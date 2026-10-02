@@ -36,9 +36,12 @@ export function AppShell({ children }: { children: ReactNode }) {
   });
 
   const unauthorized = me.error instanceof ApiError && me.error.status === 401;
+  // After a logout the cleared session query refetches and gets a 401; that must not
+  // race the logout redirect and send the user to `/login?next=…`.
+  const loggedOut = !logout.isIdle;
   useEffect(() => {
-    if (unauthorized) router.replace(`/login?next=${encodeURIComponent(pathname)}`);
-  }, [unauthorized, router, pathname]);
+    if (unauthorized && !loggedOut) router.replace(`/login?next=${encodeURIComponent(pathname)}`);
+  }, [unauthorized, loggedOut, router, pathname]);
 
   if (me.isPending || unauthorized) {
     return (
