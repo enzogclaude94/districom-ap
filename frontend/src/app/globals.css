@@ -1,0 +1,86 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens (docs/UX_GUIDELINES.md).
+ * Semantic colors are functional: success = favorable, warning = attention,
+ * danger = problem, info = neutral information. Never rely on color alone.
+ * Dark mode is prepared via the `.dark` class; V1 ships an excellent light mode.
+ */
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --background: oklch(0.985 0.002 250);
+  --surface: oklch(1 0 0);
+  --foreground: oklch(0.22 0.02 260);
+  --muted: oklch(0.96 0.005 250);
+  --muted-foreground: oklch(0.52 0.02 260);
+  --border: oklch(0.91 0.008 250);
+  --ring: oklch(0.55 0.15 255);
+
+  --primary: oklch(0.45 0.14 255);
+  --primary-foreground: oklch(0.99 0 0);
+
+  --success: oklch(0.55 0.13 155);
+  --success-soft: oklch(0.95 0.04 155);
+  --warning: oklch(0.62 0.14 70);
+  --warning-soft: oklch(0.96 0.05 85);
+  --danger: oklch(0.55 0.19 27);
+  --danger-soft: oklch(0.95 0.03 27);
+  --info: oklch(0.52 0.12 245);
+  --info-soft: oklch(0.95 0.03 245);
+
+  --radius: 0.625rem;
+  --sidebar-width: 15rem;
+}
+
+.dark {
+  --background: oklch(0.17 0.01 260);
+  --surface: oklch(0.21 0.012 260);
+  --foreground: oklch(0.95 0.005 250);
+  --muted: oklch(0.25 0.012 260);
+  --muted-foreground: oklch(0.7 0.015 255);
+  --border: oklch(0.3 0.012 260);
+  --ring: oklch(0.7 0.13 255);
+  --primary: oklch(0.7 0.13 255);
+  --primary-foreground: oklch(0.18 0.02 260);
+  --success-soft: oklch(0.3 0.05 155);
+  --warning-soft: oklch(0.32 0.06 75);
+  --danger-soft: oklch(0.3 0.06 27);
+  --info-soft: oklch(0.3 0.05 245);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-ring: var(--ring);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-feature-settings: "tnum" 1; /* tabular numbers: KPIs and tables align */
+  }
+}
