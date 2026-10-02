@@ -11,4 +11,5 @@ Backend único en Python + FastAPI, organizado por dominio (`imports/`, `analyti
 ## Consecuencias
 - Despliegue simple (Docker Compose en un host).
 - Estado en memoria (p. ej. rate limit de login) válido mientras haya una sola instancia del backend; si se escala horizontalmente, mover a PostgreSQL.
-- Los módulos se comunican por servicios Python, lo que permite separarlos en el futuro.
+- Los módulos operacionales se comunican por servicios Python, lo que permite separarlos en el futuro.
+- Excepción deliberada: `analytics/` hace consultas de solo lectura que cruzan directamente el modelo canónico (ARCHITECTURE.md §4.1), para no encadenar servicios artificialmente en consultas BI.
