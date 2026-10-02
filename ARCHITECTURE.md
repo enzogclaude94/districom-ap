@@ -1,4 +1,4 @@
-# ARCHITECTURE — Districom · Inteligencia Comercial
+# ARCHITECTURE — DistriCom · Inteligencia Comercial
 
 > v0.1 · 2026-10-02 · Estado: propuesta para validar en Fase 0.
 
@@ -40,7 +40,7 @@ Escala: 3 preventistas, 7 rutas, ~600 clientes, 500+ SKU, historia desde 2026-01
                 └────────────────────────────┘
 ```
 
-**Monolito modular**: un proceso backend, un proceso frontend, una base. Sin microservicios, Redis, Celery ni Kafka en V1. Los módulos se comunican por interfaces de servicio Python, nunca leyendo tablas de otro módulo directamente salvo a través de su repositorio/servicio.
+**Monolito modular**: un proceso backend, un proceso frontend, una base. Sin microservicios, Redis, Celery ni Kafka en V1. Los módulos operacionales se comunican por interfaces de servicio Python, nunca leyendo tablas de otro módulo directamente salvo a través de su repositorio/servicio. **Única excepción:** las consultas analíticas de solo lectura de `analytics/` (ver §4.1).
 
 ## 3. Stack
 
@@ -95,6 +95,18 @@ Reglas:
 - **La analítica solo lee el modelo canónico**, nunca columnas de archivos.
 - Un `utils/` genérico está prohibido; los helpers viven en el módulo que los usa.
 
+### 4.1 Excepción analítica: lectura directa del modelo canónico
+
+Los módulos **operacionales** (`masters/`, `imports/`, `customer_status/`, `opportunities/`, `goals/`, `incentives/`, `auth/`…) mantienen encapsulación: dueños de sus tablas, escriben solo a través de sus servicios y exponen interfaces Python.
+
+`analytics/` es la excepción explícita, para no sobrearquitecturar consultas BI:
+
+- **Puede** escribir consultas SQL (SQLAlchemy Core) que crucen directamente las tablas del modelo canónico que necesite: `sales`, `sale_items`, `customers`, `products`, `product_categories`, `brands`, `routes`, `salespeople`, asignaciones, `scheduled_visits`, `visits`, `orders`, `customer_status_*`, `opportunities`, etc. No tiene que encadenar servicios o repositorios de otros módulos para armar un join.
+- **Solo lectura.** `analytics/` nunca inserta, actualiza ni borra filas de otro módulo. Los procesos que escriben resultados derivados (estados de cliente, oportunidades) viven en su propio módulo, aunque lean de `analytics/`.
+- **Centralizado.** Esas consultas están únicamente en `analytics/` (registro de métricas, `filters.py`, `periods.py` y servicios por pantalla). Los routers y los demás módulos no escriben SQL analítico propio: piden la métrica a `analytics/`.
+- **Contrato:** los nombres de tablas y columnas del modelo canónico (DATA_MODEL.md) son la interfaz pública para `analytics/`. Un cambio de schema que rompa una consulta analítica se detecta por los tests de métricas y se corrige en el mismo PR.
+- Los módulos operacionales pueden consumir métricas de `analytics/` (por ejemplo, `opportunities/` usa penetración por pares), nunca al revés.
+
 ## 5. Frontend
 
 ```
@@ -128,10 +140,10 @@ UPLOAD → IDENTIFICACIÓN → MAPPING → PARSING → VALIDACIÓN → NORMALIZA
        → RESOLUCIÓN DE ENTIDADES → PREVIEW → IMPORT (transacción) → CHECKS → AUDITORÍA
 ```
 
-1. **Upload**: límite de tamaño (`UPLOAD_MAX_SIZE`), extensión + MIME + firma mágica (`.xlsx` = ZIP, `.csv` = texto). Nombre de archivo sanitizado; se guarda con nombre UUID fuera del webroot. Hash SHA‑256.
+1. **Upload**: límite de tamaño (`UPLOAD_MAX_SIZE`), extensión + MIME + firma mágica validadas contra el **registro de formatos** (V1: `.xlsx` = ZIP, `.csv` = texto). Nombre de archivo sanitizado; se guarda con nombre UUID fuera del webroot. Hash SHA‑256.
 2. **Identificación**: el usuario elige sistema + tipo (o se sugiere por encabezados conocidos).
 3. **Mapping**: detección automática por sinónimos (`Cliente`, `Razón Social`, `NomCliente` → `customer_name`); corrección manual; guardado como plantilla (`import_column_mappings`).
-4. **Parsing**: `openpyxl` en modo read‑only, `data_only=True` (nunca ejecuta fórmulas ni macros); CSV con detección de encoding (UTF‑8 / Latin‑1) y separador.
+4. **Parsing**: el `TabularReader` del formato convierte el archivo en filas crudas. V1: `openpyxl` read‑only con `data_only=True` (nunca ejecuta fórmulas ni macros) para `.xlsx`; CSV con detección de encoding (UTF‑8 / Latin‑1) y separador.
 5. **Validación** por fila → `import_errors` con fila, columna, código, severidad (`ERROR`/`WARNING`).
 6. **Normalización**: espacios, mayúsculas, decimales `1.234,56`, fechas `dd/mm/yyyy`, CUIT a 11 dígitos, strings vacíos → NULL.
 7. **Resolución**: por ID externo exacto → `external_entity_mappings`; lo no resuelto queda `PENDING_REVIEW`, nunca se fusiona en silencio.
@@ -141,7 +153,23 @@ UPLOAD → IDENTIFICACIÓN → MAPPING → PARSING → VALIDACIÓN → NORMALIZA
 
 **Idempotencia** (tres defensas): hash de archivo (rechazo de duplicado exacto salvo reproceso deliberado), business key de documento (`source_system + external_document_id`, o `doc_type + punto_venta + número`), clave de línea (`sale_id + line_number`).
 
-**Adaptadores**: `SourceAdapter` produce registros canónicos (`CanonicalSale`, `CanonicalVisit`, …). Reemplazar Excel por API = escribir un adaptador nuevo; normalización, resolución y analítica no cambian.
+**Dos capas separadas: formato y sistema fuente.** El adaptador de sistema no sabe de qué formato vienen las filas.
+
+```
+archivo .xlsx / .csv / .xls (futuro)      API AXUM / STORE SYS (futuro)
+        │                                          │
+  TabularReader (por formato)              ApiClient (por sistema)
+        │  Iterable[RawRecord]                     │  Iterable[RawRecord]
+        └──────────────────┬───────────────────────┘
+                     SourceAdapter (por sistema + tipo: STORE SYS ventas, AXUM visitas…)
+                           │  Iterable[CanonicalSale | CanonicalVisit | …]
+                  Normalización → Resolución → Modelo canónico
+```
+
+- `RawRecord`: número de fila/origen + valores por columna (texto, número, fecha o vacío), ya despegados del formato. Es lo único que recibe el `SourceAdapter`, junto con el mapping de columnas.
+- `TabularReader`: un lector por formato, registrado por extensión + firma (`.xlsx`, `.csv` en V1). Agregar `.xls` = registrar un lector nuevo (candidatos: `xlrd` para BIFF o conversión con LibreOffice headless), sin tocar adaptadores, validación ni analítica. Se decide el parser cuando lleguen los exports reales de STORE SYS (PLAN D2).
+- `SourceAdapter`: semántica del sistema fuente (qué columna es el comprobante, cómo se lee el signo de una NC, cómo se deduce el canal). No importa `openpyxl` ni `csv`.
+- Reemplazar archivos por API = escribir un `ApiClient` que emita `RawRecord` (o un adaptador que emita registros canónicos directamente); normalización, resolución y analítica no cambian.
 
 Imports síncronos en V1 (volumen chico). Si superan ~30 s se pasan a una tarea en background **dentro del mismo proceso** (tabla `import_batches` como cola), sin Celery.
 

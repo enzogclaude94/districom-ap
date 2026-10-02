@@ -1,6 +1,6 @@
 # CLAUDE.md — Guía operativa del repositorio
 
-Plataforma de **inteligencia comercial** para una distribuidora de bebidas. Capa de análisis sobre AXUM (preventa) y STORE SYS (facturación). No es ERP ni facturador; nunca escribe en los sistemas fuente.
+**DistriCom** — plataforma de **inteligencia comercial** para una distribuidora de bebidas. Capa de análisis sobre AXUM (preventa) y STORE SYS (facturación). No es ERP ni facturador; nunca escribe en los sistemas fuente.
 
 Leer antes de cualquier tarea: este archivo → `PLAN.md` → `ROADMAP.md` → documentos del módulo afectado.
 
@@ -19,35 +19,36 @@ scripts/    seed demo, backup/restore, utilidades de desarrollo
 Principios no negociables:
 - **Reglas de negocio y métricas solo en el backend.** El frontend no calcula KPIs.
 - **Toda métrica se define primero en `METRICS.md`** y se implementa una sola vez en `backend/app/analytics/metrics/` con el mismo `id`.
-- **La analítica opera sobre el modelo canónico**, nunca sobre columnas de archivos.
+- **La analítica opera sobre el modelo canónico**, nunca sobre columnas de archivos. `analytics/` puede cruzar tablas canónicas directamente con SQL de **solo lectura**; los módulos operacionales mantienen su encapsulación (`ARCHITECTURE.md §4.1`).
 - **Nunca fusionar entidades por nombre** sin confirmación; usar `external_entity_mappings`.
 - **Nunca destruir historia** de asignaciones ni estados (tablas con vigencia).
 - **Parámetros comerciales en `app_settings`** con defaults en código; nada hardcodeado en componentes.
+- **Marca:** colores y tipografías solo vía tokens; wordmark e ícono solo vía `<Wordmark />` / `<BrandIcon />` (`docs/BRAND.md`). Verde/ámbar/rojo únicamente para estados de negocio.
 
 ## 2. Comandos habituales
 
 ```bash
 # Infra
-docker compose up -d db
+docker compose up -d db                       # PostgreSQL (crea también districom_test)
+docker compose up -d --build                  # stack completo en :3000
 # Backend
 cd backend
 uv sync
 uv run alembic upgrade head
-uv run fastapi dev app/main.py
-uv run pytest                      # unit + integración (requiere db)
-uv run ruff check . && uv run ruff format --check . && uv run mypy app
-uv run python -m app.cli create-admin --email ...
+uv run fastapi dev app/main.py                # :8000, docs en /api/docs
+uv run pytest                                 # unit + integración (usa TEST_DATABASE_URL)
+uv run ruff check . && uv run ruff format --check . && uv run mypy
+uv run alembic check                          # modelos == migraciones
+uv run python -m app.cli create-admin --email ... --name ...
 # Frontend
 cd frontend
 pnpm install
-pnpm dev
+pnpm dev                                      # :3000, /api/* → backend
 pnpm lint && pnpm format:check && pnpm typecheck && pnpm test && pnpm build
-pnpm e2e                           # Playwright
-# Demo data
-uv run python ../scripts/seed_demo_data.py --seed 42
+pnpm e2e                                      # Playwright; requiere admin E2E (README)
 ```
 
-(Se ajustan al crear el scaffold en Fase 0; este bloque debe reflejar siempre los comandos reales.)
+Este bloque debe reflejar siempre los comandos reales. Seed de demo: Fase 1.
 
 ## 3. Estructura
 

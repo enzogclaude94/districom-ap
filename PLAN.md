@@ -1,6 +1,6 @@
-# PLAN — Districom · Plataforma de Inteligencia Comercial
+# PLAN — DistriCom · Plataforma de Inteligencia Comercial
 
-> Estado del documento: **v0.1 — exploración y planificación (pre‑Fase 0)**
+> Estado del documento: **v0.2 — Fase 0 implementada, en validación**
 > Última actualización: 2026-10-02
 > Fuente de requisitos: prompt maestro adjunto por Enzo (`message.md`, 165 secciones).
 
@@ -24,7 +24,7 @@
 
 ### 1.2 Fase activa
 
-**Fase 0 — Fundación y arquitectura**, sub‑etapa *planificación*. No se escribió código funcional. La implementación de Fase 0 está en curso en `districom-ap`.
+**Fase 0 — Fundación y arquitectura**, sub‑etapa *validación*. El código está en la rama `phase-0-foundation` (PR abierto contra `main`). Resultado por criterio en §10. **Fase 1 no empieza hasta que Enzo valide la Fase 0 y todos los criterios estén en PASS.**
 
 ---
 
@@ -199,3 +199,47 @@ Cada criterio es verificable con un comando o prueba concreta.
 | §127–134 testing | `CLAUDE.md §5`, `docs/TESTING.md` |
 | §141 roadmap | `ROADMAP.md` |
 | §159–162 definición de terminado | `CLAUDE.md §7` |
+
+---
+
+## 10. Verificación de Fase 0 (2026-10-02)
+
+Verificado en el entorno de desarrollo (PostgreSQL 16 local; Docker no disponible en ese entorno). CI de GitHub Actions repite todo con PostgreSQL 17 y agrega el smoke test de Docker Compose.
+
+| # | Criterio | Resultado | Evidencia |
+|---|---|---|---|
+| F0‑1 | PostgreSQL disponible | PASS | Local con PostgreSQL 16; en CI, `docker compose up --wait` levanta db + backend + frontend y `/api/v1/health` responde `db: ok` a través del frontend. |
+| F0‑2 | Migraciones desde cero y reversibles | PASS | `test_migrations.py`: upgrade → downgrade → upgrade; `alembic check` sin diferencias. |
+| F0‑3 | Backend arranca | PASS | `uvicorn app.main:app` (también lo levanta Playwright). |
+| F0‑4 | Health check | PASS | `test_health.py`: 200 `{status: ok, db: ok}` / 503 con DB caída. |
+| F0‑5 | Autenticación base | PASS | `test_auth.py` (12 casos): login, 401, 403, logout revoca, inactivo, rate limit, CSRF. |
+| F0‑6 | Passwords hasheadas | PASS | Test verifica prefijo `$argon2id$`. |
+| F0‑7 | Errores normalizados | PASS | `test_errors.py`. |
+| F0‑8 | Logs estructurados sin secretos | PASS | JSON con `request_id`; test verifica que la contraseña no aparece. |
+| F0‑9 | Frontend arranca | PASS | `pnpm build && pnpm start`; login → Inicio verificado en E2E. |
+| F0‑10 | Sistema de diseño inicial | PASS | Marca oficial DistriCom como tokens (paleta, Manrope + Inter, `docs/BRAND.md`); wordmark e ícono DC; Button, Card, Badge, Input, Table, Skeleton, EmptyState, ErrorState en uso. Revisión visual desktop y móvil. |
+| F0‑11 | Calidad | PASS | ruff, ruff format, mypy strict, eslint (0 warnings), prettier, tsc, next build. |
+| F0‑12 | Tests | PASS | Backend 29, frontend 13, E2E 8 (4 flujos × desktop/móvil). |
+| F0‑13 | CI | PASS | `ci.yml` en verde en el PR #1: backend, frontend, E2E y Docker Compose. |
+| F0‑14 | Configuración | PASS | `.env.example` completo; `test_settings.py` verifica fallo claro sin variables obligatorias. |
+| F0‑15 | Documentación de setup | PASS | `README.md` (desarrollo, Docker, migraciones, tests, E2E, backups, troubleshooting). |
+| F0‑16 | Arquitectura y modelo revisados | PASS | Enzo aprobó arquitectura y modelo el 2026-10-02 con tres ajustes, ya incorporados (ver abajo). El merge del PR #1 queda a cargo de Enzo. |
+
+### Ajustes pedidos por Enzo en la revisión (2026-10-02)
+1. **Marca DistriCom** adoptada como sistema de diseño: tokens con la paleta oficial, Manrope SemiBold (marca) + Inter (producto), wordmark en login y sidebar, ícono DC en favicon y header móvil. `docs/BRAND.md`.
+2. **Cumplimiento vs. cobertura**: `route.schedule_compliance` (visitas cliente × día) y `route.coverage` (clientes únicos) separadas en `METRICS.md`, con drill‑downs distintos y fixtures para la Fase 3.
+3. **Excepción analítica**: `analytics/` puede cruzar el modelo canónico con SQL de solo lectura (`ARCHITECTURE.md §4.1`).
+4. **Importadores**: `TabularReader` (formato) separado de `SourceAdapter` (sistema), así `.xls` o una API se agregan sin tocar adaptadores.
+
+### Desvíos respecto del plan
+- **TanStack Table y ECharts** no se instalaron todavía: entran en Fase 2, cuando haya tablas y gráficos reales (evita dependencias sin uso).
+- El email del login se valida como texto, no como formato de email: solo busca una cuenta existente.
+- `API_INTERNAL_URL` del frontend se resuelve **al compilar** (rewrites de Next.js). Documentado en README y Dockerfile.
+
+### Deuda técnica conocida
+- Rate limit de login en memoria: válido con una sola instancia del backend (ADR 002).
+- Detrás de proxy, la IP del rate limit es la del frontend; la clave incluye el email, así que sigue limitando por cuenta.
+- No hay alta/edición de usuarios desde la UI (solo CLI). Se agrega cuando haya más de un par de usuarios.
+- Sidebar colapsada todavía no existe; cuando se implemente usa el ícono DC.
+- El ícono DC es un PNG recortado del arte entregado; reemplazar cuando haya versión vectorial oficial.
+- Auditoría de dependencias (`pip-audit`, `pnpm audit`) pendiente de sumar a CI.

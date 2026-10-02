@@ -126,32 +126,78 @@ Filtros globales aplicables salvo indicación: período, preventista, ruta, loca
 
 ### Ejecución de rutas
 
-#### `route.scheduled` — Clientes programados
-- `COUNT(DISTINCT customer_id, business_date)` en `scheduled_visits` del período. Para un día: clientes distintos. Para varios días: **pares cliente‑día** (un cliente programado 2 veces en la semana cuenta 2 oportunidades de visita).
-- Expone `schedule_source` (`AXUM` / `DERIVED`).
+Dos preguntas distintas, dos métricas que conviven y **no se mezclan**:
 
-#### `route.visited` — Clientes visitados
-- Pares cliente‑día programados con al menos una visita `visited = true` ese día. Múltiples visitas el mismo día cuentan una vez.
+| Pregunta | Métrica | Unidad | Drill‑down |
+|---|---|---|---|
+| ¿El preventista cumplió el plan de visitas? | `route.schedule_compliance` | visitas **cliente × día** | lista de visitas cliente‑día (cumplidas / incumplidas) |
+| ¿Qué porcentaje de los clientes previstos fue alcanzado? | `route.coverage` | **clientes únicos** | lista de clientes (visitados / no visitados) |
 
-#### `route.coverage` — Cobertura de ruta
-- **Fórmula:** `route.visited / route.scheduled`.
-- **Exclusiones:** visitas no programadas no suman al numerador (se reportan aparte como `route.unscheduled_visits`).
+Base común: `scheduled_visits` del período (filtrable por ruta, preventista, localidad, tipo de cliente). Ambas métricas exponen `schedule_source` (`AXUM` / `DERIVED`, ver DATA_MODEL §6). Varias visitas del mismo cliente el mismo día cuentan una vez.
+
+#### `route.scheduled_visits` — Visitas programadas
+- Pares distintos `(customer_id, business_date)` en `scheduled_visits` del período.
+- Un cliente programado lunes y jueves aporta **2**.
+
+#### `route.completed_visits` — Visitas programadas cumplidas
+- Pares programados `(customer_id, business_date)` con al menos una visita `visited = true` **ese mismo día**.
+- Una visita en otro día no cumple el par programado (se reporta en `route.unscheduled_visits`).
+
+#### `route.schedule_compliance` — Cumplimiento de visitas programadas
+- **Fórmula:** `route.completed_visits / route.scheduled_visits`.
+- **Responde:** ¿se cumplió el plan de visitas?
+- **Nulos:** sin programación en el período → `null` con aviso "sin programación".
+- **Drill‑down:** visitas cliente‑día cumplidas e incumplidas (`route.missed_visits = scheduled_visits − completed_visits`).
+- **Dimensiones:** ruta, preventista, día de semana, localidad, tipo de cliente.
+
+#### `route.scheduled_customers` — Clientes programados
+- Clientes distintos con al menos una visita programada en el período.
+
+#### `route.visited_customers` — Clientes visitados
+- Clientes de `route.scheduled_customers` con al menos una visita `visited = true` en el período, **en cualquier día** (el cliente fue alcanzado aunque no haya sido el día planificado).
+
+#### `route.coverage` — Cobertura de cartera
+- **Fórmula:** `route.visited_customers / route.scheduled_customers`.
+- **Responde:** ¿qué porcentaje de los clientes previstos fue alcanzado?
+- **Exclusiones:** clientes visitados que no estaban programados no suman (van a `route.unscheduled_visits`).
 - **Nulos:** sin programación → `null` con aviso.
-- **Ejemplo verificable:** 5 programados, 4 visitados → **80 %**. 50 / 40 → **80 %**.
+- **Drill‑down:** clientes visitados / no visitados (`route.not_visited_customers = scheduled_customers − visited_customers`).
+- **Ejemplo verificable:** 5 clientes programados, 4 visitados → **80 %**. 50 / 40 → **80 %**.
 
-#### `route.not_visited` — No visitados
-- `route.scheduled − route.visited`. Drill‑down: lista.
+#### `route.unscheduled_visits` — Visitas fuera de programa
+- Pares `(customer_id, business_date)` con visita `visited = true` sin programación ese día. Informativa; no entra en ninguna de las dos métricas anteriores.
+
+#### Ejemplo que distingue ambas métricas
+Semana con programación lunes (L) y jueves (J):
+
+| Cliente | Programado | Visitado | Pares programados | Pares cumplidos |
+|---|---|---|---|---|
+| A | L, J | L | 2 | 1 |
+| B | L | L | 1 | 1 |
+| C | J | — | 1 | 0 |
+| D | L, J | L, J | 2 | 2 |
+| **Total** | | | **6** | **4** |
+
+- `route.schedule_compliance` = 4 / 6 = **66,7 %** (se incumplieron A‑jueves y C‑jueves).
+- `route.coverage` = 3 / 4 = **75 %** (A, B y D alcanzados; C no).
+- Variante: si C se visita el **viernes** (sin programación), cobertura = 4 / 4 = **100 %**, cumplimiento sigue en **66,7 %** y `route.unscheduled_visits` = 1.
+
+Fixture: `backend/tests/fixtures/route_execution.py`.
+
+### Conversión de visitas
+
+Se mide sobre **clientes únicos visitados** (la misma unidad que cobertura), como en el ejemplo del prompt: 40 visitados, 31 compradores → 77,5 %.
 
 #### `visit.conversion_order` — Conversión visita → pedido (principal)
-- **Fórmula:** pares cliente‑día visitados con pedido (`had_order = true` u `outcome = PURCHASE`, o fila en `orders` ese día) / `route.visited`.
+- **Fórmula:** clientes visitados con al menos una visita con pedido (`had_order = true`, `outcome = PURCHASE` o fila en `orders` ese día) / `route.visited_customers`.
 - **Ejemplo verificable:** 4 visitados, 3 con compra → **75 %**. 40 / 31 → **77,5 %**.
 
 #### `visit.conversion_invoiced` — Conversión visita → factura
-- Pares cliente‑día visitados con compra válida (§1.3) en `[visit_date, visit_date + conversion_window_days]` (default **2**, PLAN R1) / `route.visited`.
+- Clientes visitados con compra válida (§1.3) en `[visit_date, visit_date + conversion_window_days]` (default **2**, PLAN R1) para alguna de sus visitas / `route.visited_customers`.
 - Una factura se asocia a la visita más reciente previa del cliente (no se cuenta dos veces).
 
 #### `route.visited_no_purchase` — Visitados sin compra
-- `route.visited − visitados con compra` (según la conversión principal). Drill‑down: lista.
+- `route.visited_customers − clientes visitados que compraron` (según la conversión principal). Drill‑down: clientes.
 
 ### Penetración
 
@@ -253,4 +299,4 @@ Evento cuando un cliente cuyo estado vigente era `DORMANT` o `LOST` registra una
 
 ## 7. Tests obligatorios de métricas
 
-Cada métrica tiene al menos un fixture verificable a mano en `backend/tests/unit/metrics/`. Mínimos ya fijados por el prompt: cobertura 80 % / conversión 75 %; cobertura 80 % / conversión 77,5 %; ratio 3 vs 0,5; frecuencia 5 días; `previous = 0`; SKU promedio por cliente ≠ SKU globales / compradores.
+Cada métrica tiene al menos un fixture verificable a mano en `backend/tests/unit/metrics/`. Mínimos ya fijados: cobertura 80 % / conversión 75 %; cobertura 80 % / conversión 77,5 %; cumplimiento 66,7 % vs. cobertura 75 % con el mismo plan (y 100 % de cobertura con visita fuera de programa); ratio 3 vs 0,5; frecuencia 5 días; `previous = 0`; SKU promedio por cliente ≠ SKU globales / compradores.
