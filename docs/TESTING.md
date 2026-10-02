@@ -11,6 +11,7 @@
 - Nunca SQLite: los tests de integración corren contra PostgreSQL (`TEST_DATABASE_URL`, base descartable que se migra desde cero en cada corrida).
 - Reglas de negocio y métricas con TDD y fixtures verificables a mano (`METRICS.md §7`).
 - Idempotencia de imports: test obligatorio desde Fase 1.
+- Escenarios verificables a mano en `backend/tests/fixtures/` (por ejemplo `route_execution.py`: cumplimiento 66,7 % vs. cobertura 75 %). Son la especificación ejecutable de fases futuras; un test unitario verifica que sus valores esperados coinciden con las definiciones de `METRICS.md`, y la fase que implemente la métrica los usa tal cual.
 - No se saltean ni desactivan tests para llegar a verde.
 
 ## Cómo correr

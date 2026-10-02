@@ -205,10 +205,10 @@ Ruta 2×semana = 2 filas; 1×semana = 1 fila. Exclusion constraint sobre `(route
 Separados de `sales`. Análisis pedido → factura queda para fases posteriores.
 
 ### scheduled_visits
-Clientes programados por día. Es la base del denominador de cobertura.
+Clientes programados por día. Es la base de los denominadores de cumplimiento de visitas (pares cliente‑día) y de cobertura (clientes únicos); ver METRICS.md.
 `id`, `business_date`, `customer_id`, `route_id`, `salesperson_id`, `source` (`AXUM` = programación exportada, `DERIVED` = generada desde `route_schedules` + asignaciones), `import_batch_id` NULL.
 `UNIQUE (business_date, customer_id, route_id)`.
-Si AXUM exporta programación, `DERIVED` no se genera para esas fechas. Las métricas de cobertura exponen el `source` usado.
+Si AXUM exporta programación, `DERIVED` no se genera para esas fechas. Las métricas de cumplimiento y cobertura exponen el `source` usado.
 
 ### visits
 `id`, `external_axum_id` UNIQUE parcial, `business_date`, `visited_at` timestamptz NULL, `customer_id`, `route_id`, `salesperson_id`, `scheduled_visit_id` FK NULL, `scheduled` bool, `visited` bool, `outcome` (`PURCHASE`, `NO_PURCHASE`, `NOT_VISITED`, `CLOSED`, `OTHER`), `no_purchase_reason` text NULL, `had_order` bool NULL, `notes`, `import_batch_id`.
@@ -307,8 +307,8 @@ Diseñados desde las queries previstas; se revisan con `EXPLAIN ANALYZE` al impl
 | sales | `(salesperson_id, business_date)`, `(route_id, business_date)` | breakdowns |
 | sales | `(sales_channel_id, business_date)` | preventa vs boca |
 | sale_items | `(sale_id)`, `(product_id)` | penetración, SKU por cliente |
-| visits | `(business_date, route_id)`, `(customer_id, business_date)` | cobertura, conversión |
-| scheduled_visits | `(business_date, route_id)` | cobertura |
+| visits | `(business_date, route_id)`, `(customer_id, business_date)` | cumplimiento, cobertura, conversión |
+| scheduled_visits | `(business_date, route_id)` | cumplimiento, cobertura |
 | assignments | GiST `(customer_id, daterange)` | atribución histórica |
 | opportunities | `(status, priority)`, `(customer_id)` | listados |
 | customer_status_current | `(health_status)` | listas de riesgo |
