@@ -1,0 +1,144 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12"
+  NODE_VERSION: "22"
+
+jobs:
+  backend:
+    name: Backend (lint, types, tests)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: districom
+          POSTGRES_PASSWORD: districom
+          POSTGRES_DB: districom_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U districom" --health-interval 5s --health-timeout 3s --health-retries 20
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      TEST_DATABASE_URL: postgresql+psycopg://districom:districom@localhost:5432/districom_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv python install ${{ env.PYTHON_VERSION }}
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy
+      - run: uv run pytest --cov=app --cov-report=term-missing
+
+  frontend:
+    name: Frontend (lint, types, tests, build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: frontend/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm format:check
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+
+  e2e:
+    name: E2E (critical flows)
+    needs: [backend, frontend]
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: districom
+          POSTGRES_PASSWORD: districom
+          POSTGRES_DB: districom
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U districom" --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      DATABASE_URL: postgresql+psycopg://districom:districom@localhost:5432/districom
+      SECRET_KEY: ci-only-secret-key-not-used-anywhere-else-0123456789
+      COOKIE_SECURE: "false"
+      E2E_ADMIN_EMAIL: e2e-admin@districom.local
+      E2E_ADMIN_PASSWORD: e2e-password-123
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: frontend/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Prepare backend
+        working-directory: backend
+        run: |
+          uv python install ${{ env.PYTHON_VERSION }}
+          uv sync --frozen
+          uv run alembic upgrade head
+          echo "$E2E_ADMIN_PASSWORD" | uv run python -m app.cli create-admin --email "$E2E_ADMIN_EMAIL" --name "Admin E2E"
+      - name: Prepare frontend
+        working-directory: frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm exec playwright install --with-deps chromium
+      - name: Run Playwright
+        working-directory: frontend
+        run: pnpm e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: frontend/playwright-report
+          retention-days: 7
+
+  compose:
+    name: Docker Compose smoke test
+    needs: [backend, frontend]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create .env from example
+        run: |
+          cp .env.example .env
+          sed -i "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=ci-password|" .env
+          sed -i "s|^SECRET_KEY=.*|SECRET_KEY=ci-only-secret-key-not-used-anywhere-else-0123456789|" .env
+      - run: docker compose up -d --build --wait --wait-timeout 300
+      - name: Health through the frontend rewrite
+        run: |
+          curl -fsS http://localhost:3000/api/v1/health | tee /dev/stderr | grep -q '"db":"ok"'
+          curl -fsS -o /dev/null -w "%{http_code}\n" http://localhost:3000/login
+      - if: failure()
+        run: docker compose logs
+      - if: always()
+        run: docker compose down -v
