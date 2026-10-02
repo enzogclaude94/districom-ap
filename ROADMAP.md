@@ -1,12 +1,12 @@
 # ROADMAP — DistriCom · Inteligencia Comercial
 
-> v0.1 · 2026-10-02. Estados: `PLANNED`, `IN_PROGRESS`, `BLOCKED`, `DONE`.
+> v0.2 · 2026-10-02. Estados: `PLANNED`, `PREPARATION` (análisis previo, sin implementación), `IN_PROGRESS`, `BLOCKED`, `DONE`.
 > Una fase es `DONE` solo si cumple la Definition of Done de fase (`CLAUDE.md §7`) y todos sus criterios críticos están en PASS.
 
 | Fase | Nombre | Estado | Depende de |
 |---|---|---|---|
-| 0 | Fundación y arquitectura | **IN_PROGRESS** (implementada; en validación, ver `PLAN.md §10`) | — |
-| 1 | Importación y maestros | PLANNED | 0 · ejemplos reales (D2–D6) para cerrar |
+| 0 | Fundación y arquitectura | **DONE** (aprobada y mergeada el 2026-10-02, PR #1) | — |
+| 1 | Importación y maestros | **PREPARATION** (análisis de exportaciones reales, `docs/DATA_INTAKE.md`) | 0 · muestras reales y aprobación de Enzo para implementar |
 | 2 | Dashboard general | PLANNED | 1 |
 | 3 | Rutas y preventistas | PLANNED | 2 |
 | 4 | Cliente 360° y estados | PLANNED | 1 (puede ir en paralelo con 3) |
@@ -22,9 +22,10 @@
 
 ## Fase 0 — Fundación y arquitectura
 **Alcance:** monorepo, Git, documentación, Docker Compose + PostgreSQL, FastAPI con health/errores/logging, Alembic, auth base (sesiones + roles), Next.js con sistema de diseño inicial y layout, tests base, CI, `.env.example`, ADRs, estrategia de demo data.
-**Criterios:** F0‑1 … F0‑16 en `PLAN.md §7`.
+**Criterios:** F0‑1 … F0‑16 en `PLAN.md §7`. **Resultado:** todos en PASS (`PLAN.md §10`).
 
 ## Fase 1 — Importación y maestros
+**Preparación (actual):** recibir y perfilar exportaciones reales de AXUM y STORE SYS, responder D3–D6 con datos y proponer mappings para aprobación (`PLAN.md §11`). La implementación empieza solo con autorización explícita de Enzo.
 **Alcance:** tablas de maestros, asignaciones con historia, ventas/ítems, visitas, programación, pedidos, canales, `import_*`, `external_entity_mappings`, pipeline completo, pantalla Importaciones (subir, mapping, preview, errores, confirmación, historial), revisión de mappings pendientes, generador de demo data por pipeline, página inicial de Calidad de datos.
 **Criterios:**
 - XLSX y CSV aceptados; archivo inválido (extensión, tamaño, estructura) rechazado con mensaje útil.

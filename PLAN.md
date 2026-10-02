@@ -1,6 +1,6 @@
 # PLAN — DistriCom · Plataforma de Inteligencia Comercial
 
-> Estado del documento: **v0.2 — Fase 0 implementada, en validación**
+> Estado del documento: **v0.3 — Fase 0 DONE; Fase 1 en preparación (análisis de datos reales)**
 > Última actualización: 2026-10-02
 > Fuente de requisitos: prompt maestro adjunto por Enzo (`message.md`, 165 secciones).
 
@@ -24,7 +24,9 @@
 
 ### 1.2 Fase activa
 
-**Fase 0 — Fundación y arquitectura**, sub‑etapa *validación*. El código está en la rama `phase-0-foundation` (PR abierto contra `main`). Resultado por criterio en §10. **Fase 1 no empieza hasta que Enzo valide la Fase 0 y todos los criterios estén en PASS.**
+**Fase 0 — DONE.** Aprobada por Enzo el 2026-10-02; PR #1 mergeado a `main`. Los 16 criterios en PASS (§10).
+
+**Fase 1 — en preparación: análisis de datos reales.** No se implementan importadores ni mappings hasta recibir y analizar exportaciones reales de AXUM y STORE SYS y que Enzo apruebe la propuesta resultante. Pedido de archivos, período y validaciones en `docs/DATA_INTAKE.md`; pasos en §11.
 
 ---
 
@@ -114,7 +116,7 @@ Ninguna modificación cambia el alcance funcional.
 | ID | Pregunta | Default mientras tanto | Bloquea |
 |---|---|---|---|
 | D1 | ~~¿Repo nuevo o existente?~~ **Resuelto:** `districom-ap`. | — | — |
-| D2 | Exports de ejemplo de AXUM y STORE SYS (aunque sea 1 semana, anonimizados). | Demo data sintética. | Cierre de Fase 1. |
+| D2 | Exports reales de AXUM y STORE SYS. Lista, período y validaciones en `docs/DATA_INTAKE.md`. | Ninguno: la Fase 1 espera las muestras. | **Inicio** de la implementación de Fase 1. |
 | D3 | ¿AXUM y STORE SYS comparten código de cliente / producto? | Asumir que no. | Diseño de matching (Fase 1). |
 | D4 | ¿Cómo se registran NC y devoluciones en STORE SYS? ¿Importes con o sin IVA? | NC separadas, signo negativo, neto sin IVA. | Definición final de `sales.net_total`. |
 | D5 | Desfase típico pedido → factura en preventa. | 2 días. | Conversión facturada. |
@@ -202,7 +204,7 @@ Cada criterio es verificable con un comando o prueba concreta.
 
 ---
 
-## 10. Verificación de Fase 0 (2026-10-02)
+## 10. Verificación de Fase 0 (2026-10-02) — DONE
 
 Verificado en el entorno de desarrollo (PostgreSQL 16 local; Docker no disponible en ese entorno). CI de GitHub Actions repite todo con PostgreSQL 17 y agrega el smoke test de Docker Compose.
 
@@ -243,3 +245,19 @@ Verificado en el entorno de desarrollo (PostgreSQL 16 local; Docker no disponibl
 - Sidebar colapsada todavía no existe; cuando se implemente usa el ícono DC.
 - El ícono DC es un PNG recortado del arte entregado; reemplazar cuando haya versión vectorial oficial.
 - Auditoría de dependencias (`pip-audit`, `pnpm audit`) pendiente de sumar a CI.
+
+---
+
+## 11. Fase 1 — Preparación (análisis de datos reales)
+
+Estado: **esperando muestras de Enzo.** Implementación sustancial no autorizada todavía.
+
+| Paso | Estado |
+|---|---|
+| 1. Pedir exportaciones reales con período y validaciones (`docs/DATA_INTAKE.md`) | Hecho (2026-10-02) |
+| 2. Recibir muestras de AXUM (A1–A5) y STORE SYS (S1–S3) | Pendiente (Enzo) |
+| 3. Perfilar cada archivo y registrar hallazgos | Pendiente |
+| 4. Proponer respuestas a D3–D6, mappings por archivo y ajustes a `DATA_MODEL.md` | Pendiente |
+| 5. Aprobación de Enzo y autorización explícita para implementar | Pendiente |
+
+Gate de inicio de implementación: pasos 2–5 completos. Los criterios de cierre de la Fase 1 siguen siendo los de `ROADMAP.md`.
