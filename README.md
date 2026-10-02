@@ -1,4 +1,4 @@
-# Districom · Inteligencia Comercial
+# DistriCom · Inteligencia Comercial
 
 Plataforma web de inteligencia comercial para una distribuidora de bebidas. Analiza datos de **AXUM** (preventa) y **STORE SYS** (facturación) para responder qué está pasando, dónde se pierden oportunidades y qué acción concreta tomar. No reemplaza a esos sistemas: es una capa de análisis.
 

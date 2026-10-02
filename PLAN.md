@@ -1,4 +1,4 @@
-# PLAN — Districom · Plataforma de Inteligencia Comercial
+# PLAN — DistriCom · Plataforma de Inteligencia Comercial
 
 > Estado del documento: **v0.2 — Fase 0 implementada, en validación**
 > Última actualización: 2026-10-02
@@ -217,13 +217,19 @@ Verificado en el entorno de desarrollo (PostgreSQL 16 local; Docker no disponibl
 | F0‑7 | Errores normalizados | PASS | `test_errors.py`. |
 | F0‑8 | Logs estructurados sin secretos | PASS | JSON con `request_id`; test verifica que la contraseña no aparece. |
 | F0‑9 | Frontend arranca | PASS | `pnpm build && pnpm start`; login → Inicio verificado en E2E. |
-| F0‑10 | Sistema de diseño inicial | PASS | Tokens en `globals.css`; Button, Card, Badge, Input, Table, Skeleton, EmptyState, ErrorState en uso. Revisión visual desktop y móvil. |
+| F0‑10 | Sistema de diseño inicial | PASS | Marca oficial DistriCom como tokens (paleta, Manrope + Inter, `docs/BRAND.md`); wordmark e ícono DC; Button, Card, Badge, Input, Table, Skeleton, EmptyState, ErrorState en uso. Revisión visual desktop y móvil. |
 | F0‑11 | Calidad | PASS | ruff, ruff format, mypy strict, eslint (0 warnings), prettier, tsc, next build. |
-| F0‑12 | Tests | PASS | Backend 26, frontend 13, E2E 6 (3 flujos × desktop/móvil). |
+| F0‑12 | Tests | PASS | Backend 29, frontend 13, E2E 8 (4 flujos × desktop/móvil). |
 | F0‑13 | CI | PASS | `ci.yml` en verde en el PR #1: backend, frontend, E2E y Docker Compose. |
 | F0‑14 | Configuración | PASS | `.env.example` completo; `test_settings.py` verifica fallo claro sin variables obligatorias. |
 | F0‑15 | Documentación de setup | PASS | `README.md` (desarrollo, Docker, migraciones, tests, E2E, backups, troubleshooting). |
-| F0‑16 | Arquitectura y modelo revisados | PENDIENTE | Requiere validación de Enzo de `ARCHITECTURE.md`, `DATA_MODEL.md` y `METRICS.md`. |
+| F0‑16 | Arquitectura y modelo revisados | PASS | Enzo aprobó arquitectura y modelo el 2026-10-02 con tres ajustes, ya incorporados (ver abajo). El merge del PR #1 queda a cargo de Enzo. |
+
+### Ajustes pedidos por Enzo en la revisión (2026-10-02)
+1. **Marca DistriCom** adoptada como sistema de diseño: tokens con la paleta oficial, Manrope SemiBold (marca) + Inter (producto), wordmark en login y sidebar, ícono DC en favicon y header móvil. `docs/BRAND.md`.
+2. **Cumplimiento vs. cobertura**: `route.schedule_compliance` (visitas cliente × día) y `route.coverage` (clientes únicos) separadas en `METRICS.md`, con drill‑downs distintos y fixtures para la Fase 3.
+3. **Excepción analítica**: `analytics/` puede cruzar el modelo canónico con SQL de solo lectura (`ARCHITECTURE.md §4.1`).
+4. **Importadores**: `TabularReader` (formato) separado de `SourceAdapter` (sistema), así `.xls` o una API se agregan sin tocar adaptadores.
 
 ### Desvíos respecto del plan
 - **TanStack Table y ECharts** no se instalaron todavía: entran en Fase 2, cuando haya tablas y gráficos reales (evita dependencias sin uso).
@@ -234,4 +240,6 @@ Verificado en el entorno de desarrollo (PostgreSQL 16 local; Docker no disponibl
 - Rate limit de login en memoria: válido con una sola instancia del backend (ADR 002).
 - Detrás de proxy, la IP del rate limit es la del frontend; la clave incluye el email, así que sigue limitando por cuenta.
 - No hay alta/edición de usuarios desde la UI (solo CLI). Se agrega cuando haya más de un par de usuarios.
+- Sidebar colapsada todavía no existe; cuando se implemente usa el ícono DC.
+- El ícono DC es un PNG recortado del arte entregado; reemplazar cuando haya versión vectorial oficial.
 - Auditoría de dependencias (`pip-audit`, `pnpm audit`) pendiente de sumar a CI.

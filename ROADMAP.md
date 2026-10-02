@@ -1,4 +1,4 @@
-# ROADMAP — Districom · Inteligencia Comercial
+# ROADMAP — DistriCom · Inteligencia Comercial
 
 > v0.1 · 2026-10-02. Estados: `PLANNED`, `IN_PROGRESS`, `BLOCKED`, `DONE`.
 > Una fase es `DONE` solo si cumple la Definition of Done de fase (`CLAUDE.md §7`) y todos sus criterios críticos están en PASS.

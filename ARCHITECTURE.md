@@ -1,4 +1,4 @@
-# ARCHITECTURE — Districom · Inteligencia Comercial
+# ARCHITECTURE — DistriCom · Inteligencia Comercial
 
 > v0.1 · 2026-10-02 · Estado: propuesta para validar en Fase 0.
 

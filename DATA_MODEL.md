@@ -1,4 +1,4 @@
-# DATA_MODEL — Districom · Inteligencia Comercial
+# DATA_MODEL — DistriCom · Inteligencia Comercial
 
 > v0.1 · 2026-10-02 · Propuesta. Las tablas se crean por migraciones Alembic en la fase indicada (columna **Fase**).
 

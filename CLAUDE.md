@@ -1,6 +1,6 @@
 # CLAUDE.md — Guía operativa del repositorio
 
-Plataforma de **inteligencia comercial** para una distribuidora de bebidas. Capa de análisis sobre AXUM (preventa) y STORE SYS (facturación). No es ERP ni facturador; nunca escribe en los sistemas fuente.
+**DistriCom** — plataforma de **inteligencia comercial** para una distribuidora de bebidas. Capa de análisis sobre AXUM (preventa) y STORE SYS (facturación). No es ERP ni facturador; nunca escribe en los sistemas fuente.
 
 Leer antes de cualquier tarea: este archivo → `PLAN.md` → `ROADMAP.md` → documentos del módulo afectado.
 
@@ -19,10 +19,11 @@ scripts/    seed demo, backup/restore, utilidades de desarrollo
 Principios no negociables:
 - **Reglas de negocio y métricas solo en el backend.** El frontend no calcula KPIs.
 - **Toda métrica se define primero en `METRICS.md`** y se implementa una sola vez en `backend/app/analytics/metrics/` con el mismo `id`.
-- **La analítica opera sobre el modelo canónico**, nunca sobre columnas de archivos.
+- **La analítica opera sobre el modelo canónico**, nunca sobre columnas de archivos. `analytics/` puede cruzar tablas canónicas directamente con SQL de **solo lectura**; los módulos operacionales mantienen su encapsulación (`ARCHITECTURE.md §4.1`).
 - **Nunca fusionar entidades por nombre** sin confirmación; usar `external_entity_mappings`.
 - **Nunca destruir historia** de asignaciones ni estados (tablas con vigencia).
 - **Parámetros comerciales en `app_settings`** con defaults en código; nada hardcodeado en componentes.
+- **Marca:** colores y tipografías solo vía tokens; wordmark e ícono solo vía `<Wordmark />` / `<BrandIcon />` (`docs/BRAND.md`). Verde/ámbar/rojo únicamente para estados de negocio.
 
 ## 2. Comandos habituales
 
