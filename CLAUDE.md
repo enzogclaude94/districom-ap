@@ -28,26 +28,26 @@ Principios no negociables:
 
 ```bash
 # Infra
-docker compose up -d db
+docker compose up -d db                       # PostgreSQL (crea también districom_test)
+docker compose up -d --build                  # stack completo en :3000
 # Backend
 cd backend
 uv sync
 uv run alembic upgrade head
-uv run fastapi dev app/main.py
-uv run pytest                      # unit + integración (requiere db)
-uv run ruff check . && uv run ruff format --check . && uv run mypy app
-uv run python -m app.cli create-admin --email ...
+uv run fastapi dev app/main.py                # :8000, docs en /api/docs
+uv run pytest                                 # unit + integración (usa TEST_DATABASE_URL)
+uv run ruff check . && uv run ruff format --check . && uv run mypy
+uv run alembic check                          # modelos == migraciones
+uv run python -m app.cli create-admin --email ... --name ...
 # Frontend
 cd frontend
 pnpm install
-pnpm dev
+pnpm dev                                      # :3000, /api/* → backend
 pnpm lint && pnpm format:check && pnpm typecheck && pnpm test && pnpm build
-pnpm e2e                           # Playwright
-# Demo data
-uv run python ../scripts/seed_demo_data.py --seed 42
+pnpm e2e                                      # Playwright; requiere admin E2E (README)
 ```
 
-(Se ajustan al crear el scaffold en Fase 0; este bloque debe reflejar siempre los comandos reales.)
+Este bloque debe reflejar siempre los comandos reales. Seed de demo: Fase 1.
 
 ## 3. Estructura
 

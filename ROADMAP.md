@@ -5,7 +5,7 @@
 
 | Fase | Nombre | Estado | Depende de |
 |---|---|---|---|
-| 0 | Fundación y arquitectura | **IN_PROGRESS** (planificación hecha; código pendiente de repo) | — |
+| 0 | Fundación y arquitectura | **IN_PROGRESS** (implementada; en validación, ver `PLAN.md §10`) | — |
 | 1 | Importación y maestros | PLANNED | 0 · ejemplos reales (D2–D6) para cerrar |
 | 2 | Dashboard general | PLANNED | 1 |
 | 3 | Rutas y preventistas | PLANNED | 2 |
