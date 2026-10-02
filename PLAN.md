@@ -208,7 +208,7 @@ Verificado en el entorno de desarrollo (PostgreSQL 16 local; Docker no disponibl
 
 | # | Criterio | Resultado | Evidencia |
 |---|---|---|---|
-| F0‑1 | PostgreSQL disponible | PARTIAL → CI | Local con PostgreSQL 16. `docker compose up` se verifica en el job `compose` de CI. |
+| F0‑1 | PostgreSQL disponible | PASS | Local con PostgreSQL 16; en CI, `docker compose up --wait` levanta db + backend + frontend y `/api/v1/health` responde `db: ok` a través del frontend. |
 | F0‑2 | Migraciones desde cero y reversibles | PASS | `test_migrations.py`: upgrade → downgrade → upgrade; `alembic check` sin diferencias. |
 | F0‑3 | Backend arranca | PASS | `uvicorn app.main:app` (también lo levanta Playwright). |
 | F0‑4 | Health check | PASS | `test_health.py`: 200 `{status: ok, db: ok}` / 503 con DB caída. |
@@ -220,7 +220,7 @@ Verificado en el entorno de desarrollo (PostgreSQL 16 local; Docker no disponibl
 | F0‑10 | Sistema de diseño inicial | PASS | Tokens en `globals.css`; Button, Card, Badge, Input, Table, Skeleton, EmptyState, ErrorState en uso. Revisión visual desktop y móvil. |
 | F0‑11 | Calidad | PASS | ruff, ruff format, mypy strict, eslint (0 warnings), prettier, tsc, next build. |
 | F0‑12 | Tests | PASS | Backend 26, frontend 13, E2E 6 (3 flujos × desktop/móvil). |
-| F0‑13 | CI | PENDIENTE | Workflow `ci.yml`; se marca PASS cuando el PR quede en verde. |
+| F0‑13 | CI | PASS | `ci.yml` en verde en el PR #1: backend, frontend, E2E y Docker Compose. |
 | F0‑14 | Configuración | PASS | `.env.example` completo; `test_settings.py` verifica fallo claro sin variables obligatorias. |
 | F0‑15 | Documentación de setup | PASS | `README.md` (desarrollo, Docker, migraciones, tests, E2E, backups, troubleshooting). |
 | F0‑16 | Arquitectura y modelo revisados | PENDIENTE | Requiere validación de Enzo de `ARCHITECTURE.md`, `DATA_MODEL.md` y `METRICS.md`. |
