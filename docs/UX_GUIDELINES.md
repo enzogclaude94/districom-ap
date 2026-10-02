@@ -1,5 +1,7 @@
 # Guía de UX
 
+Aplica junto con [`BRAND.md`](BRAND.md): esta guía define el comportamiento; la marca define la apariencia.
+
 ## Principios
 - Cada pantalla responde al menos una de: ¿qué está pasando?, ¿dónde perdemos oportunidades?, ¿qué acción tomamos?
 - Todo KPI lleva a una explicación, un drill-down o una lista de clientes/productos.
@@ -8,16 +10,11 @@
 ## Layout
 Sidebar jerárquica (Inicio · Comercial · Portfolio · Gestión · Boca de expendio · Datos · Configuración), topbar con filtros globales (Fase 2) y contenido con ancho máximo `7xl`. Los módulos no disponibles se muestran deshabilitados con su fase.
 
-## Tokens (`frontend/src/app/globals.css`)
-| Token | Uso |
-|---|---|
-| `success` | resultado favorable |
-| `warning` | atención |
-| `danger` | problema |
-| `info` / `primary` | información, acción principal |
-| `muted` | fondos secundarios, texto auxiliar |
-
-El color nunca es la única señal: acompañar con ícono, texto o símbolo (▲ ▼). Números con `tabular-nums`. Dark mode preparado por tokens (`.dark`), light mode primero.
+## Marca, color y tipografía
+Ver [`docs/BRAND.md`](BRAND.md): wordmark e ícono, paleta oficial como tokens, Manrope (marca) + Inter (producto), y reglas de uso. Resumen:
+- Azul Francia como acento; neutros luminosos como base.
+- Verde / ámbar / rojo solo para estados de negocio, siempre con ícono o texto además del color.
+- Números con `tabular-nums`. Light mode primero; dark mode preparado por tokens.
 
 ## Estados obligatorios
 - **Loading:** skeletons con la forma del contenido; nunca spinner de pantalla completa para consultas chicas.

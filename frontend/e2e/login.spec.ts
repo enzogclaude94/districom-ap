@@ -35,3 +35,14 @@ test("admin logs in, navigates and logs out", async ({ page, isMobile }) => {
   await page.goto("/");
   await expect(page).toHaveURL(/\/login/);
 });
+
+test("brand assets are public (login page renders the wordmark)", async ({ page, request }) => {
+  for (const path of ["/brand/districom-wordmark.svg", "/brand/districom-icon-96.png", "/favicon.ico"]) {
+    const response = await request.get(path, { maxRedirects: 0 });
+    expect(response.status(), path).toBe(200);
+  }
+  await page.goto("/login");
+  const wordmark = page.getByRole("img", { name: "DistriCom" });
+  await expect(wordmark).toBeVisible();
+  expect(await wordmark.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
+});

@@ -5,6 +5,8 @@ import { LogOut, Menu, X } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 
+import { BrandIcon } from "@/components/brand/brand-icon";
+import { Wordmark } from "@/components/brand/wordmark";
 import { ErrorState } from "@/components/common/error-state";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Badge } from "@/components/ui/badge";
@@ -69,8 +71,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         )}
       >
         <div className="flex h-14 items-center border-b border-border px-5">
-          <span className="font-semibold tracking-tight">Districom</span>
-          <span className="ml-1.5 text-sm text-muted-foreground">Comercial</span>
+          <Wordmark height={22} priority />
         </div>
         <Sidebar />
       </aside>
@@ -94,7 +95,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           >
             {menuOpen ? <X /> : <Menu />}
           </Button>
-          <span className="font-semibold tracking-tight md:hidden">Districom</span>
+          <BrandIcon size={28} className="rounded-md md:hidden" />
           {/* Global filters (period, salesperson, route…) land here in Phase 2. */}
           <div className="flex-1" />
           <div className="flex items-center gap-3">

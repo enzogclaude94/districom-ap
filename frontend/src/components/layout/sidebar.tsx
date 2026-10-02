@@ -42,7 +42,7 @@ function NavLink({ item, pathname, nested, icon: Icon }: NavLinkProps) {
     <Link
       href={item.href}
       aria-current={active ? "page" : undefined}
-      className={cn(base, active ? "bg-primary/10 font-medium text-primary" : "hover:bg-muted")}
+      className={cn(base, active ? "bg-primary-soft font-medium text-primary" : "text-foreground hover:bg-muted")}
     >
       {label}
     </Link>

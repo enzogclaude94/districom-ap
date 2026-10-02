@@ -1,52 +1,65 @@
 @import "tailwindcss";
 
 /*
- * Design tokens (docs/UX_GUIDELINES.md).
- * Semantic colors are functional: success = favorable, warning = attention,
- * danger = problem, info = neutral information. Never rely on color alone.
- * Dark mode is prepared via the `.dark` class; V1 ships an excellent light mode.
+ * DistriCom design tokens — source of truth: docs/BRAND.md.
+ * Components use these tokens only; never hardcode hex values in components.
+ * Brand blues are accents. Green / amber / red are reserved for business
+ * states (favorable / attention / problem), never decorative.
+ * Dark mode is prepared via the `.dark` class; V1 ships light mode.
  */
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
-  --background: oklch(0.985 0.002 250);
-  --surface: oklch(1 0 0);
-  --foreground: oklch(0.22 0.02 260);
-  --muted: oklch(0.96 0.005 250);
-  --muted-foreground: oklch(0.52 0.02 260);
-  --border: oklch(0.91 0.008 250);
-  --ring: oklch(0.55 0.15 255);
+  /* Brand palette (DistriCom Brand Concept v1) */
+  --brand-blue: #1455d9; /* Azul Francia: actions, emphasis, brand */
+  --brand-deep: #173b72; /* Azul profundo: contrast, dark states */
+  --brand-light: #3b82f6; /* Azul claro: complementary accent, charts */
+  --brand-soft: #e8f0ff; /* Azul suave: selection backgrounds */
 
-  --primary: oklch(0.45 0.14 255);
-  --primary-foreground: oklch(0.99 0 0);
+  /* Surfaces and text */
+  --background: #f7f9fc; /* Fondo secundario */
+  --surface: #ffffff; /* Blanco */
+  --foreground: #182230; /* Texto principal */
+  --muted-foreground: #667085; /* Texto secundario */
+  --muted: #f0f3f8; /* neutral fill derived from the palette */
+  --border: #e4e9f1; /* thin neutral lines */
+  --ring: var(--brand-blue);
 
-  --success: oklch(0.55 0.13 155);
-  --success-soft: oklch(0.95 0.04 155);
-  --warning: oklch(0.62 0.14 70);
-  --warning-soft: oklch(0.96 0.05 85);
-  --danger: oklch(0.55 0.19 27);
-  --danger-soft: oklch(0.95 0.03 27);
-  --info: oklch(0.52 0.12 245);
-  --info-soft: oklch(0.95 0.03 245);
+  --primary: var(--brand-blue);
+  --primary-foreground: #ffffff;
+  --primary-soft: var(--brand-soft);
+  --primary-deep: var(--brand-deep);
+
+  /* Business states (semantic only) */
+  --success: #12805c;
+  --success-soft: #e7f6ef;
+  --warning: #b54708;
+  --warning-soft: #fef4e6;
+  --danger: #c4320a;
+  --danger-soft: #fdeceb;
+  --info: var(--brand-blue);
+  --info-soft: var(--brand-soft);
 
   --radius: 0.625rem;
-  --sidebar-width: 15rem;
+  --shadow-card: 0 1px 2px rgb(24 34 48 / 0.04), 0 1px 3px rgb(24 34 48 / 0.04);
+  --sidebar-width: 15.5rem;
 }
 
 .dark {
-  --background: oklch(0.17 0.01 260);
-  --surface: oklch(0.21 0.012 260);
-  --foreground: oklch(0.95 0.005 250);
-  --muted: oklch(0.25 0.012 260);
-  --muted-foreground: oklch(0.7 0.015 255);
-  --border: oklch(0.3 0.012 260);
-  --ring: oklch(0.7 0.13 255);
-  --primary: oklch(0.7 0.13 255);
-  --primary-foreground: oklch(0.18 0.02 260);
-  --success-soft: oklch(0.3 0.05 155);
-  --warning-soft: oklch(0.32 0.06 75);
-  --danger-soft: oklch(0.3 0.06 27);
-  --info-soft: oklch(0.3 0.05 245);
+  --background: #0f1724;
+  --surface: #162131;
+  --foreground: #eef2f8;
+  --muted: #1d2a3d;
+  --muted-foreground: #98a2b3;
+  --border: #253449;
+  --primary: var(--brand-light);
+  --primary-foreground: #0f1724;
+  --primary-soft: #1a2f55;
+  --success-soft: #0f3326;
+  --warning-soft: #3b2a10;
+  --danger-soft: #3d1a14;
+  --info: var(--brand-light);
+  --info-soft: #1a2f55;
 }
 
 @theme inline {
@@ -59,6 +72,12 @@
   --color-ring: var(--ring);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-primary-soft: var(--primary-soft);
+  --color-primary-deep: var(--primary-deep);
+  --color-brand-blue: var(--brand-blue);
+  --color-brand-deep: var(--brand-deep);
+  --color-brand-light: var(--brand-light);
+  --color-brand-soft: var(--brand-soft);
   --color-success: var(--success);
   --color-success-soft: var(--success-soft);
   --color-warning: var(--warning);
@@ -70,8 +89,10 @@
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --shadow-card: var(--shadow-card);
+  --font-sans: var(--font-inter);
+  --font-display: var(--font-manrope);
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 @layer base {
