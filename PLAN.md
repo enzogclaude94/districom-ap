@@ -1,7 +1,7 @@
 # PLAN — DistriCom · Plataforma de Inteligencia Comercial
 
-> Estado del documento: **v0.3 — Fase 0 DONE; Fase 1 en preparación (análisis de datos reales)**
-> Última actualización: 2026-10-02
+> Estado del documento: **v0.4 — Fase 0 DONE; preparación modular (P0) en curso; Fase 1 en preparación (análisis de datos reales)**
+> Última actualización: 2026-10-03
 > Fuente de requisitos: prompt maestro adjunto por Enzo (`message.md`, 165 secciones).
 
 ---
@@ -25,6 +25,8 @@
 ### 1.2 Fase activa
 
 **Fase 0 — DONE.** Aprobada por Enzo el 2026-10-02; PR #1 mergeado a `main`. Los 16 criterios en PASS (§10).
+
+**Plataforma modular — P0 aprobados por Enzo el 2026-10-03, en curso** (ADR 006, §12). Antes de la Fase 1.
 
 **Fase 1 — en preparación: análisis de datos reales.** No se implementan importadores ni mappings hasta recibir y analizar exportaciones reales de AXUM y STORE SYS y que Enzo apruebe la propuesta resultante. Pedido de archivos, período y validaciones en `docs/DATA_INTAKE.md`; pasos en §11.
 
@@ -261,3 +263,22 @@ Estado: **esperando muestras de Enzo.** Implementación sustancial no autorizada
 | 5. Aprobación de Enzo y autorización explícita para implementar | Pendiente |
 
 Gate de inicio de implementación: pasos 2–5 completos. Los criterios de cierre de la Fase 1 siguen siendo los de `ROADMAP.md`.
+
+---
+
+## 12. Preparación de la plataforma modular (P0)
+
+Origen: revisión arquitectónica del 2026-10-03 (`/mnt/project-files/districom/REVISION_ARQUITECTURA_MODULAR.md`), aprobada por Enzo con el ajuste de `employees` + `employee_functions`. Decisión registrada en ADR 006.
+
+**Límites aprobados:** solo preparar la plataforma; no desarrollar otros módulos ni crear sus tablas, modelos, funciones o pantallas; los comprobantes de STORE SYS siguen como estaban; Inteligencia Comercial es el único módulo funcional; una sola aplicación. No avanzar a Fase 1 al terminar.
+
+| Bloque | Cambio | Tipo | Estado |
+|---|---|---|---|
+| 1 | P0‑1 ADR 006 + ARCHITECTURE, CLAUDE, ROADMAP, README | Documentación | Hecho |
+| 1 | P0‑2 DATA_MODEL v0.2: ownership/schemas, `employees` + `employee_functions`, identidad de clientes, imports y mappings extensibles, `suppliers` diferido | Documentación | Hecho |
+| 2 | P0‑3 Backend: `auth`, `audit`, `settings_store`, `sources` → `app/platform/`; convención `app/modules/<m>/` | Reorganización | Pendiente |
+| 2 | P0‑4 Regla de dependencias en CI (import-linter + ESLint) | Preparación | Pendiente |
+| 3 | P0‑5 Configuración por scope (`platform.*` / `commercial.*`), zona horaria solo env | Cambio visible menor | Pendiente |
+| 3 | P0‑6 Acceso por módulo, Etapa 0 (`require_module_access`, `modules` en `/auth/me`) | Preparación | Pendiente |
+| 3 | P0‑7 Frontend: Inteligencia Comercial bajo `/comercial`, shell de plataforma | Cambio visible menor | Pendiente |
+

@@ -1,12 +1,24 @@
-# ROADMAP — DistriCom · Inteligencia Comercial
+# ROADMAP — DistriCom
 
-> v0.2 · 2026-10-02. Estados: `PLANNED`, `PREPARATION` (análisis previo, sin implementación), `IN_PROGRESS`, `BLOCKED`, `DONE`.
+> v0.3 · 2026-10-03. Estados: `PLANNED`, `PREPARATION` (análisis previo, sin implementación), `IN_PROGRESS`, `BLOCKED`, `DONE`.
 > Una fase es `DONE` solo si cumple la Definition of Done de fase (`CLAUDE.md §7`) y todos sus criterios críticos están en PASS.
+
+DistriCom es una plataforma modular (ADR 006). Este roadmap tiene dos carriles: **Plataforma** (núcleo compartido) e **Inteligencia Comercial**, el único módulo en desarrollo. Otros módulos no tienen fases hasta que se aprueben.
+
+### Plataforma
+
+| Ítem | Nombre | Estado | Depende de |
+|---|---|---|---|
+| PL‑1 | Preparación modular (P0‑1 … P0‑7 de la revisión del 2026-10-03) | **IN_PROGRESS** | Fase 0 |
+| PL‑2 | Identidades compartidas (`employees`, `employee_functions`, `customers`, `localities`) y framework de importación | PLANNED (se construye dentro de la Fase 1) | PL‑1 |
+| PL‑3 | Roles por módulo (`user_module_roles`) y gestión de usuarios | PLANNED (solo cuando exista un segundo módulo) | PL‑1 |
+
+### Inteligencia Comercial
 
 | Fase | Nombre | Estado | Depende de |
 |---|---|---|---|
 | 0 | Fundación y arquitectura | **DONE** (aprobada y mergeada el 2026-10-02, PR #1) | — |
-| 1 | Importación y maestros | **PREPARATION** (análisis de exportaciones reales, `docs/DATA_INTAKE.md`) | 0 · muestras reales y aprobación de Enzo para implementar |
+| 1 | Importación y maestros | **PREPARATION** (análisis de exportaciones reales, `docs/DATA_INTAKE.md`) | 0 · PL‑1 · muestras reales y aprobación de Enzo para implementar |
 | 2 | Dashboard general | PLANNED | 1 |
 | 3 | Rutas y preventistas | PLANNED | 2 |
 | 4 | Cliente 360° y estados | PLANNED | 1 (puede ir en paralelo con 3) |
@@ -26,7 +38,7 @@
 
 ## Fase 1 — Importación y maestros
 **Preparación (actual):** recibir y perfilar exportaciones reales de AXUM y STORE SYS, responder D3–D6 con datos y proponer mappings para aprobación (`PLAN.md §11`). La implementación empieza solo con autorización explícita de Enzo.
-**Alcance:** tablas de maestros, asignaciones con historia, ventas/ítems, visitas, programación, pedidos, canales, `import_*`, `external_entity_mappings`, pipeline completo, pantalla Importaciones (subir, mapping, preview, errores, confirmación, historial), revisión de mappings pendientes, generador de demo data por pipeline, página inicial de Calidad de datos.
+**Alcance:** identidades de plataforma (`employees` + función `commercial.salesperson` en `employee_functions`, `customers`, `localities`), maestros comerciales, asignaciones con historia, ventas/ítems, visitas, programación, pedidos, canales, `import_*`, `external_entity_mappings`, pipeline completo, pantalla Importaciones (subir, mapping, preview, errores, confirmación, historial), revisión de mappings pendientes, generador de demo data por pipeline, página inicial de Calidad de datos.
 **Criterios:**
 - XLSX y CSV aceptados; archivo inválido (extensión, tamaño, estructura) rechazado con mensaje útil.
 - Columnas mapeables, plantilla guardable y auto‑detectada.

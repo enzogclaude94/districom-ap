@@ -1,6 +1,23 @@
-# DATA_MODEL — DistriCom · Inteligencia Comercial
+# DATA_MODEL — DistriCom
 
-> v0.1 · 2026-10-02 · Propuesta. Las tablas se crean por migraciones Alembic en la fase indicada (columna **Fase**).
+> v0.2 · 2026-10-03 · Propuesta. Las tablas se crean por migraciones Alembic en la fase indicada.
+> v0.2: modelo revisado para la **plataforma modular** (ADR 006): ownership por plataforma/módulo, `employees` + `employee_functions` en lugar de `salespeople`, identidad de clientes en plataforma, tipos de import y de mapping extensibles, `suppliers` diferido.
+
+## 0. Ownership y schemas
+
+Una sola base PostgreSQL. **Plataforma** (DistriCom Core) en el schema `public`; cada **módulo** en su propio schema. Hoy el único módulo es **Inteligencia Comercial** (`commercial`).
+
+| Dueño | Schema | Tablas |
+|---|---|---|
+| Plataforma | `public` | `users`, `user_sessions`, `app_settings`, `audit_events`, `source_systems` (Fase 0) · `employees`, `employee_functions`, `customers`, `localities`, `external_entity_mappings`, `import_batches`, `import_files`, `import_column_mappings`, `import_errors`, `import_staging_rows` (Fase 1) |
+| Inteligencia Comercial | `commercial` | `customer_profiles`, `customer_types`, `routes`, `route_schedules`, `customer_route_assignments`, `customer_salesperson_assignments`, `product_categories`, `brands`, `products`, `sales_channels`, `sales`, `sale_items`, `orders`, `order_items`, `scheduled_visits`, `visits` (Fase 1) · `customer_status_*`, `customer_recovery_events`, `opportunities`, `opportunity_status_history`, `cross_sell_rules`, `commercial_goals`, `incentives` (Fases 4–8) |
+
+Reglas:
+- Una tabla tiene **un solo dueño**, que la define, la migra y es el único que escribe en ella. Un módulo escribe en tablas de plataforma solo a través de servicios de plataforma.
+- **Claves foráneas:** módulo → plataforma, sí. Plataforma → módulo, **nunca**. Módulo → otro módulo, solo si esa dependencia está declarada en ARCHITECTURE.md (hoy no hay ninguna).
+- Los nombres de tabla no llevan prefijo de módulo: el schema ya lo indica. En consultas y migraciones las tablas de módulo se califican (`commercial.sales`).
+- **Única fuente de verdad:** un dato compartido (persona, cliente, localidad, sistema fuente, identidad externa) existe una sola vez, en plataforma. Los módulos guardan solo sus relaciones y atributos propios, referenciando la fila de plataforma.
+- Las columnas que referencian a un empleado en un rol usan el nombre del rol (`salesperson_id → public.employees.id`).
 
 ## 1. Convenciones
 
@@ -17,17 +34,21 @@
 
 ## 2. ERD (resumen)
 
+> Las entidades de plataforma (`employees`, `customers`, `localities`, `import_batches`) viven en `public`; el resto en `commercial` (ver §0).
+
 ```mermaid
 erDiagram
   localities ||--o{ customers : ""
   localities ||--o{ routes : ""
-  customer_types ||--o{ customers : ""
+  customers ||--|| customer_profiles : ""
+  customer_types ||--o{ customer_profiles : ""
   customers ||--o{ customer_route_assignments : ""
   routes ||--o{ customer_route_assignments : ""
   customers ||--o{ customer_salesperson_assignments : ""
-  salespeople ||--o{ customer_salesperson_assignments : ""
+  employees ||--o{ employee_functions : ""
+  employees ||--o{ customer_salesperson_assignments : "salesperson_id"
   routes ||--o{ route_schedules : ""
-  salespeople ||--o{ route_schedules : ""
+  employees ||--o{ route_schedules : "salesperson_id"
   customers ||--o{ scheduled_visits : ""
   customers ||--o{ visits : ""
   customers ||--o{ sales : ""
@@ -40,7 +61,6 @@ erDiagram
   product_categories ||--o{ products : ""
   product_categories ||--o{ product_categories : "parent"
   brands ||--o{ products : ""
-  suppliers ||--o{ products : ""
   customers ||--|| customer_status_current : ""
   customers ||--o{ customer_status_history : ""
   customers ||--o{ customer_recovery_events : ""
@@ -60,7 +80,7 @@ erDiagram
 | email | citext UNIQUE NOT NULL | |
 | password_hash | text NULL | Argon2id; NULL si identidad externa futura |
 | full_name | text NOT NULL | |
-| role | text NOT NULL CHECK (`admin`,`viewer`) | RBAC expandible vía `role_permissions` futura |
+| role | text NOT NULL CHECK (`admin`,`viewer`) | **Rol de plataforma.** El acceso a cada módulo se resuelve con `require_module_access` (Etapa 0: deriva del rol de plataforma). Roles por módulo (`user_module_roles`) recién cuando exista un segundo módulo (ARCHITECTURE.md §8). |
 | active | bool NOT NULL DEFAULT true | |
 | last_login_at | timestamptz | |
 
@@ -68,34 +88,52 @@ erDiagram
 `id`, `user_id` FK, `token_hash` (bytea UNIQUE), `created_at`, `last_seen_at`, `expires_at`, `revoked_at`, `ip`, `user_agent`. Índice `(user_id)`.
 
 ### app_settings
-Parámetros comerciales y técnicos. `key text PK`, `value jsonb NOT NULL`, `description`, `updated_by` FK users, `updated_at`. Los defaults viven en código (`settings_store/defaults.py`) y la tabla solo guarda overrides; así un parámetro siempre tiene valor seguro. Cambios auditados.
+Parámetros de negocio editables. `key text PK`, `value jsonb NOT NULL`, `description`, `updated_by` FK users, `updated_at`. Las claves llevan el **scope** como prefijo: `platform.*` (globales) y `<módulo>.*` (`commercial.*`). Los defaults viven en código junto a su dueño (`app/platform/settings/` y `app/modules/<módulo>/settings.py`) y la tabla solo guarda overrides; así un parámetro siempre tiene valor seguro. Cambios auditados. La zona horaria de negocio **no** es un parámetro: es la variable de entorno `BUSINESS_TIMEZONE`.
 
 ### audit_events
-`id`, `occurred_at`, `user_id` NULL, `event_type` (`IMPORT_STARTED`, `IMPORT_COMPLETED`, `IMPORT_FAILED`, `GOAL_CREATED`, `INCENTIVE_APPROVED`, `OPPORTUNITY_UPDATED`, `SETTING_CHANGED`, `LOGIN`, …), `entity_type`, `entity_id`, `payload jsonb` (sin PII), `request_id`. Índice `(event_type, occurred_at)`.
+`id`, `occurred_at`, `user_id` NULL, `event_type` (`auth.login`, `platform.setting_changed`, `platform.import.completed`, `commercial.goal.created`, `commercial.incentive.approved`, … — prefijo = dueño; los eventos existentes de Fase 0 se renombran al adoptar la convención, P1), `entity_type`, `entity_id`, `payload jsonb` (sin PII), `request_id`. Índice `(event_type, occurred_at)`.
 
 ### source_systems
 `id`, `code` UNIQUE (`AXUM`, `STORE_SYS`, `MANUAL`, `DEMO`), `name`.
 
-## 4. Catálogos y maestros (Fase 1)
+## 4. Maestros (Fase 1)
 
-### localities
+### 4.1 Plataforma (`public`)
+
+#### localities
 `id`, `name`, `province`, `zone` (texto, para segmentar), `normalized_name` UNIQUE.
 
-### customer_types
-`id`, `code` UNIQUE (`KIOSCO`, `ALMACEN`, `SUPERMERCADO`, `BAR`, `RESTAURANTE`, `MAYORISTA`, `AUTOSERVICIO`, `OTRO`), `name`, `sort_order`. Corrección manual permitida; el valor original del archivo se guarda en `customers.source_customer_type_raw`.
+#### employees
+Identidad **única** de cada persona que trabaja en la empresa, sea cual sea su función o módulo. Solo identidad: los datos propios de cada función viven en el módulo que la usa.
+| Columna | Notas |
+|---|---|
+| id | PK |
+| full_name | text NOT NULL |
+| external_axum_id, external_store_id | text, unique parcial `WHERE … IS NOT NULL` |
+| active | bool NOT NULL DEFAULT true |
+| hire_date | date NULL |
+| phone | text NULL — PII |
+| timestamps | |
 
-### salespeople
-`id`, `external_axum_id`, `external_store_id`, `name`, `active`, `phone`, `hire_date`, timestamps.
+#### employee_functions
+Funciones del empleado con historia. Una persona puede tener varias funciones a la vez o cambiar de función sin duplicarse.
+| Columna | Notas |
+|---|---|
+| id | PK |
+| employee_id | FK `employees` NOT NULL |
+| function_code | text NOT NULL — código registrado en código por el módulo dueño de la función (sin CHECK en la base). **Fase 1: solo `commercial.salesperson`** (preventista). |
+| valid_from | date NOT NULL |
+| valid_to | date NULL — NULL = vigente |
+| source | `AXUM`, `STORE_SYS`, `MANUAL` |
+| import_batch_id | FK NULL |
+| created_by | FK users NULL |
 
-### routes
-`id`, `external_id`, `code` UNIQUE, `name`, `locality_id` FK, `active`, `description`, timestamps.
+- Exclusion constraint: `(employee_id, function_code, daterange(valid_from, valid_to))` sin solapamientos.
+- Un cambio de función cierra la vigente y abre otra; nunca UPDATE in place.
+- Que un `salesperson_id` de una tabla comercial sea preventista **en esa fecha** lo valida el servicio comercial contra esta tabla (no es una FK).
 
-### route_schedules
-Frecuencia planificada por ruta.
-`id`, `route_id` FK, `weekday` smallint (1=lunes … 7=domingo), `salesperson_id` FK, `recurrence` (`WEEKLY`, `BIWEEKLY`), `valid_from`, `valid_to`.
-Ruta 2×semana = 2 filas; 1×semana = 1 fila. Exclusion constraint sobre `(route_id, weekday, daterange(valid_from, valid_to))`.
-
-### customers
+#### customers
+Identidad **única** del cliente para toda la plataforma. Asignaciones, segmentación y derivados comerciales viven en `commercial` (§4.2).
 | Columna | Tipo | Notas |
 |---|---|---|
 | id | bigint PK | |
@@ -107,47 +145,61 @@ Ruta 2×semana = 2 filas; 1×semana = 1 fila. Exclusion constraint sobre `(route
 | tax_id | text | CUIT/DNI **normalizado**, no único (puede repetirse en sucursales) |
 | phone, address | text | PII |
 | locality_id | FK localities | |
-| customer_type_id | FK customer_types | |
-| source_customer_type_raw | text | valor original |
 | active_in_source | bool | |
-| is_generic | bool NOT NULL DEFAULT false | "Consumidor final" / mostrador. Excluido de universos (PLAN R9) |
+| is_generic | bool NOT NULL DEFAULT false | "Consumidor final" / mostrador. Excluido de universos de clientes (PLAN R9) |
 | registered_at | date | alta en sistema fuente, si existe |
-| first_purchase_date | date | derivado, mantenido por el pipeline |
 | timestamps | | |
 
-> Ruta y preventista **no** son columnas de `customers`: viven en tablas de asignación (§5).
+> Ruta y preventista **no** son columnas de `customers`: viven en tablas de asignación del módulo comercial (§5).
 
-### product_categories
+### 4.2 Inteligencia Comercial (`commercial`)
+
+#### customer_types
+`id`, `code` UNIQUE (`KIOSCO`, `ALMACEN`, `SUPERMERCADO`, `BAR`, `RESTAURANTE`, `MAYORISTA`, `AUTOSERVICIO`, `OTRO`), `name`, `sort_order`. Segmentación comercial. Corrección manual permitida.
+
+#### customer_profiles
+Atributos y derivados comerciales del cliente (1:1 con `public.customers`).
+`customer_id` PK/FK `public.customers`, `customer_type_id` FK NULL, `source_customer_type_raw` (valor original del archivo), `first_purchase_date` (derivado, mantenido por el pipeline), `updated_at`.
+
+#### routes
+**Rutas de preventa** (AXUM). No representan recorridos de reparto ni ningún otro concepto operativo: si en el futuro existen, serán otra entidad en su propio módulo.
+`id`, `external_id`, `code` UNIQUE, `name`, `locality_id` FK `public.localities`, `active`, `description`, timestamps.
+
+#### route_schedules
+Frecuencia planificada por ruta de preventa.
+`id`, `route_id` FK, `weekday` smallint (1=lunes … 7=domingo), `salesperson_id` FK `public.employees` (función `commercial.salesperson`), `recurrence` (`WEEKLY`, `BIWEEKLY`), `valid_from`, `valid_to`.
+Ruta 2×semana = 2 filas; 1×semana = 1 fila. Exclusion constraint sobre `(route_id, weekday, daterange(valid_from, valid_to))`.
+
+#### product_categories
 `id`, `code` UNIQUE, `name`, `parent_id` FK self NULL, `sort_order`, `active`. Jerarquía de 2 niveles en V1 (categoría → subcategoría). Las métricas "categorías por cliente" usan el **nivel 1** por defecto (configurable).
 
-### brands
-`id`, `name`, `normalized_name` UNIQUE, `supplier_id` FK NULL.
+#### brands
+`id`, `name`, `normalized_name` UNIQUE.
 
-### suppliers
-`id`, `name`, `external_store_id`.
+> **Proveedores:** no se crea un catálogo `suppliers` en Fase 1. Un proveedor de producto no es necesariamente lo mismo que un beneficiario de pagos; la entidad se define cuando haya un caso real que la necesite. Si los exports traen proveedor, se guarda como texto en `products.supplier_name_raw`.
 
-### products
+#### products
 | Columna | Notas |
 |---|---|
 | id, external_store_id (unique parcial), sku (UNIQUE), barcode | |
-| name, category_id FK, brand_id FK, supplier_id FK | |
+| name, category_id FK, brand_id FK, supplier_name_raw text NULL | |
 | presentation (texto original), volume_ml numeric NULL, package_type (`LATA`, `BOTELLA_VIDRIO`, `PET`, `BARRIL`, `CAJA`, `OTRO`) NULL | útiles para cross‑selling |
 | units_per_pack int NULL | |
 | active bool | |
 | premium_flag bool NULL | NULL = sin clasificar; se setea manualmente o por regla configurable |
 | is_returnable bool NULL | |
 
-### sales_channels
-`id`, `code` UNIQUE (`PREVENTA`, `BOCA_EXPENDIO`, `OTRO`), `name`.
+#### sales_channels
+`id`, `code` UNIQUE (`PREVENTA`, `BOCA_EXPENDIO`, `OTRO`), `name`. Es el **canal de venta** para el análisis comercial.
 
-## 5. Asignaciones con historia (Fase 1)
+## 5. Asignaciones con historia (Fase 1, `commercial`)
 
 ### customer_route_assignments / customer_salesperson_assignments
 | Columna | Notas |
 |---|---|
 | id | |
 | customer_id FK | |
-| route_id FK / salesperson_id FK | |
+| route_id FK / salesperson_id FK `public.employees` | |
 | valid_from DATE NOT NULL | |
 | valid_to DATE NULL | NULL = vigente |
 | source | `AXUM`, `STORE_SYS`, `MANUAL` |
@@ -160,9 +212,10 @@ Ruta 2×semana = 2 filas; 1×semana = 1 fila. Exclusion constraint sobre `(route
 - Vista `customer_current_assignment(customer_id, route_id, salesperson_id)`.
 - Función `assignment_at(customer_id, date)` para atribución histórica.
 
-## 6. Transacciones (Fase 1)
+## 6. Transacciones (Fase 1, `commercial`)
 
 ### sales (encabezado de comprobante)
+Comprobantes de STORE SYS, propiedad del módulo comercial.
 | Columna | Tipo / Notas |
 |---|---|
 | id | PK |
@@ -214,10 +267,12 @@ Si AXUM exporta programación, `DERIVED` no se genera para esas fechas. Las mét
 `id`, `external_axum_id` UNIQUE parcial, `business_date`, `visited_at` timestamptz NULL, `customer_id`, `route_id`, `salesperson_id`, `scheduled_visit_id` FK NULL, `scheduled` bool, `visited` bool, `outcome` (`PURCHASE`, `NO_PURCHASE`, `NOT_VISITED`, `CLOSED`, `OTHER`), `no_purchase_reason` text NULL, `had_order` bool NULL, `notes`, `import_batch_id`.
 `visited = false` con `outcome = NOT_VISITED` cuando AXUM informa la no‑visita.
 
-## 7. Importaciones y mappings (Fase 1)
+## 7. Importaciones y mappings (Fase 1, plataforma)
+
+El **framework** de importación es de plataforma: lote, archivo, staging, errores, plantillas y lectores por formato. Los **tipos de import y sus adaptadores** son de cada módulo y se registran en código; la base no lista tipos con CHECK.
 
 ### import_batches
-`id`, `source_system_id`, `import_type` (`CUSTOMERS`, `PRODUCTS`, `SALES`, `VISITS`, `SCHEDULED_VISITS`, `ORDERS`, `ROUTES`, `SALESPEOPLE`), `status` (`UPLOADED`, `MAPPED`, `VALIDATED`, `IMPORTING`, `COMPLETED`, `FAILED`, `REJECTED_DUPLICATE`), `user_id`, `mapping_template_id` NULL, `started_at`, `finished_at`, `duration_ms`, `rows_read`, `rows_valid`, `rows_rejected`, `rows_inserted`, `rows_updated`, `rows_duplicate`, `rows_unchanged`, `error_count`, `warning_count`, `reprocess_of_batch_id` NULL, `notes`.
+`id`, `source_system_id`, `import_type` (texto con prefijo del dueño, validado por el registro de tipos: `commercial.customers`, `commercial.products`, `commercial.sales`, `commercial.visits`, `commercial.scheduled_visits`, `commercial.orders`, `commercial.routes`, `commercial.salespeople`), `status` (`UPLOADED`, `MAPPED`, `VALIDATED`, `IMPORTING`, `COMPLETED`, `FAILED`, `REJECTED_DUPLICATE`), `user_id`, `mapping_template_id` NULL, `started_at`, `finished_at`, `duration_ms`, `rows_read`, `rows_valid`, `rows_rejected`, `rows_inserted`, `rows_updated`, `rows_duplicate`, `rows_unchanged`, `error_count`, `warning_count`, `reprocess_of_batch_id` NULL, `notes`.
 
 ### import_files
 `id`, `import_batch_id`, `original_filename` (sanitizado), `stored_path`, `size_bytes`, `mime_type`, `sha256` (índice), `sheet_name`.
@@ -237,18 +292,18 @@ Resolución de identidad entre sistemas.
 | Columna | Notas |
 |---|---|
 | id | |
-| entity_type | `CUSTOMER`, `PRODUCT`, `SALESPERSON`, `ROUTE` |
+| entity_type | texto validado por registro: entidades de plataforma `customer`, `employee`; de módulo con prefijo `commercial.product`, `commercial.route` |
 | source_system_id | |
 | external_id | |
 | external_label | nombre tal como vino |
-| entity_id | ID interno, NULL si pendiente |
+| entity_id | ID interno en la tabla del dueño del `entity_type`, NULL si pendiente |
 | status | `AUTO_MATCHED`, `PENDING_REVIEW`, `CONFIRMED`, `REJECTED` |
 | match_method | `EXACT_EXTERNAL_ID`, `EXACT_TAX_ID`, `MANUAL`, `SUGGESTED_NAME` (solo sugerencia, nunca auto) |
 | decided_by, decided_at | |
 
 `UNIQUE (entity_type, source_system_id, external_id)`. Historial de decisiones en `audit_events`.
 
-## 8. Estado del cliente (Fase 4)
+## 8. Estado del cliente (Fase 4, `commercial`)
 
 ### customer_status_current
 Una fila por cliente no genérico (para queries rápidas).
@@ -260,7 +315,7 @@ Mismas columnas de estado + `effective_from DATE`, `effective_to DATE NULL`. Sol
 ### customer_recovery_events
 `id`, `customer_id`, `recovered_on` (date), `previous_status` (`DORMANT`/`LOST`), `previous_status_since`, `sale_id` FK, `amount`, `salesperson_id` (atribución de la venta), `calculation_version`. `UNIQUE (customer_id, sale_id)`.
 
-## 9. Oportunidades, objetivos e incentivos (Fases 6–8)
+## 9. Oportunidades, objetivos e incentivos (Fases 6–8, `commercial`)
 
 ### opportunities
 Campos del prompt §28 más: `rule_id` + `rule_version` (reemplazan `source_rule`), `reasons jsonb` (lista estructurada `[{code, value, weight, points}]`), `dedup_key text`, `attribution_window_days`, `worked_source` (`MANUAL`, `INFERRED_VISIT`), `converted_sale_id`, `converted_amount`, `converted_quantity`, `days_to_conversion`.
@@ -290,7 +345,7 @@ Prompt §30. `status` (`SUGGESTED`, `APPROVED`, `ACTIVE`, `COMPLETED`, `CANCELLE
 | Línea | `(sale_id, line_number)` |
 | Visita | `external_axum_id`; si no existe: `(business_date, customer_id, salesperson_id)` |
 | Programación | `(business_date, customer_id, route_id)` |
-| Cliente/producto/preventista | ID externo por sistema vía `external_entity_mappings` |
+| Cliente/empleado/producto/ruta | ID externo por sistema vía `external_entity_mappings` |
 | Oportunidad abierta | `dedup_key` con unique parcial |
 | Recuperación | `(customer_id, sale_id)` |
 
