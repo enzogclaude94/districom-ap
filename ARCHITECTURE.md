@@ -71,7 +71,8 @@ backend/app/
 ├── core/                  técnico: settings de entorno, logging, errores, middleware (no importa negocio)
 ├── db/                    técnico: Base declarativa, convenciones, sesión, registro de modelos
 ├── platform/              DistriCom Core — negocio compartido
-│   ├── auth/              users, user_sessions, acceso por módulo (require_module_access)
+│   ├── modules.py         contrato ModuleSpec + módulos instalados
+│   ├── auth/              users, user_sessions, acceso por módulo (access.py: require_module_access)
 │   ├── audit/             audit_events
 │   ├── settings/          app_settings + registro de parámetros por scope (platform.*, <módulo>.*)
 │   ├── sources/           source_systems
@@ -81,10 +82,9 @@ backend/app/
 ├── modules/
 │   ├── __init__.py        MODULES: lista literal de módulos instalados
 │   └── commercial/        Inteligencia Comercial
-│       ├── __init__.py    manifiesto (key, nombre visible, roles)
+│       ├── __init__.py    MODULE: ModuleSpec (key, nombre visible, router, settings)
 │       ├── api.py         router montado en /api/v1/commercial
-│       ├── settings.py    parámetros commercial.* con defaults
-│       ├── access.py      dependencia de acceso al módulo
+│       ├── settings.py    parámetros commercial.* con defaults y etiquetas
 │       ├── public.py      [cuando otro módulo lo necesite] interfaz pública
 │       ├── models/        [Fase 1] routes, assignments, products, sales, visits, orders…
 │       ├── imports/       [Fase 1] adaptadores AXUM / STORE SYS + tipos commercial.*
@@ -144,7 +144,7 @@ Dentro de un módulo, los paquetes **operacionales** (en Comercial: `imports/`, 
 
 | Aspecto | Qué se agrega |
 |---|---|
-| Backend | `app/modules/<key>/` con manifiesto, `api.py`, `settings.py`, `access.py`; una entrada en `app/modules/__init__.py` |
+| Backend | `app/modules/<key>/` con `MODULE` (ModuleSpec), `api.py`, `settings.py`; una entrada en `MODULES` (`app/modules/__init__.py`) |
 | API | `/api/v1/<key>/…` |
 | Acceso | `require_module_access("<key>", …)`; roles por módulo cuando existan (§8) |
 | Configuración | Parámetros `<key>.*` en `settings.py`; aparecen solos en Configuración |

@@ -1,15 +1,19 @@
 "use client";
 
 import type { LucideIcon } from "lucide-react";
+import { Settings } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 import { Badge } from "@/components/ui/badge";
-import { NAV_SECTIONS, type NavItem } from "@/features/navigation/nav-items";
+import type { NavItem, NavSection } from "@/lib/modules";
 import { cn } from "@/lib/cn";
 
-function isActive(pathname: string, href: string) {
-  return href === "/" ? pathname === "/" : pathname.startsWith(href);
+/** Platform pages, shown under every module's navigation. */
+const PLATFORM_NAV: NavSection[] = [{ label: "Configuración", icon: Settings, href: "/configuracion" }];
+
+function isActive(pathname: string, item: NavItem) {
+  return item.exact ? pathname === item.href : pathname === item.href || pathname.startsWith(`${item.href}/`);
 }
 
 interface NavLinkProps {
@@ -37,7 +41,7 @@ function NavLink({ item, pathname, nested, icon: Icon }: NavLinkProps) {
       </span>
     );
   }
-  const active = isActive(pathname, item.href);
+  const active = isActive(pathname, item);
   return (
     <Link
       href={item.href}
@@ -49,34 +53,42 @@ function NavLink({ item, pathname, nested, icon: Icon }: NavLinkProps) {
   );
 }
 
-export function Sidebar() {
+function Sections({ sections, pathname }: { sections: NavSection[]; pathname: string }) {
+  return sections.map((section) => {
+    const Icon = section.icon;
+    if (section.href) {
+      return (
+        <NavLink
+          key={section.label}
+          pathname={pathname}
+          icon={Icon}
+          item={{ label: section.label, href: section.href, phase: section.phase, exact: section.exact }}
+        />
+      );
+    }
+    return (
+      <div key={section.label} className="space-y-0.5">
+        <p className="flex items-center gap-2 px-2 pb-1 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+          <Icon className="size-3.5" aria-hidden />
+          {section.label}
+        </p>
+        {section.items?.map((item) => (
+          <NavLink key={item.href} item={item} pathname={pathname} nested />
+        ))}
+      </div>
+    );
+  });
+}
+
+/** Navigation of the active module followed by the platform pages. */
+export function Sidebar({ sections }: { sections: NavSection[] }) {
   const pathname = usePathname();
   return (
     <nav aria-label="Navegación principal" className="flex flex-col gap-4 p-3">
-      {NAV_SECTIONS.map((section) => {
-        const Icon = section.icon;
-        if (section.href) {
-          return (
-            <NavLink
-              key={section.label}
-              pathname={pathname}
-              icon={Icon}
-              item={{ label: section.label, href: section.href, phase: section.phase }}
-            />
-          );
-        }
-        return (
-          <div key={section.label} className="space-y-0.5">
-            <p className="flex items-center gap-2 px-2 pb-1 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-              <Icon className="size-3.5" aria-hidden />
-              {section.label}
-            </p>
-            {section.items?.map((item) => (
-              <NavLink key={item.href} item={item} pathname={pathname} nested />
-            ))}
-          </div>
-        );
-      })}
+      <Sections sections={sections} pathname={pathname} />
+      <div className="border-t border-border pt-3">
+        <Sections sections={PLATFORM_NAV} pathname={pathname} />
+      </div>
     </nav>
   );
 }

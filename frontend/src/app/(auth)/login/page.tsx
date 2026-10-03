@@ -12,15 +12,12 @@ function LoginCard() {
   const next = safeNextPath(useSearchParams().get("next"));
   return (
     <div className="flex w-full max-w-sm flex-col items-center gap-8">
-      <div className="flex flex-col items-center gap-3">
-        <Wordmark height={40} priority />
-        <p className="text-xs font-medium tracking-[0.3em] text-muted-foreground uppercase">Inteligencia comercial</p>
-      </div>
+      <Wordmark height={40} priority />
       <Card className="w-full">
         <CardContent className="space-y-5 p-6">
           <div className="space-y-1">
             <h1 className="font-display text-lg font-semibold">Ingresar</h1>
-            <p className="text-sm text-muted-foreground">Usá tu cuenta para ver la información comercial.</p>
+            <p className="text-sm text-muted-foreground">Usá tu cuenta de DistriCom.</p>
           </div>
           <LoginForm onSuccess={() => router.replace(next)} />
         </CardContent>

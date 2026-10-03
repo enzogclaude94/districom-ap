@@ -1,12 +1,13 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { LogOut, Menu, X } from "lucide-react";
+import { Lock, LogOut, Menu, X } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 
 import { BrandIcon } from "@/components/brand/brand-icon";
 import { Wordmark } from "@/components/brand/wordmark";
+import { EmptyState } from "@/components/common/empty-state";
 import { ErrorState } from "@/components/common/error-state";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Badge } from "@/components/ui/badge";
@@ -15,10 +16,17 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { authApi, currentUserQueryKey } from "@/lib/api/auth";
 import { ApiError } from "@/lib/api/client";
 import { cn } from "@/lib/cn";
+import { isInModule, type AppModule } from "@/lib/modules";
 
 const ROLE_LABELS = { admin: "Administrador", viewer: "Lectura" } as const;
 
-export function AppShell({ children }: { children: ReactNode }) {
+interface AppShellProps {
+  /** Installed modules, passed by the app layout (shared code never imports modules). */
+  modules: AppModule[];
+  children: ReactNode;
+}
+
+export function AppShell({ modules, children }: AppShellProps) {
   const router = useRouter();
   const pathname = usePathname();
   const queryClient = useQueryClient();
@@ -65,6 +73,20 @@ export function AppShell({ children }: { children: ReactNode }) {
   }
 
   const user = me.data;
+  const accessible = modules.filter((module) => user.modules.some((access) => access.key === module.key));
+  // Platform pages (e.g. Configuración) keep the navigation of the user's first module.
+  const activeModule = accessible.find((module) => isInModule(pathname, module)) ?? accessible[0];
+  if (!activeModule) {
+    return (
+      <div className="mx-auto max-w-lg p-8">
+        <EmptyState
+          icon={Lock}
+          title="Sin módulos habilitados"
+          description="Pedile a un administrador que te dé acceso."
+        />
+      </div>
+    );
+  }
   return (
     <div className="flex min-h-screen">
       <aside
@@ -73,10 +95,11 @@ export function AppShell({ children }: { children: ReactNode }) {
           menuOpen ? "translate-x-0" : "-translate-x-full",
         )}
       >
-        <div className="flex h-14 items-center border-b border-border px-5">
-          <Wordmark height={22} priority />
+        <div className="flex h-16 flex-col justify-center gap-1 border-b border-border px-5">
+          <Wordmark height={20} priority />
+          <p className="text-xs font-medium text-muted-foreground">{activeModule.name}</p>
         </div>
-        <Sidebar />
+        <Sidebar sections={activeModule.nav} />
       </aside>
       {menuOpen && (
         <button

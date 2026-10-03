@@ -278,7 +278,7 @@ Origen: revisión arquitectónica del 2026-10-03 (`/mnt/project-files/districom/
 | 1 | P0‑2 DATA_MODEL v0.2: ownership/schemas, `employees` + `employee_functions`, identidad de clientes, imports y mappings extensibles, `suppliers` diferido | Documentación | Hecho |
 | 2 | P0‑3 Backend: `auth`, `audit`, `settings_store`, `sources` → `app/platform/`; convención `app/modules/<m>/` | Reorganización | Hecho |
 | 2 | P0‑4 Regla de dependencias en CI (import-linter + ESLint) | Preparación | Hecho |
-| 3 | P0‑5 Configuración por scope (`platform.*` / `commercial.*`), zona horaria solo env | Cambio visible menor | Pendiente |
-| 3 | P0‑6 Acceso por módulo, Etapa 0 (`require_module_access`, `modules` en `/auth/me`) | Preparación | Pendiente |
-| 3 | P0‑7 Frontend: Inteligencia Comercial bajo `/comercial`, shell de plataforma | Cambio visible menor | Pendiente |
+| 3 | P0‑5 Configuración por scope (`platform.*` / `commercial.*`), zona horaria solo env | Cambio visible menor | Hecho |
+| 3 | P0‑6 Acceso por módulo, Etapa 0 (`require_module_access`, `modules` en `/auth/me`) | Preparación | Hecho |
+| 3 | P0‑7 Frontend: Inteligencia Comercial bajo `/comercial`, shell de plataforma | Cambio visible menor | Hecho |
 
