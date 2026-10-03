@@ -1,7 +1,7 @@
 [project]
 name = "districom-backend"
 version = "0.1.0"
-description = "Districom commercial intelligence API"
+description = "DistriCom modular platform API"
 requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.20.0",

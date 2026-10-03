@@ -4,7 +4,7 @@ from app.core.config import get_settings
 from app.core.errors import AppError
 from app.platform.auth.deps import SESSION_COOKIE, AppSettings, CurrentUser, DbSession
 from app.platform.auth.rate_limit import LoginRateLimiter
-from app.platform.auth.schemas import LoginRequest, UserOut
+from app.platform.auth.schemas import LoginRequest, UserOut, user_out
 from app.platform.auth.service import authenticate, create_session, revoke_session
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -35,7 +35,7 @@ def login(body: LoginRequest, request: Request, response: Response, db: DbSessio
         samesite="lax",
         path="/",
     )
-    return UserOut.model_validate(user)
+    return user_out(user)
 
 
 @router.post("/logout", status_code=204)
@@ -50,4 +50,4 @@ def logout(request: Request, response: Response, db: DbSession) -> Response:
 
 @router.get("/me", response_model=UserOut)
 def me(user: CurrentUser) -> UserOut:
-    return UserOut.model_validate(user)
+    return user_out(user)
