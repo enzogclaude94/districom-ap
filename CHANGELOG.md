@@ -6,6 +6,8 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ### Changed — Plataforma modular (ADR 006)
 - **Documentación:** DistriCom pasa a describirse como plataforma modular (núcleo compartido + módulos) con Inteligencia Comercial como único módulo en desarrollo. ADR 006; `ARCHITECTURE.md` v0.2 (estructura `platform/` + `modules/`, regla de dependencias, excepción analítica acotada al módulo, patrón para agregar módulos, acceso por módulo en etapas); `CLAUDE.md`, `ROADMAP.md` (carril Plataforma), README.
+- **Backend reorganizado:** `auth`, `audit`, `settings_store` (ahora `settings`) y `sources` pasan a `app/platform/`; `app/modules/` aloja los módulos. Sin cambios de comportamiento, tablas ni endpoints.
+- **Límites verificados en CI:** `import-linter` (capas api → modules → platform → db → core e independencia entre módulos) y reglas `no-restricted-imports` de ESLint en el frontend.
 - **Modelo de datos (`DATA_MODEL.md` v0.2, aún no implementado):** ownership por plataforma/módulo y schema `commercial`; `employees` + `employee_functions` (identidad única y funciones con historia) reemplazan a `salespeople`; identidad de `customers` en plataforma con `commercial.customer_profiles` para segmentación y derivados; rutas documentadas como rutas de preventa; catálogo `suppliers` diferido; tipos de import y de mapping extensibles por registro en lugar de CHECK.
 
 ### Added

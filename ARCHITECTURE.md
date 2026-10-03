@@ -149,7 +149,7 @@ Dentro de un módulo, los paquetes **operacionales** (en Comercial: `imports/`, 
 | Acceso | `require_module_access("<key>", …)`; roles por módulo cuando existan (§8) |
 | Configuración | Parámetros `<key>.*` en `settings.py`; aparecen solos en Configuración |
 | Base de datos | Migración `<key>: create schema` con su schema y tablas |
-| Frontend | `src/modules/<key>/` (nav, api, features), `src/app/(app)/<ruta>/`, una entrada en `src/platform/modules.ts` |
+| Frontend | `src/modules/<key>/` (nav, api, features), `src/app/(app)/<ruta>/`, una entrada en `src/modules/registry.ts` |
 | Tests | `backend/tests/modules/<key>/`, tests de frontend y un E2E de humo; los contratos de dependencias lo cubren sin configuración extra |
 | Docs | Sección propia en ROADMAP y docs del módulo |
 
@@ -170,7 +170,7 @@ frontend/src/
 │       ├── gestion/{objetivos,incentivos,reuniones}
 │       ├── boca
 │       └── datos/{importaciones,calidad}
-├── platform/modules.ts           registro de módulos (key, nombre, ruta base, navegación)
+├── modules/registry.ts           registro de módulos (key, nombre, ruta base, navegación); lo usan solo las rutas de app/
 ├── modules/commercial/           navegación, API y features del módulo
 ├── features/                     features de plataforma (auth, settings)
 ├── components/ui/                design system (shadcn/ui)
@@ -181,7 +181,7 @@ frontend/src/
 ```
 
 - **Una sola aplicación:** mismo login, sesión, shell, branding y design system para todos los módulos. Cada módulo tiene su prefijo de URL y su navegación; el AppShell muestra la del módulo activo. El selector de módulos aparece solo cuando un usuario tiene acceso a más de uno.
-- **Dependencias:** `modules/<m>` puede importar `components/`, `lib/`, `platform/` y `features/` de plataforma; nunca otro `modules/<otro>`. `components/`, `lib/`, `platform/` y `features/` nunca importan de `modules/` (ESLint).
+- **Dependencias:** `modules/<m>` puede importar `components/`, `lib/` y `features/` de plataforma; nunca otro `modules/<otro>` ni el registro. `components/`, `lib/` y `features/` nunca importan de `modules/`. Las únicas raíces de composición son las rutas de `app/` y `modules/registry.ts`: el layout pasa el módulo activo al AppShell por props (ESLint `no-restricted-imports`).
 - **Filtros globales en la URL** (`?from=…&to=…&salesperson=…`) → enlaces compartibles y coherencia entre vistas.
 - **Tipos de API generados desde OpenAPI** (`openapi-typescript`), para que frontend y backend no diverjan.
 - Estados obligatorios en cada vista de datos: loading (skeleton), empty (con explicación), error (mensaje comprensible + `request_id`).

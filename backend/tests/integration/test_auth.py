@@ -5,9 +5,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.audit.models import AuditEvent
-from app.auth.deps import SESSION_COOKIE
-from app.auth.models import User, UserSession
+from app.platform.audit.models import AuditEvent
+from app.platform.auth.deps import SESSION_COOKIE
+from app.platform.auth.models import User, UserSession
 from tests.conftest import PASSWORD
 
 LOGIN = "/api/v1/auth/login"

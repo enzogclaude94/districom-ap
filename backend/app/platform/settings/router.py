@@ -3,10 +3,10 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from app.auth.deps import DbSession, require_role
-from app.auth.models import User
-from app.settings_store.defaults import DEFAULTS
-from app.settings_store.service import get_setting
+from app.platform.auth.deps import DbSession, require_role
+from app.platform.auth.models import User
+from app.platform.settings.defaults import DEFAULTS
+from app.platform.settings.service import get_setting
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 

@@ -1,11 +1,11 @@
 from fastapi import APIRouter, Request, Response
 
-from app.auth.deps import SESSION_COOKIE, AppSettings, CurrentUser, DbSession
-from app.auth.rate_limit import LoginRateLimiter
-from app.auth.schemas import LoginRequest, UserOut
-from app.auth.service import authenticate, create_session, revoke_session
 from app.core.config import get_settings
 from app.core.errors import AppError
+from app.platform.auth.deps import SESSION_COOKIE, AppSettings, CurrentUser, DbSession
+from app.platform.auth.rate_limit import LoginRateLimiter
+from app.platform.auth.schemas import LoginRequest, UserOut
+from app.platform.auth.service import authenticate, create_session, revoke_session
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 

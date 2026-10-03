@@ -2,8 +2,8 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.audit.models import AuditEvent
 from app.core.logging import request_id_var
+from app.platform.audit.models import AuditEvent
 
 
 def record_event(

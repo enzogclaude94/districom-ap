@@ -5,10 +5,10 @@ import getpass
 import logging
 import sys
 
-from app.auth.service import create_user
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.db.session import get_db
+from app.platform.auth.service import create_user
 
 logger = logging.getLogger("app.cli")
 

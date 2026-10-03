@@ -76,7 +76,7 @@ Nunca se modifica el schema fuera de Alembic. Política completa en [`CLAUDE.md 
 ```bash
 # Backend: usa TEST_DATABASE_URL (base descartable; se migra desde cero en cada corrida)
 cd backend
-uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run pytest
+uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run lint-imports && uv run pytest
 
 # Frontend
 cd frontend

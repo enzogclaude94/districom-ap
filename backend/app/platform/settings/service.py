@@ -3,8 +3,8 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.settings_store.defaults import DEFAULTS
-from app.settings_store.models import AppSetting
+from app.platform.settings.defaults import DEFAULTS
+from app.platform.settings.models import AppSetting
 
 
 def get_setting(db: Session, key: str) -> Any:

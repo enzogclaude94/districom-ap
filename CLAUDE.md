@@ -42,6 +42,7 @@ uv run alembic upgrade head
 uv run fastapi dev app/main.py                # :8000, docs en /api/docs
 uv run pytest                                 # unit + integración (usa TEST_DATABASE_URL)
 uv run ruff check . && uv run ruff format --check . && uv run mypy
+uv run lint-imports                           # límites plataforma/módulos (ARCHITECTURE §4.2)
 uv run alembic check                          # modelos == migraciones
 uv run python -m app.cli create-admin --email ... --name ...
 # Frontend
