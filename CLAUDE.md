@@ -7,7 +7,7 @@
 
 No se desarrollan otros módulos ni se anticipan sus modelos sin aprobación explícita de Enzo (ADR 006). Dentro de Rendiciones, cada fase crea solo lo suyo (ADR 007).
 
-Leer antes de cualquier tarea: este archivo → `PLAN.md` → `ROADMAP.md` → documentos del módulo afectado (Rendiciones: ADR 007 y `DATA_MODEL.md §13`).
+Leer antes de cualquier tarea: este archivo → `PLAN.md` → `ROADMAP.md` → documentos del módulo afectado (Rendiciones: ADR 007, ADR 008 y `DATA_MODEL.md §13`).
 
 ## 1. Arquitectura (resumen)
 
@@ -25,7 +25,7 @@ Principios no negociables:
 - **Reglas de negocio y métricas solo en el backend.** El frontend no calcula KPIs.
 - **Regla de dependencias** (verificada en CI): módulo → plataforma → core/db. La plataforma nunca importa de un módulo; un módulo nunca importa internals de otro (`ARCHITECTURE.md §4.2`).
 - **Única fuente de verdad:** personas (`employees` + `employee_functions`), clientes, localidades e identidades externas viven una sola vez en plataforma. Preventista, repartidor, etc. son **funciones** del empleado, no personas nuevas; cada módulo registra sus códigos de función en código.
-- **Dinero en Rendiciones:** todo movimiento de valores pasa por el servicio de operaciones del ledger (`settlements`): entradas inmutables, operaciones balanceadas e idempotentes, correcciones por reverso, ningún saldo editable (ADR 007).
+- **Dinero en Rendiciones:** todo movimiento de valores pasa por `app/modules/settlements/ledger/service.py`, la **única puerta** de escritura de `financial_operations` y `ledger_entries` (un test lo verifica): entradas inmutables, operaciones balanceadas e idempotentes, correcciones por reverso, ningún saldo editable, cajas nunca negativas (ADR 007, ADR 008).
 - **Toda métrica se define primero en `METRICS.md`** y se implementa una sola vez en `backend/app/modules/commercial/analytics/metrics/` con el mismo `id`.
 - **La analítica opera sobre el modelo canónico**, nunca sobre columnas de archivos. `analytics/` de un módulo puede cruzar directamente sus tablas y las de plataforma con SQL de **solo lectura**, nunca las de otro módulo; los paquetes operacionales mantienen su encapsulación (`ARCHITECTURE.md §4.3`).
 - **Nunca fusionar entidades por nombre** sin confirmación; usar `external_entity_mappings`.

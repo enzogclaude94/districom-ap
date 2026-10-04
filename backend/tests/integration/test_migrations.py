@@ -24,6 +24,17 @@ def _schemas(url: str) -> set[str]:
         engine.dispose()
 
 
+SETTLEMENTS_TABLES = {"accounts", "financial_operations", "ledger_entries"}
+
+
+def _settlements_tables(url: str) -> set[str]:
+    engine = create_engine(url)
+    try:
+        return set(inspect(engine).get_table_names(schema="settlements"))
+    finally:
+        engine.dispose()
+
+
 def _tables(url: str) -> set[str]:
     engine = create_engine(url)
     try:
@@ -44,6 +55,12 @@ def test_migrations_upgrade_downgrade_upgrade_from_scratch() -> None:
     command.upgrade(cfg, "head")
     assert _tables(url) >= EXPECTED_TABLES
     assert "settlements" in _schemas(url)
+    assert _settlements_tables(url) == SETTLEMENTS_TABLES
+
+    command.downgrade(cfg, "0004")
+    assert _settlements_tables(url) == set()
+    command.upgrade(cfg, "head")
+    assert _settlements_tables(url) == SETTLEMENTS_TABLES
 
     command.downgrade(cfg, "base")
     assert _tables(url) == set()
@@ -64,6 +81,22 @@ def test_source_systems_seeded(migrated_db: None) -> None:
         codes = set(conn.execute(text("SELECT code FROM source_systems")).scalars())
     engine.dispose()
     assert codes == {"AXUM", "STORE_SYS", "MANUAL", "DEMO"}
+
+
+def test_settlements_system_accounts_seeded(migrated_db: None) -> None:
+    url = alembic_config().get_main_option("sqlalchemy.url")
+    assert url
+    engine = create_engine(url)
+    with engine.connect() as conn:
+        rows = conn.execute(text("SELECT code, kind, allow_negative FROM settlements.accounts ORDER BY id")).all()
+    engine.dispose()
+    assert [tuple(row) for row in rows] == [
+        ("main_cash", "CASH_BOX", False),
+        ("change_cash", "CASH_BOX", False),
+        ("bank", "BANK", False),
+        ("opening_balance", "OPENING_BALANCE", True),
+        ("adjustment", "ADJUSTMENT", True),
+    ]
 
 
 def test_module_roles_migration_keeps_viewers_in_commercial() -> None:

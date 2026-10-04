@@ -393,14 +393,49 @@ Generador reproducible con seed fijo (`scripts/seed_demo_data.py --seed 42`) que
 
 ## 13. Rendiciones (`settlements`, R1–R8)
 
-Modelo **conceptual** aprobado (ADR 007, *Informe Inicial — DistriCom Rendiciones*). Cada tabla se diseña en detalle y se crea en su fase; nada de esta sección existe en R0. Convenciones de §1 (dinero `numeric(14,2)`, fechas de negocio `date`, enums `text + CHECK`).
+Modelo **conceptual** aprobado (ADR 007, *Informe Inicial — DistriCom Rendiciones*). Cada tabla se diseña en detalle y se crea en su fase: §13.1 existe desde R1‑1; el resto es conceptual. Convenciones de §1 (dinero `numeric(14,2)`, fechas de negocio `date`, enums `text + CHECK`).
 
-### 13.1 Ledger (R1)
-| Tabla | Rol |
-|---|---|
-| `accounts` | Dónde puede estar un valor: `CASH_BOX` (Caja principal, Caja de cambio), `BANK`, `CHEQUE_PORTFOLIO`, `PENDING_RECEIVABLE`, `EMPLOYEE` (cuenta interna por empleado), `OWNER_EQUITY` (por socio) y cuentas de resultado (`SETTLEMENT_INCOME`, `EXPENSE`, `PAYMENT_OUT`, `PAYROLL`). Pocas filas; no es un plan de cuentas. |
-| `financial_operations` | Un hecho económico: tipo, fecha de negocio, usuario, `client_request_id` UNIQUE, documento origen (`source_type`, `source_id`), `reverses_operation_id`. |
-| `ledger_entries` | Patas inmutables con signo: operación, cuenta, importe y referencias opcionales (`cheque_id`, `pending_id`, `employee_id`, `counterparty_id`). Suma cero por operación (constraint trigger diferido). |
+### 13.1 Ledger (R1, implementado en R1‑1 · migración `0005`)
+Decisiones en ADR 007 §8 y ADR 008. Signo de las entradas: positivo = el valor **entra** a la cuenta; negativo = **sale**. El saldo de una cuenta es siempre la suma de sus entradas; no hay columna de saldo.
+
+**`settlements.accounts`** — dónde puede estar un valor. Pocas filas; no es un plan de cuentas.
+| Columna | Tipo | Notas |
+|---|---|---|
+| id | bigint identity | PK |
+| code | varchar(40) null | Código estable de las cuentas del sistema (único si existe); NULL en las que crea un admin |
+| name | varchar(120) | Único |
+| kind | varchar(30) | CHECK: `CASH_BOX`, `BANK`, `OWNER_EQUITY`, `OPENING_BALANCE`, `ADJUSTMENT` (crece por fase) |
+| allow_negative | bool, default false | CHECK: una `CASH_BOX` nunca lo permite |
+| active | bool, default true | |
+| created_at / updated_at | timestamptz | |
+
+Una sola cuenta de cada tipo técnico (`OPENING_BALANCE`, `ADJUSTMENT`: índice único parcial). Sembradas por la migración: `main_cash` Caja principal y `change_cash` Caja de cambio (`CASH_BOX`, sin negativo), `bank` Banco (`BANK`, sin negativo hasta confirmar un descubierto real), `opening_balance` Saldo inicial y `adjustment` Ajustes (contrapartidas técnicas, con negativo). Las cuentas de aportes de cada socio (`OWNER_EQUITY`, con negativo) las crea un admin; en R6 se vinculan a `counterparties`.
+
+**`settlements.financial_operations`** — un hecho económico. Sin UPDATE ni DELETE (trigger).
+| Columna | Tipo | Notas |
+|---|---|---|
+| id | bigint identity | PK |
+| type | varchar(30) | CHECK: `OPENING_BALANCE`, `CASH_TRANSFER`, `BANK_DEPOSIT`, `BANK_WITHDRAWAL`, `OWNER_CONTRIBUTION`, `OWNER_WITHDRAWAL`, `ADJUSTMENT`, `REVERSAL` |
+| business_date | date | Indexada; nunca futura (servicio) |
+| description | text null | Obligatoria (no vacía) en `ADJUSTMENT` y `REVERSAL` (CHECK) |
+| client_request_id | uuid | UNIQUE (idempotencia) |
+| request_fingerprint | varchar(64) | SHA‑256 hex del comando (CHECK de formato) |
+| source_type / source_id | varchar(40) / bigint, null | Documento origen desde R2; ambos o ninguno (CHECK) |
+| reverses_operation_id | bigint null | FK a la operación revertida (RESTRICT); obligatorio sí y solo sí `type = REVERSAL` (CHECK); único (un reverso por operación) |
+| created_by | bigint | FK `users` (RESTRICT) |
+| created_at | timestamptz | |
+
+**`settlements.ledger_entries`** — las patas. Sin UPDATE ni DELETE (trigger).
+| Columna | Tipo | Notas |
+|---|---|---|
+| id | bigint identity | PK |
+| operation_id | bigint | FK `financial_operations` (RESTRICT), indexada |
+| account_id | bigint | FK `accounts` (RESTRICT); índice `(account_id, operation_id)` |
+| amount | numeric(14,2) | Con signo; CHECK `<> 0` |
+
+Las referencias opcionales de las patas (`cheque_id`, `pending_id`, `employee_id`, `counterparty_id`) se agregan en la fase que las usa.
+
+**Invariantes en la base:** al commit, cada operación tiene al menos dos patas que suman cero; al commit, ninguna cuenta con `allow_negative = false` queda en negativo, ni hoy ni al cierre de ningún día de negocio anterior afectado por una operación retroactiva (la verificación bloquea la cuenta). Ver ADR 008.
 
 ### 13.2 Rendiciones y conteo (R2, R7)
 `settlements` (tipo `DELIVERY`/`OUTLET`, fecha, `employee_id` o `outlet_id`, importe esperado, `expected_source` `MANUAL`/`STORE_SYS`, referencia externa, estado `OPEN`/`CLOSED`, `version`) · `settlement_items` (una tabla de líneas: `CASH`, `TRANSFER`, `CHEQUE`, `EXPENSE`, `PENDING`, con referencia a su detalle) · `cash_counts` + `cash_count_lines` (denominación × cantidad y "agregados") · `settlement_differences` + `difference_allocations` (faltante/sobrante histórico y su reparto entre empleados) · `outlets` (bocas de expendio, R7).
