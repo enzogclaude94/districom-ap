@@ -49,6 +49,7 @@ uv run ruff check . && uv run ruff format --check . && uv run mypy
 uv run lint-imports                           # límites plataforma/módulos (ARCHITECTURE §4.2)
 uv run alembic check                          # modelos == migraciones
 uv run python -m app.cli create-admin --email ... --name ...
+uv run python -m app.cli grant-module-role --email ... --module settlements --role operator
 # Frontend
 cd frontend
 pnpm install

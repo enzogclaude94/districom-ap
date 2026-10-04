@@ -28,6 +28,9 @@ cd frontend && pnpm e2e
 - `test_employees_api.py`: alta, edición auditada con antes/después sin PII, búsqueda y filtros, asignación y cierre de funciones con historia, solapamiento rechazado (servicio y base), baja lógica que cierra funciones, reactivación, permisos de plataforma.
 - `test_employee_functions_registry.py`: registro idempotente y prefijo obligatorio del módulo.
 - Frontend: formulario, lista y funciones de empleados. E2E: alta → función → baja (desktop y móvil).
+- `test_module_access.py` / `test_module_roles.py`: admin de plataforma en todos los módulos, roles ordenados, permisos sin rol (403), grant/cambio/revocación auditados, CLI, restricciones de base, configuración visible por módulo.
+- `test_migrations.py`: schema `settlements` creado y eliminado; la migración de roles conserva el acceso de los `viewer` a Comercial.
+- Frontend: navegación de Rendiciones, cambio de módulo, bloqueo de rutas sin rol, selector. E2E: selector → Rendiciones (logo cargado) → Comercial; usuario solo-Comercial bloqueado en `/rendiciones` y 403 en la API.
 
 ## Fase 0
 - `test_migrations.py`: upgrade → downgrade → upgrade desde base vacía, una sola head, `source_systems` sembrado.

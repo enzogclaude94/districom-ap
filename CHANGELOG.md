@@ -4,6 +4,15 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Added — Roles por módulo y esqueleto de Rendiciones (R0, PR 3)
+- **Roles por módulo (Etapa 1):** migración `0003` con `user_module_roles` (`viewer < operator < admin`, único por usuario y módulo); los `viewer` existentes conservan `viewer` en Comercial. El administrador de plataforma es `admin` en todos los módulos; los demás usuarios ven solo los módulos asignados. `require_module_access` admite `operator`. CLI `grant-module-role` / `revoke-module-role`, auditados con antes/después.
+- **Módulo Rendiciones (`settlements`):** registrado en backend y frontend; migración `0004` crea el schema `settlements` vacío; `GET /api/v1/settlements/status` (rol del usuario, 403 sin acceso); parámetro `settlements.pending_alert_hours` (24); función de empleado `settlements.delivery_driver` (Repartidor). Alembic compara todos los schemas (`include_schemas`).
+- **Frontend:** `/rendiciones` con el logo oficial (versión web recortada, fondo transparente, `frontend/public/brand/districom-rendiciones.png`) y navegación por fases R1–R8 deshabilitada; home de plataforma con selector de módulos (con un solo módulo redirige); menú para cambiar de módulo bajo el wordmark; pantalla "sin acceso" para rutas de módulos sin rol.
+- **Tests:** acceso por rol y módulo, migración de roles, CLI, configuración por módulo, selector y bloqueo de rutas; E2E de selector, cambio de módulo y usuario sin acceso a Rendiciones.
+
+### Changed
+- La home `/` deja de redirigir siempre a Comercial: muestra los módulos del usuario cuando tiene más de uno.
+
 ### Added — Empleados en plataforma (R0, PR 2)
 - **Base de datos:** migración `0002` (`platform: employees and employee functions`): `employees` (identidad única, baja lógica, IDs externos con unicidad parcial) y `employee_functions` (períodos con vigencia; exclusion constraint que impide solapar la misma función y CHECK de rango).
 - **Backend:** paquete `app/platform/parties/` con servicio, API `/api/v1/employees` (listar con búsqueda, estado, función y paginación; alta; edición; baja lógica que cierra funciones vigentes; reactivación; asignar y cerrar funciones; códigos de función) solo para administradores de plataforma. Registro de funciones por módulo vía `ModuleSpec.employee_functions` (Comercial registra `commercial.salesperson`). `has_function()` para que los módulos validen funciones por fecha.

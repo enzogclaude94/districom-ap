@@ -31,7 +31,7 @@ Logo oficial actual del módulo Rendiciones, entregado por Enzo el 2026-10-04 (A
 | Asset | Archivo | Uso |
 |---|---|---|
 | Original (referencia) | `docs/brand/districom-rendiciones-original.png` (2172 × 724, fondo blanco) | Fuente de verdad visual. No se usa en la app. |
-| Versión web | `frontend/public/brand/districom-rendiciones.png` (R0) | Recorte del original con fondo transparente, optimizado. Mismo arte. |
+| Versión web | `frontend/public/brand/districom-rendiciones.png` (880 × 240) | Recorte del original, fondo transparente por "color a alfa" contra blanco (sobre blanco reproduce el original: diferencia máxima 5/255, solo ruido de fondo), redimensionado para web. Mismo arte, colores y proporciones. |
 
 Reglas:
 - **El PNG entregado manda.** No se modifican colores, tipografía, proporciones ni composición, y no se adapta al wordmark de plataforma (sus azules y su peso difieren a propósito; la unificación del branding general queda fuera de alcance).
