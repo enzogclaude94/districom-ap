@@ -291,8 +291,20 @@ Origen: *Informe Inicial — DistriCom Rendiciones* (2026-10-04), aprobado por E
 
 | PR | Contenido | Estado |
 |---|---|---|
-| 1 | Documentación: ADR 007, `CLAUDE.md`, `ARCHITECTURE.md`, `ROADMAP.md`, `DATA_MODEL.md`, `docs/BRAND.md`, PL‑1 en DONE | En revisión |
-| 2 | Plataforma: `employees` + `employee_functions`, servicio, API, pantalla de administración, registro de funciones por módulo | En revisión |
-| 3 | Plataforma + módulo: `user_module_roles`, CLI, `require_module_access`; esqueleto `settlements`; `/rendiciones` con logo; selector de módulos | En revisión |
+| 1 | Documentación: ADR 007, `CLAUDE.md`, `ARCHITECTURE.md`, `ROADMAP.md`, `DATA_MODEL.md`, `docs/BRAND.md`, PL‑1 en DONE | Hecho (#4) |
+| 2 | Plataforma: `employees` + `employee_functions`, servicio, API, pantalla de administración, registro de funciones por módulo | Hecho (#5) |
+| 3 | Plataforma + módulo: `user_module_roles`, CLI, `require_module_access`; esqueleto `settlements`; `/rendiciones` con logo; selector de módulos | Hecho (#6) |
 
-Límites: ninguna tabla de negocio de Rendiciones; no se avanza a R1 sin aprobación de Enzo.
+R0 aprobada por Enzo el 2026-10-04; `main` en verde tras el merge (7bf9f75).
+
+## 14. Rendiciones — R1 (ledger y cajas)
+
+Aprobada por Enzo el 2026-10-04 con sus respuestas P1–P3, D4, D5 y dos ajustes técnicos (ADR 008). Alcance y criterios en `ROADMAP.md`.
+
+| PR | Contenido | Estado |
+|---|---|---|
+| R1‑1 | Núcleo del ledger: migración `0005` (`accounts`, `financial_operations`, `ledger_entries`, triggers, cuentas base), servicio de operaciones (reglas por tipo, idempotencia con huella, reversos, bloqueo contra saldos negativos), lectura de saldos y movimientos, guardia de única puerta, tests | En revisión |
+| R1‑2 | API de cajas: casos de uso, endpoints, alta de cuentas de socios | Espera aprobación de R1‑1 |
+| R1‑3 | Pantalla Cajas, E2E | Espera aprobación de R1‑2 |
+
+Límites: sin rendiciones, cheques, pendientes ni denominaciones en cajas; no se avanza a R2 sin aprobación de Enzo.

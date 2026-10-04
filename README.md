@@ -5,7 +5,7 @@ Plataforma web modular para una distribuidora de bebidas: un núcleo compartido 
 - **Inteligencia Comercial** (`/comercial`) analiza datos de **AXUM** (preventa) y **STORE SYS** (facturación) para responder qué está pasando, dónde se pierden oportunidades y qué acción concreta tomar. No reemplaza a esos sistemas: es una capa de análisis.
 - **Rendiciones** (`/rendiciones`) administra las rendiciones de reparto y de boca de expendio, cajas, cheques, pendientes, gastos, combustible, pagos y liquidación semanal, con trazabilidad de dónde terminó cada valor (ADR 007).
 
-**Estado:** Fase 0 DONE; plataforma modular DONE (ADR 006); Comercial Fase 1 en preparación; Rendiciones R0 (habilitación) en curso. Ver [`PLAN.md`](PLAN.md) y [`ROADMAP.md`](ROADMAP.md).
+**Estado:** Fase 0 DONE; plataforma modular DONE (ADR 006); Comercial Fase 1 en preparación; Rendiciones R0 DONE, R1 (ledger y cajas) en curso. Ver [`PLAN.md`](PLAN.md) y [`ROADMAP.md`](ROADMAP.md).
 
 ## Arquitectura
 
@@ -13,7 +13,7 @@ Plataforma web modular para una distribuidora de bebidas: un núcleo compartido 
 Navegador → Next.js (frontend, :3000) → /api/* → FastAPI (backend, :8000) → PostgreSQL
 ```
 
-Monorepo con monolito modular: una sola aplicación con un núcleo de **plataforma** (`backend/app/platform/`) y **módulos** (`backend/app/modules/<módulo>/`, `frontend/src/modules/<módulo>/`), una base PostgreSQL con un schema por módulo. Detalle en [`ARCHITECTURE.md`](ARCHITECTURE.md); decisiones en [`docs/ADR/`](docs/ADR) (ver ADR 006 y 007).
+Monorepo con monolito modular: una sola aplicación con un núcleo de **plataforma** (`backend/app/platform/`) y **módulos** (`backend/app/modules/<módulo>/`, `frontend/src/modules/<módulo>/`), una base PostgreSQL con un schema por módulo. Detalle en [`ARCHITECTURE.md`](ARCHITECTURE.md); decisiones en [`docs/ADR/`](docs/ADR) (ver ADR 006, 007 y 008).
 
 | Carpeta | Contenido |
 |---|---|

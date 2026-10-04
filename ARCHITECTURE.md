@@ -10,7 +10,7 @@
 |---|---|---|
 | **Plataforma (DistriCom Core)** | En construcción | Usuarios, sesiones, roles por módulo, configuración, auditoría, sistemas fuente, identidades compartidas (empleados y funciones; clientes y localidades en Fase 1), framework de importación. |
 | **Inteligencia Comercial** (`commercial`, `/comercial`) | En desarrollo | Capa de **inteligencia comercial** sobre AXUM y STORE SYS. Alcance en `ROADMAP.md`. |
-| **Rendiciones** (`settlements`, `/rendiciones`) | En desarrollo (R0) | Rendiciones de reparto y boca de expendio, cajas, cheques, pendientes, gastos, combustible, pagos y liquidación semanal, con ledger propio (ADR 007, §4.6). |
+| **Rendiciones** (`settlements`, `/rendiciones`) | En desarrollo (R1) | Rendiciones de reparto y boca de expendio, cajas, cheques, pendientes, gastos, combustible, pagos y liquidación semanal, con ledger propio (ADR 007, §4.6). |
 | Otros módulos | Sin desarrollar | Se agregan con el patrón de §4.5. Nada de su modelo se anticipa. |
 
 Sistemas fuente:
@@ -165,11 +165,14 @@ No hay carga dinámica, descubrimiento automático, plugins ni feature flags por
 
 ### 4.6 Rendiciones: ledger de valores
 
-Fuente de verdad de dónde está cada valor del módulo (cajas, banco, cartera de cheques, pendientes de cobro, cuentas internas de empleados, aportes de socios). Detalle en ADR 007 y `DATA_MODEL.md §13`.
+Fuente de verdad de dónde está cada valor del módulo (cajas, banco, cartera de cheques, pendientes de cobro, cuentas internas de empleados, aportes de socios). Detalle en ADR 007, ADR 008 y `DATA_MODEL.md §13`.
 
 - `accounts` (pocas filas: lugares y conceptos, no un plan de cuentas) · `financial_operations` (un hecho económico, con su documento origen) · `ledger_entries` (patas inmutables con signo).
-- **Un solo escritor:** el servicio de operaciones del módulo. Los documentos (rendición, pago, pendiente…) lo invocan en su misma transacción; ningún otro código inserta entradas.
-- **Invariantes en la base:** suma cero por operación (constraint trigger diferido), `client_request_id` único, unicidad del documento origen para operaciones que existen una sola vez, un cheque sale de cartera una sola vez.
+- **Un solo escritor:** `ledger/service.py` (`post_operation`, `reverse_operation`). Los documentos (rendición, pago, pendiente…) lo invocan en su misma transacción, que confirma quien llama; ningún otro código importa los modelos del ledger ni escribe sus tablas (`tests/modules/settlements/test_ledger_single_writer.py`).
+- **Reglas por tipo de operación** (`ledger/rules.py`): rol mínimo y forma de las patas. Ajustes y reversos exigen `admin` y motivo.
+- **Idempotencia:** `client_request_id` + huella SHA‑256 del comando; el mismo id con otro contenido es `409 idempotency_conflict` (ADR 008).
+- **Concurrencia:** las cuentas que no admiten negativo y pierden valor se bloquean (`FOR NO KEY UPDATE`, en orden de id) antes de validar el saldo; la base vuelve a verificarlo al commit.
+- **Invariantes en la base:** suma cero y al menos dos patas por operación (constraint trigger diferido), tablas append-only (trigger), sin saldo negativo donde no se permite (constraint trigger diferido con bloqueo), `client_request_id` único, un reverso por operación. Desde su fase: unicidad del documento origen para operaciones que existen una sola vez (R2), un cheque sale de cartera una sola vez (R4).
 - **Correcciones por reverso:** nunca UPDATE ni DELETE de entradas. Reabrir una rendición revierte su cierre.
 - **Saldos derivados:** suma de entradas por cuenta. Sin tablas de saldo mantenidas a mano; si algún día hace falta performance, un saldo materializado se agrega sin cambiar el modelo.
 - Sin event sourcing, bus de eventos ni contabilidad formal.
