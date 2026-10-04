@@ -395,7 +395,7 @@ Generador reproducible con seed fijo (`scripts/seed_demo_data.py --seed 42`) que
 
 Modelo **conceptual** aprobado (ADR 007, *Informe Inicial — DistriCom Rendiciones*). Cada tabla se diseña en detalle y se crea en su fase: §13.1 existe desde R1‑1; el resto es conceptual. Convenciones de §1 (dinero `numeric(14,2)`, fechas de negocio `date`, enums `text + CHECK`).
 
-### 13.1 Ledger (R1, implementado en R1‑1 · migración `0005`)
+### 13.1 Ledger (R1, implementado en R1‑1 y R1‑2 · migraciones `0005` y `0006`)
 Decisiones en ADR 007 §8 y ADR 008. Signo de las entradas: positivo = el valor **entra** a la cuenta; negativo = **sale**. El saldo de una cuenta es siempre la suma de sus entradas; no hay columna de saldo.
 
 **`settlements.accounts`** — dónde puede estar un valor. Pocas filas; no es un plan de cuentas.
@@ -404,12 +404,13 @@ Decisiones en ADR 007 §8 y ADR 008. Signo de las entradas: positivo = el valor 
 | id | bigint identity | PK |
 | code | varchar(40) null | Código estable de las cuentas del sistema (único si existe); NULL en las que crea un admin |
 | name | varchar(120) | Único |
+| name_key | varchar(120) | Único (`0006`). El nombre en minúsculas, sin acentos y con un solo espacio: evita dos cuentas equivalentes para el mismo socio, activas o de baja |
 | kind | varchar(30) | CHECK: `CASH_BOX`, `BANK`, `OWNER_EQUITY`, `OPENING_BALANCE`, `ADJUSTMENT` (crece por fase) |
 | allow_negative | bool, default false | CHECK: una `CASH_BOX` nunca lo permite |
 | active | bool, default true | |
 | created_at / updated_at | timestamptz | |
 
-Una sola cuenta de cada tipo técnico (`OPENING_BALANCE`, `ADJUSTMENT`: índice único parcial). Sembradas por la migración: `main_cash` Caja principal y `change_cash` Caja de cambio (`CASH_BOX`, sin negativo), `bank` Banco (`BANK`, sin negativo hasta confirmar un descubierto real), `opening_balance` Saldo inicial y `adjustment` Ajustes (contrapartidas técnicas, con negativo). Las cuentas de aportes de cada socio (`OWNER_EQUITY`, con negativo) las crea un admin; en R6 se vinculan a `counterparties`.
+Una sola cuenta de cada tipo técnico (`OPENING_BALANCE`, `ADJUSTMENT`: índice único parcial). Sembradas por la migración: `main_cash` Caja principal y `change_cash` Caja de cambio (`CASH_BOX`, sin negativo), `bank` Banco (`BANK`, sin negativo hasta confirmar un descubierto real), `opening_balance` Saldo inicial y `adjustment` Ajustes (contrapartidas técnicas, con negativo). Las cuentas de aportes de cada socio (`OWNER_EQUITY`, con negativo) las crea un admin desde la API (`POST /api/v1/settlements/accounts`); en R6 se vinculan a `counterparties`.
 
 **`settlements.financial_operations`** — un hecho económico. Sin UPDATE ni DELETE (trigger).
 | Columna | Tipo | Notas |

@@ -1,7 +1,7 @@
 """Router of Rendiciones, mounted at /api/v1/settlements.
 
-Every endpoint added here must depend on `require_module_access("settlements", ...)`. R0 only
-exposes the module status; business endpoints arrive from R1 on (ROADMAP.md).
+Every endpoint added here must depend on `require_module_access("settlements", ...)`. Cajas (R1)
+lives in `cash/router.py`; later phases add their own routers (ROADMAP.md).
 """
 
 from typing import Annotated
@@ -9,6 +9,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
+from app.modules.settlements.cash.router import router as cash_router
 from app.platform.auth.access import module_role, require_module_access
 from app.platform.auth.models import User
 
@@ -28,3 +29,6 @@ def status(user: ModuleViewer) -> ModuleStatusOut:
     role = module_role(user, "settlements")
     assert role is not None  # guaranteed by require_module_access
     return ModuleStatusOut(module="settlements", role=role)
+
+
+router.include_router(cash_router)

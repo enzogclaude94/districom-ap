@@ -97,7 +97,8 @@ backend/app/
 │       ├── api.py         router montado en /api/v1/settlements
 │       ├── settings.py    parámetros settlements.*
 │       ├── ledger/        [R1] accounts, financial_operations, ledger_entries y el servicio de operaciones
-│       └── cash/ settlements/ pending/ cheques/ expenses/ payments/ payroll/   [R1–R8]
+│       ├── cash/          [R1] API de cajas: schemas, casos de uso y endpoints sobre el servicio del ledger
+│       └── settlements/ pending/ cheques/ expenses/ payments/ payroll/   [R2–R8]
 └── api/v1/router.py       raíz de composición: monta routers de plataforma y de cada módulo
 ```
 
@@ -174,6 +175,7 @@ Fuente de verdad de dónde está cada valor del módulo (cajas, banco, cartera d
 - **Concurrencia:** las cuentas que no admiten negativo y pierden valor se bloquean (`FOR NO KEY UPDATE`, en orden de id) antes de validar el saldo, que debe quedar ≥ 0 hoy y al cierre de cada día desde la fecha de la operación (operaciones retroactivas); la base vuelve a verificarlo al commit.
 - **Invariantes en la base:** suma cero y al menos dos patas por operación (constraint trigger diferido), tablas append-only (trigger), sin saldo negativo donde no se permite (constraint trigger diferido con bloqueo), `client_request_id` único, un reverso por operación. Desde su fase: unicidad del documento origen para operaciones que existen una sola vez (R2), un cheque sale de cartera una sola vez (R4).
 - **Correcciones por reverso:** nunca UPDATE ni DELETE de entradas. Reabrir una rendición revierte su cierre.
+- **API de cajas** (`cash/`, R1‑2): un caso de uso por operación (traspaso, depósito, extracción, saldo inicial, aporte, devolución, ajuste, reverso, alta de cuenta de socio) que arma las patas y llama al servicio; el router exige el rol del módulo (`viewer` lee, `operator` mueve entre cajas y banco, `admin` el resto) y responde `201`/`200` según la operación sea nueva o un reintento. Un rechazo de la base al confirmar se traduce a `409 invalid_ledger_operation` sin detalles internos.
 - **Saldos derivados:** suma de entradas por cuenta. Sin tablas de saldo mantenidas a mano; si algún día hace falta performance, un saldo materializado se agrega sin cambiar el modelo.
 - Sin event sourcing, bus de eventos ni contabilidad formal.
 

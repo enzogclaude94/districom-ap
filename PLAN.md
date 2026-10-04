@@ -303,8 +303,8 @@ Aprobada por Enzo el 2026-10-04 con sus respuestas P1–P3, D4, D5 y dos ajustes
 
 | PR | Contenido | Estado |
 |---|---|---|
-| R1‑1 | Núcleo del ledger: migración `0005` (`accounts`, `financial_operations`, `ledger_entries`, triggers, cuentas base), servicio de operaciones (reglas por tipo, idempotencia con huella, reversos, bloqueo contra saldos negativos), lectura de saldos y movimientos, guardia de única puerta, tests | En revisión |
-| R1‑2 | API de cajas: casos de uso, endpoints, alta de cuentas de socios | Espera aprobación de R1‑1 |
+| R1‑1 | Núcleo del ledger: migración `0005` (`accounts`, `financial_operations`, `ledger_entries`, triggers, cuentas base), servicio de operaciones (reglas por tipo, idempotencia con huella, reversos, bloqueo contra saldos negativos), lectura de saldos y movimientos, guardia de única puerta, tests | Aprobado (saldo histórico agregado) |
+| R1‑2 | API de cajas: casos de uso, endpoints, alta de cuentas de socios sin duplicados (migración `0006`) | En revisión |
 | R1‑3 | Pantalla Cajas, E2E | Espera aprobación de R1‑2 |
 
 Límites: sin rendiciones, cheques, pendientes ni denominaciones en cajas; no se avanza a R2 sin aprobación de Enzo.

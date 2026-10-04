@@ -4,6 +4,14 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Added — API de cajas de Rendiciones (R1‑2)
+- **Endpoints** bajo `/api/v1/settlements`: lectura de cuentas con saldo (a hoy o a una fecha), cuenta, movimientos paginados con filtro de fechas y detalle de operación con sus patas (`viewer`); traspaso entre cajas, depósito y extracción bancaria (`operator`); saldo inicial, aporte y devolución a socio, ajuste con motivo, reverso y alta de cuenta de socio (`admin`).
+- **Idempotencia por HTTP:** cada operación lleva `client_request_id` (UUID); `201` cuando se registra, `200` con la misma operación al reintentar, `409 idempotency_conflict` si el id llega con otro contenido.
+- **Errores** con el contrato estándar (`insufficient_funds`, `account_inactive`, `operation_already_reversed`, `invalid_legs`, `account_name_taken`, `forbidden`…). Si la base rechaza una operación al confirmarla, la API responde `409 invalid_ledger_operation` sin detalles de PostgreSQL.
+- **Cuentas de socio:** migración `0006` (`settlements: account name key`) agrega `name_key`, el nombre sin mayúsculas, acentos ni espacios repetidos, único entre todas las cuentas (activas o de baja): «Juan Pérez» y «juan  perez» no pueden coexistir. Alta auditada (`settlements.account.created`).
+- **Importes** en las respuestas siempre como texto con dos decimales (`"1500.00"`).
+- **Tests:** permisos por endpoint y rol, idempotencia por HTTP, errores y validaciones, saldo insuficiente actual e histórico, cuentas de socio duplicadas, backfill de `name_key`.
+
 ### Added — Núcleo del ledger de Rendiciones (R1‑1)
 - **Base de datos:** migración `0005` (`settlements: ledger core`) con `settlements.accounts`, `financial_operations` y `ledger_entries`, y las cuentas del sistema Caja principal, Caja de cambio, Banco (las tres sin saldo negativo), Saldo inicial y Ajustes. La base garantiza al commit que cada operación tiene al menos dos patas que suman cero y que ninguna cuenta sin negativo permitido queda en rojo, ni hoy ni al cierre de un día pasado afectado por una operación retroactiva; operaciones y patas no admiten UPDATE ni DELETE; una caja no puede habilitar negativo; ajustes y reversos exigen motivo; una operación se revierte una sola vez.
 - **Servicio de operaciones** (`app/modules/settlements/ledger/service.py`), única puerta de escritura del ledger: `post_operation` y `reverse_operation` en la transacción de quien llama, con rol mínimo y forma de patas por tipo (`ledger/rules.py`), idempotencia por `client_request_id` + huella SHA‑256 del comando (`409 idempotency_conflict` si el mismo id llega con otro contenido), bloqueo `FOR NO KEY UPDATE` en orden de id de las cuentas que pierden valor (`409 insufficient_funds`), auditoría `settlements.operation.posted` / `.reversed` con `{action, before, after}`. Lectura: saldos por cuenta (a hoy o a una fecha de negocio) y movimientos paginados con su reverso.
