@@ -36,6 +36,13 @@ TRUNCATED_TABLES = (
     "user_module_roles",
     "settlements.ledger_entries",
     "settlements.financial_operations",
+    "settlements.transfer_status_events",
+    "settlements.settlement_transfers",
+    "settlements.cash_additions",
+    "settlements.cash_count_lines",
+    "settlements.expenses",
+    "settlements.expense_categories",
+    "settlements.settlements",
 )
 # Rendiciones accounts seeded by migration 0005; tests may add others, which are removed afterwards.
 SEEDED_ACCOUNTS = ("main_cash", "change_cash", "bank", "opening_balance", "adjustment")

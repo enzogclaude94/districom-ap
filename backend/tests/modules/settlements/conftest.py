@@ -1,10 +1,12 @@
-"""Fixtures for the ledger of Rendiciones: seeded accounts, actors per role and posting helpers."""
+"""Fixtures of Rendiciones: seeded accounts, actors per role, posting helpers, API logins and drivers."""
 
 from collections.abc import Callable
+from datetime import date
 from decimal import Decimal
 from uuid import uuid4
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -12,6 +14,8 @@ import app.api.v1.router  # noqa: F401  (installs the modules, as the app does)
 from app.modules.settlements.ledger.models import Account
 from app.modules.settlements.ledger.service import Leg, Posted, post_operation
 from app.platform.auth.models import User
+from app.platform.parties.models import Employee, EmployeeFunction
+from tests.conftest import PASSWORD
 
 
 @pytest.fixture
@@ -70,3 +74,46 @@ def post(db: Session, actor) -> Callable[..., Posted]:  # type: ignore[no-untype
         return posted
 
     return _post
+
+
+@pytest.fixture
+def as_role(client: TestClient, make_user, grant) -> Callable[[str], TestClient]:  # type: ignore[no-untyped-def]
+    """Log in as the platform admin ("admin") or as a user with that role in Rendiciones only."""
+    created: set[str] = set()
+
+    def _as(role: str) -> TestClient:
+        email = f"{role}@districom.test"
+        if role not in created:
+            make_user(email=email, role="admin" if role == "admin" else "viewer")
+            if role in ("viewer", "operator"):
+                grant(role, "settlements", role)
+            created.add(role)
+        response = client.post("/api/v1/auth/login", json={"email": email, "password": PASSWORD})
+        assert response.status_code == 200, response.text
+        return client
+
+    return _as
+
+
+@pytest.fixture
+def driver(db: Session) -> Callable[..., int]:
+    """An employee holding `settlements.delivery_driver` from `valid_from` (default 2026-01-01) on."""
+
+    def _driver(
+        name: str, valid_from: date = date(2026, 1, 1), valid_to: date | None = None, function: str | None = None
+    ) -> int:
+        employee = Employee(full_name=name)
+        db.add(employee)
+        db.flush()
+        db.add(
+            EmployeeFunction(
+                employee_id=employee.id,
+                function_code=function or "settlements.delivery_driver",
+                valid_from=valid_from,
+                valid_to=valid_to,
+            )
+        )
+        db.commit()
+        return employee.id
+
+    return _driver

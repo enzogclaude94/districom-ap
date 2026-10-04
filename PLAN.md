@@ -297,7 +297,7 @@ Origen: *Informe Inicial — DistriCom Rendiciones* (2026-10-04), aprobado por E
 
 R0 aprobada por Enzo el 2026-10-04; `main` en verde tras el merge (7bf9f75).
 
-## 14. Rendiciones — R1 (ledger y cajas)
+## 14. Rendiciones — R1 (ledger y cajas) · DONE
 
 Aprobada por Enzo el 2026-10-04 con sus respuestas P1–P3, D4, D5 y dos ajustes técnicos (ADR 008). Alcance y criterios en `ROADMAP.md`.
 
@@ -305,6 +305,20 @@ Aprobada por Enzo el 2026-10-04 con sus respuestas P1–P3, D4, D5 y dos ajustes
 |---|---|---|
 | R1‑1 | Núcleo del ledger: migración `0005` (`accounts`, `financial_operations`, `ledger_entries`, triggers, cuentas base), servicio de operaciones (reglas por tipo, idempotencia con huella, reversos, bloqueo contra saldos negativos), lectura de saldos y movimientos, guardia de única puerta, tests | Aprobado (saldo histórico agregado) |
 | R1‑2 | API de cajas: casos de uso, endpoints, alta de cuentas de socios sin duplicados (migración `0006`) | Aprobado |
-| R1‑3 | Pantalla Cajas (`/rendiciones/cajas`, detalle de operación, acciones por rol), tests frontend, E2E | En revisión |
+| R1‑3 | Pantalla Cajas (`/rendiciones/cajas`, detalle de operación, acciones por rol), tests frontend, E2E; operaciones inciertas guardadas para reintentar con el mismo id, `Dialog` con foco atrapado, rol efectivo del módulo | Aprobado |
 
-Límites: sin rendiciones, cheques, pendientes ni denominaciones en cajas; no se avanza a R2 sin aprobación de Enzo.
+Límites: sin rendiciones, cheques, pendientes ni denominaciones en cajas.
+
+**Cierre:** Enzo aprobó R1 el 2026-10-04. PRs #7, #8 y #9 mergeados en orden; CI de `main` en verde en `f427a9b`. R1 está **DONE**.
+
+## 15. Rendiciones — R2 (rendición de reparto)
+
+Propuesta aprobada por Enzo el 2026-10-04 con sus decisiones R2‑D1 a R2‑D7 y los ajustes R2‑P1 a R2‑P5 (reapertura sin tocar el ledger hasta el nuevo cierre, sobrante o faltante a la empresa solo admin con motivo, transferencias `DECLARED` que no justifican y bloquean el cierre, denominaciones de $100 o más sin monedas, verificación por operator y corrección por admin con motivo). Alcance y criterios en `ROADMAP.md`.
+
+| PR | Contenido | Estado |
+|---|---|---|
+| R2‑1 | Rendición y carga, sin ledger: migración `0007` (`settlements`, `cash_count_lines`, `cash_additions`, `settlement_transfers`, `transfer_status_events`, `expense_categories`, `expenses`, triggers), secuencia por repartidor y día, alta idempotente, denominaciones configurables, transferencias con verificación, gastos, tablero calculado, API, tests | En revisión |
+| R2‑2 | Cierre y reapertura hacia el ledger: cuentas nuevas, diferencias y asignaciones, `replace_operation` | Espera aprobación |
+| R2‑3 | Pantallas y E2E | Espera aprobación |
+
+Cada PR espera la aprobación de Enzo antes del siguiente.

@@ -393,7 +393,7 @@ Generador reproducible con seed fijo (`scripts/seed_demo_data.py --seed 42`) que
 
 ## 13. Rendiciones (`settlements`, R1–R8)
 
-Modelo **conceptual** aprobado (ADR 007, *Informe Inicial — DistriCom Rendiciones*). Cada tabla se diseña en detalle y se crea en su fase: §13.1 existe desde R1‑1; el resto es conceptual. Convenciones de §1 (dinero `numeric(14,2)`, fechas de negocio `date`, enums `text + CHECK`).
+Modelo **conceptual** aprobado (ADR 007, *Informe Inicial — DistriCom Rendiciones*). Cada tabla se diseña en detalle y se crea en su fase: §13.1 existe desde R1‑1 y §13.2 desde R2‑1; el resto es conceptual. Convenciones de §1 (dinero `numeric(14,2)`, fechas de negocio `date`, enums `text + CHECK`).
 
 ### 13.1 Ledger (R1, implementado en R1‑1 y R1‑2 · migraciones `0005` y `0006`)
 Decisiones en ADR 007 §8 y ADR 008. Signo de las entradas: positivo = el valor **entra** a la cuenta; negativo = **sale**. El saldo de una cuenta es siempre la suma de sus entradas; no hay columna de saldo.
@@ -438,11 +438,47 @@ Las referencias opcionales de las patas (`cheque_id`, `pending_id`, `employee_id
 
 **Invariantes en la base:** al commit, cada operación tiene al menos dos patas que suman cero; al commit, ninguna cuenta con `allow_negative = false` queda en negativo, ni hoy ni al cierre de ningún día de negocio anterior afectado por una operación retroactiva (la verificación bloquea la cuenta). Ver ADR 008.
 
-### 13.2 Rendiciones y conteo (R2, R7)
-`settlements` (tipo `DELIVERY`/`OUTLET`, fecha, `employee_id` o `outlet_id`, importe esperado, `expected_source` `MANUAL`/`STORE_SYS`, referencia externa, estado `OPEN`/`CLOSED`, `version`) · `settlement_items` (una tabla de líneas: `CASH`, `TRANSFER`, `CHEQUE`, `EXPENSE`, `PENDING`, con referencia a su detalle) · `cash_counts` + `cash_count_lines` (denominación × cantidad y "agregados") · `settlement_differences` + `difference_allocations` (faltante/sobrante histórico y su reparto entre empleados) · `outlets` (bocas de expendio, R7).
+### 13.2 Rendiciones de reparto (R2‑1 · migración `0007`)
+Decisiones de Enzo R2‑D1 a R2‑D7 y R2‑P1 a R2‑P5 (`ROADMAP.md`). En R2‑1 nada de esto escribe el ledger: el cierre hacia el ledger, las diferencias materializadas y sus asignaciones llegan en R2‑2. Nada se borra (trigger): el conteo se reemplaza con auditoría, agregados y gastos se anulan con motivo, las decisiones sobre transferencias quedan en su historial.
+
+**`settlements.settlements`** — una rendición de un repartidor en un día.
+| Columna | Tipo | Notas |
+|---|---|---|
+| id | bigint identity | PK |
+| type | varchar(20) | CHECK `DELIVERY` (`OUTLET` en R7) |
+| business_date | date | Indexada; nunca futura (servicio) |
+| employee_id | bigint | FK `employees` (RESTRICT). Debe tener `settlements.delivery_driver` vigente ese día y estar activo (servicio) |
+| sequence_number | int | ≥ 1. Rendición 1, 2… del mismo repartidor y día, generada por el sistema |
+| expected_amount | numeric(14,2) | > 0; editable mientras está `OPEN` |
+| expected_source | varchar(20) | CHECK `MANUAL` (`STORE_SYS` cuando exista la integración) |
+| external_reference / notes | varchar(100) / text, null | |
+| status | varchar(20) | CHECK `OPEN` / `CLOSED` |
+| version | int, default 1 | Sube con cada reapertura (R2‑2) |
+| client_request_id / request_fingerprint | uuid único / varchar(64) | Alta idempotente: un reintento nunca crea la Rendición 2 |
+| created_by / created_at / updated_at | | |
+
+UNIQUE (`type`, `employee_id`, `business_date`, `sequence_number`); **no** hay unicidad por repartidor y día. El número se calcula como `max + 1` bajo `pg_advisory_xact_lock` sobre (tipo, repartidor, día); la UNIQUE es la última barrera. Repartidor, fecha, número e id de solicitud no cambian nunca (trigger); con `status = CLOSED` tampoco el resto de los datos.
+
+**`settlements.cash_count_lines`** — conteo por denominación: `settlement_id`, `denomination_code` y `denomination_value` (copiados de la configuración, no una FK), `quantity` > 0, `destination_account_id` (FK `accounts`, una caja activa elegida línea por línea), `created_by`, `created_at`. UNIQUE (`settlement_id`, `denomination_code`).
+
+**`settlements.cash_additions`** — agregados: efectivo que aparece después del conteo o que se suma sin rehacerlo. `amount` > 0, `destination_account_id` (caja), `description` opcional, `created_by`, `created_at`, idempotencia, y `voided_by` / `voided_at` / `void_reason` (los tres o ninguno, motivo no vacío). La base solo permite el UPDATE que lo anula.
+
+**`settlements.settlement_transfers`** — transferencias declaradas: `amount` > 0, `bank_account_id` (un `BANK`, Banco por defecto), `reference`, `payer_name` (cliente en texto, C3), `status` `DECLARED` / `VERIFIED` / `REJECTED` (rechazo con motivo, CHECK), `status_reason`, `status_changed_by` / `status_changed_at`, idempotencia. Solo `VERIFIED` justifica dinero; los datos se corrigen solo mientras está `DECLARED`.
+**`settlements.transfer_status_events`** — historial inmutable de cada decisión: `from_status`, `to_status`, `reason`, `is_correction` (un admin cambió una decisión ya tomada), `changed_by`, `changed_at`.
+
+**`settlements.expense_categories`** — `name`, `name_key` único (sin mayúsculas, acentos ni espacios repetidos), `active`. Las edita un admin; se desactivan, no se borran. Sin categorías fijas en código.
+**`settlements.expenses`** — `settlement_id`, `category_id` (FK, RESTRICT), `amount` > 0, `description`, idempotencia, anulación con motivo como los agregados; se corrigen mientras la rendición está `OPEN`.
+
+**Una rendición `CLOSED` no cambia** (trigger sobre las cuatro tablas de carga y sobre la propia rendición).
+
+**Denominaciones** — parámetro `settlements.cash_denominations` (`app_settings`), lista de `{code, value, active, suggested_destination}`. El código es la identidad estable de la denominación (`ARS_20000`…), independiente de su posición y de su valor; un código no se borra ni cambia de valor, se desactiva. `suggested_destination` es el código de una caja (`main_cash`, `change_cash`) o null y es solo una sugerencia. Valor inicial: $20.000, $10.000, $2.000 y $1.000 sugeridos a Caja principal; $500, $200 y $100 a Caja de cambio. **La operación no usa monedas ni billetes de menos de $100**, así que no se configuran. Cambiar la configuración nunca altera conteos históricos (las líneas copian código y valor).
+
+**Tablero** (calculado por el backend, `delivery/summary.py`): justificado = efectivo (conteo + agregados no anulados) + transferencias `VERIFIED` + cheques (R4, hoy 0) + pendientes (R3, hoy 0) + gastos no anulados; diferencia = justificado − esperado (negativa = faltante, positiva = sobrante).
+
+**Pendiente para R2‑2 (aprobado):** `settlement_differences` + `difference_allocations`, cuentas `DELIVERY_COLLECTIONS`, `EXPENSE`, `SETTLEMENT_DIFFERENCE` y `EMPLOYEE`, y el cierre hacia el ledger. Bocas de expendio (`outlets`) en R7.
 
 ### 13.3 Pendientes, cheques, gastos (R3–R5)
-`pending_collections` (cliente en texto + `customer_id` opcional, importe, motivo, responsable, rendición origen, estado, operación de acreditación) · `cheques` + `cheque_events` (cheque único, titular ≠ entregador, estados con historial, destinatario obligatorio si se entrega) · `expenses` + `expense_categories` (editables) · `fuel_loads` (detalle 1:1 de un gasto de combustible) · `vehicles`.
+`pending_collections` (cliente en texto + `customer_id` opcional, importe, motivo, responsable, rendición origen, estado, operación de acreditación) · `cheques` + `cheque_events` (cheque único, titular ≠ entregador, estados con historial, destinatario obligatorio si se entrega) · `expenses` + `expense_categories` (creadas en R2‑1, §13.2) · `fuel_loads` (detalle 1:1 de un gasto de combustible) · `vehicles`.
 
 ### 13.4 Pagos y terceros (R6)
 `counterparties` (proveedores, beneficiarios, titulares, socios; `customer_id` opcional) · `payments` (los medios de pago son las entradas del ledger de su operación). Aportes, devoluciones y depósitos son operaciones, no tablas.

@@ -24,7 +24,18 @@ def _schemas(url: str) -> set[str]:
         engine.dispose()
 
 
-SETTLEMENTS_TABLES = {"accounts", "financial_operations", "ledger_entries"}
+SETTLEMENTS_TABLES = {
+    "accounts",
+    "financial_operations",
+    "ledger_entries",
+    "settlements",
+    "cash_count_lines",
+    "cash_additions",
+    "settlement_transfers",
+    "transfer_status_events",
+    "expense_categories",
+    "expenses",
+}
 
 
 def _settlements_tables(url: str) -> set[str]:

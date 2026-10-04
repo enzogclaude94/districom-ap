@@ -10,7 +10,7 @@
 |---|---|---|
 | **Plataforma (DistriCom Core)** | En construcción | Usuarios, sesiones, roles por módulo, configuración, auditoría, sistemas fuente, identidades compartidas (empleados y funciones; clientes y localidades en Fase 1), framework de importación. |
 | **Inteligencia Comercial** (`commercial`, `/comercial`) | En desarrollo | Capa de **inteligencia comercial** sobre AXUM y STORE SYS. Alcance en `ROADMAP.md`. |
-| **Rendiciones** (`settlements`, `/rendiciones`) | En desarrollo (R1) | Rendiciones de reparto y boca de expendio, cajas, cheques, pendientes, gastos, combustible, pagos y liquidación semanal, con ledger propio (ADR 007, §4.6). |
+| **Rendiciones** (`settlements`, `/rendiciones`) | En desarrollo (R2) | Rendiciones de reparto y boca de expendio, cajas, cheques, pendientes, gastos, combustible, pagos y liquidación semanal, con ledger propio (ADR 007, §4.6). |
 | Otros módulos | Sin desarrollar | Se agregan con el patrón de §4.5. Nada de su modelo se anticipa. |
 
 Sistemas fuente:
@@ -98,7 +98,8 @@ backend/app/
 │       ├── settings.py    parámetros settlements.*
 │       ├── ledger/        [R1] accounts, financial_operations, ledger_entries y el servicio de operaciones
 │       ├── cash/          [R1] API de cajas: schemas, casos de uso y endpoints sobre el servicio del ledger
-│       └── settlements/ pending/ cheques/ expenses/ payments/ payroll/   [R2–R8]
+│       ├── delivery/      [R2] rendiciones de reparto: alta, conteo, agregados, transferencias, gastos, tablero, denominaciones
+│       └── pending/ cheques/ payments/ payroll/   [R3–R8]
 └── api/v1/router.py       raíz de composición: monta routers de plataforma y de cada módulo
 ```
 
@@ -174,8 +175,9 @@ Fuente de verdad de dónde está cada valor del módulo (cajas, banco, cartera d
 - **Idempotencia:** `client_request_id` + huella SHA‑256 del comando; el mismo id con otro contenido es `409 idempotency_conflict` (ADR 008).
 - **Concurrencia:** las cuentas que no admiten negativo y pierden valor se bloquean (`FOR NO KEY UPDATE`, en orden de id) antes de validar el saldo, que debe quedar ≥ 0 hoy y al cierre de cada día desde la fecha de la operación (operaciones retroactivas); la base vuelve a verificarlo al commit.
 - **Invariantes en la base:** suma cero y al menos dos patas por operación (constraint trigger diferido), tablas append-only (trigger), sin saldo negativo donde no se permite (constraint trigger diferido con bloqueo), `client_request_id` único, un reverso por operación. Desde su fase: unicidad del documento origen para operaciones que existen una sola vez (R2), un cheque sale de cartera una sola vez (R4).
-- **Correcciones por reverso:** nunca UPDATE ni DELETE de entradas. Reabrir una rendición revierte su cierre.
+- **Correcciones por reverso:** nunca UPDATE ni DELETE de entradas. Reabrir una rendición no toca el ledger: su cierre sigue vigente en Cajas hasta el nuevo cierre, que publica en una sola transacción el reverso del anterior y el cierre nuevo, en la fecha de negocio de la rendición y validando el efecto neto (decisión R2‑P1 de Enzo, se implementa en R2‑2).
 - **API de cajas** (`cash/`, R1‑2): un caso de uso por operación (traspaso, depósito, extracción, saldo inicial, aporte, devolución, ajuste, reverso, alta de cuenta de socio) que arma las patas y llama al servicio; el router exige el rol del módulo (`viewer` lee, `operator` mueve entre cajas y banco, `admin` el resto) y responde `201`/`200` según la operación sea nueva o un reintento. Un rechazo de la base al confirmar se traduce a `409 invalid_ledger_operation` sin detalles internos.
+- **Rendiciones de reparto** (`delivery/`, R2‑1): la rendición y su carga (conteo por denominación con destino por línea, agregados, transferencias con verificación, gastos) viven en tablas propias y todavía no tocan el ledger; el cierre las vuelca en una operación (R2‑2). El tablero (esperado, efectivo, transferencias verificadas, cheques, pendientes, gastos, justificado y diferencia) lo calcula `delivery/summary.py`. Cada escritura bloquea la rendición y exige `OPEN`; la base rechaza cambios sobre una rendición `CLOSED`, borrados y ediciones de agregados (migración `0007`). Altas idempotentes con `client_request_id` + huella, como el ledger.
 - **Saldos derivados:** suma de entradas por cuenta. Sin tablas de saldo mantenidas a mano; si algún día hace falta performance, un saldo materializado se agrega sin cambiar el modelo.
 - Sin event sourcing, bus de eventos ni contabilidad formal.
 
