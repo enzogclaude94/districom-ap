@@ -94,6 +94,7 @@ class MovementOut(BaseModel):
     description: str | None
     amount: Money
     created_by: int
+    created_by_name: str
     created_at: datetime
     source_type: str | None
     source_id: int | None
