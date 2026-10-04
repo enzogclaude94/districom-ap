@@ -13,10 +13,12 @@ from app.core.errors import AppError
 from app.modules.settlements.ledger.models import Account, FinancialOperation, LedgerEntry
 from app.modules.settlements.ledger.service import (
     Leg,
+    SourceRef,
     account_balances,
     account_movements,
     get_operation,
     post_operation,
+    replace_operation,
     reverse_operation,
 )
 from app.platform.audit.models import AuditEvent
@@ -554,3 +556,95 @@ def test_retroactive_reversal_is_checked_too(db: Session, post, history, actor) 
             business_date=TODAY - timedelta(days=3),
         )
     assert error_code(excinfo) == (409, "insufficient_funds")
+
+
+# --- replace_operation (R2-2) ---------------------------------------------------------------------
+
+
+def _close(post, accounts, amount: str = "1000", source_id: int = 1, **kwargs):  # type: ignore[no-untyped-def]
+    return post(
+        "SETTLEMENT_CLOSE",
+        (accounts["main_cash"], amount),
+        (accounts["delivery_collections"], f"-{amount}"),
+        source=SourceRef("settlement", source_id),
+        **kwargs,
+    )
+
+
+def _replace(db: Session, actor, original: int, accounts, amount: str, **kwargs):  # type: ignore[no-untyped-def]
+    return replace_operation(
+        db,
+        actor=actor,
+        original_id=original,
+        type=kwargs.pop("type", "SETTLEMENT_CLOSE"),
+        legs=[Leg(accounts["main_cash"], Decimal(amount)), Leg(accounts["delivery_collections"], -Decimal(amount))],
+        client_request_id=kwargs.pop("client_request_id", None) or uuid4(),
+        reversal_request_id=kwargs.pop("reversal_request_id", None) or uuid4(),
+        business_date=TODAY - timedelta(days=1),
+        description="Cierre corregido",
+        reason="Corrección",
+        source=kwargs.pop("source", SourceRef("settlement", 1)),
+    )
+
+
+def test_replace_publishes_reversal_and_replacement_once(db: Session, post, accounts, actor) -> None:  # type: ignore[no-untyped-def]
+    original = _close(post, accounts, business_date=TODAY - timedelta(days=1)).operation
+    key, reversal_key = uuid4(), uuid4()
+    first = _replace(
+        db, actor("operator"), original.id, accounts, "1500", client_request_id=key, reversal_request_id=reversal_key
+    )
+    db.commit()
+    again = _replace(
+        db, actor("operator"), original.id, accounts, "1500", client_request_id=key, reversal_request_id=reversal_key
+    )
+    assert (first.created, again.created) == (True, False)
+    assert (again.reversal.id, again.replacement.id) == (first.reversal.id, first.replacement.id)
+    assert first.reversal.reverses_operation_id == original.id
+    assert first.reversal.business_date == first.replacement.business_date == original.business_date
+    assert balances(db)["Caja principal"] == Decimal("1500.00")
+    with pytest.raises(AppError) as conflict:
+        _replace(db, actor("operator"), original.id, accounts, "1600", client_request_id=key)
+    assert conflict.value.code == "idempotency_conflict"
+    with pytest.raises(AppError) as twice:
+        _replace(db, actor("operator"), original.id, accounts, "1600")
+    assert twice.value.code == "operation_already_reversed"
+
+
+def test_replace_only_documents_of_the_same_source(db: Session, post, accounts, funded, actor) -> None:  # type: ignore[no-untyped-def]
+    original = _close(post, accounts).operation
+    transfer = post("CASH_TRANSFER", (accounts["main_cash"], "-10"), (accounts["change_cash"], "10")).operation
+    operator = actor("operator")
+    cases = [
+        ({"type": "CASH_TRANSFER"}, original.id, "unknown_operation_type"),
+        ({"source": SourceRef("settlement", 2)}, original.id, "invalid_replacement"),
+        ({}, transfer.id, "invalid_replacement"),
+        ({}, 999999, "operation_not_found"),
+    ]
+    for kwargs, original_id, code in cases:
+        with pytest.raises(AppError) as caught:
+            _replace(db, operator, original_id, accounts, "10", **kwargs)
+        assert caught.value.code == code, kwargs
+        db.rollback()
+
+
+def test_a_document_operation_is_not_reversed_directly(db: Session, post, accounts, actor) -> None:  # type: ignore[no-untyped-def]
+    original = _close(post, accounts).operation
+    with pytest.raises(AppError) as caught:
+        reverse_operation(db, actor=actor("admin"), operation_id=original.id, reason="x", client_request_id=uuid4())
+    assert caught.value.code == "operation_owned_by_document"
+
+
+def test_replace_checks_the_net_effect_only(db: Session, post, accounts, actor) -> None:  # type: ignore[no-untyped-def]
+    """$1.000 closed yesterday and moved out today. Replacing it by $1.200 only needs room for the net +$200;
+    replacing it by $800 is a net -$200 that would leave the box at -$200 from today on."""
+    _close(post, accounts, business_date=TODAY - timedelta(days=1))
+    original = db.scalars(select(FinancialOperation)).one()
+    post("CASH_TRANSFER", (accounts["main_cash"], "-1000"), (accounts["change_cash"], "1000"))
+    operator = actor("operator")
+    with pytest.raises(AppError) as caught:
+        _replace(db, operator, original.id, accounts, "800")
+    assert caught.value.code == "insufficient_funds"
+    db.rollback()
+    _replace(db, operator, original.id, accounts, "1200")
+    db.commit()
+    assert balances(db)["Caja principal"] == Decimal("200.00")
