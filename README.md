@@ -106,9 +106,13 @@ cd backend
 echo "e2e-password-123" | uv run python -m app.cli create-admin --email e2e-admin@districom.local --name "Admin E2E"
 echo "viewer-password-123" | uv run python -m app.cli create-viewer --email e2e-viewer@districom.local --name "Viewer E2E"
 uv run python -m app.cli grant-module-role --email e2e-viewer@districom.local --module commercial --role viewer
+echo "operator-password-123" | uv run python -m app.cli create-viewer --email e2e-operator@districom.local --name "Operador E2E"
+uv run python -m app.cli grant-module-role --email e2e-operator@districom.local --module settlements --role operator
+echo "cash-viewer-password-123" | uv run python -m app.cli create-viewer --email e2e-cash-viewer@districom.local --name "Lector Cajas E2E"
+uv run python -m app.cli grant-module-role --email e2e-cash-viewer@districom.local --module settlements --role viewer
 cd ../frontend && pnpm exec playwright install chromium && pnpm e2e
 ```
-(Credenciales configurables con `E2E_ADMIN_EMAIL` / `E2E_ADMIN_PASSWORD` y `E2E_VIEWER_EMAIL` / `E2E_VIEWER_PASSWORD`.)
+(Credenciales configurables con `E2E_ADMIN_EMAIL` / `E2E_ADMIN_PASSWORD`, `E2E_VIEWER_EMAIL` / `E2E_VIEWER_PASSWORD`, `E2E_OPERATOR_EMAIL` / `E2E_OPERATOR_PASSWORD` y `E2E_CASH_VIEWER_EMAIL` / `E2E_CASH_VIEWER_PASSWORD`. El flujo de Cajas usa saldos relativos, así que puede repetirse sobre la misma base.)
 
 CI (GitHub Actions) corre todo lo anterior más un smoke test de Docker Compose en cada push y PR. Detalle en [`docs/TESTING.md`](docs/TESTING.md).
 
