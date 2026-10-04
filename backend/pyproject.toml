@@ -57,7 +57,7 @@ name = "Layers: api -> modules -> platform -> db -> core"
 type = "layers"
 layers = ["app.api", "app.modules", "app.platform", "app.db", "app.core"]
 # db/models.py imports every model only to register it on Base.metadata for Alembic.
-ignore_imports = ["app.db.models -> app.platform.**"]  # add app.modules.** when a module has models
+ignore_imports = ["app.db.models -> app.platform.**", "app.db.models -> app.modules.**"]
 
 [[tool.importlinter.contracts]]
 name = "Modules do not import each other (only a declared public.py, none today)"
