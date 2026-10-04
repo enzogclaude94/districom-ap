@@ -11,7 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { authApi, currentUserQueryKey } from "@/lib/api/auth";
 import type { AppModule } from "@/lib/modules";
 
-const MODULE_ROLE_LABELS = { admin: "Administrador", operator: "Operador", viewer: "Lectura" } as const;
+const MODULE_ROLE_LABELS = { admin: "Administrador", operator: "Operador", viewer: "Lector" } as const;
 
 /** DistriCom home: one card per module the user can open; with a single module, go straight to it. */
 export function ModuleSelector({ modules }: { modules: AppModule[] }) {

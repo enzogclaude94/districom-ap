@@ -85,6 +85,7 @@ test("cash boxes end to end: opening, transfer, deposit, contribution, adjustmen
 
   // 2–3. Operator: transfer and deposit.
   await switchUser(page, operatorEmail, operatorPassword);
+  await expect(page.getByLabel("Tu rol en Rendiciones: Operador")).toBeVisible();
   await expect(page.getByText("Operaciones administrativas")).toHaveCount(0);
   const transferId = await submitOperation(
     page,
