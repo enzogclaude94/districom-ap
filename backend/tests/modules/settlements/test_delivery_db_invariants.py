@@ -10,7 +10,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 from app.core.clock import business_today
-from app.modules.settlements.delivery import additions, schemas, service, transfers
+from app.modules.settlements.delivery import additions, closing, schemas, service, transfers
 
 DAY = business_today() - timedelta(days=1)
 
@@ -58,32 +58,6 @@ def loaded(db: Session, actor, driver, accounts) -> dict[str, int]:  # type: ign
     ).scalar_one()
     db.commit()
     return {"settlement": sid, "addition": addition.id, "transfer": transfer.id, "expense": expense}
-
-
-def close_in_database(db: Session, settlement_id: int) -> None:
-    """Close a settlement with raw SQL: a SETTLEMENT_CLOSE of it in effect, as the close flow leaves it."""
-    operation = db.execute(
-        text(
-            "INSERT INTO settlements.financial_operations (type, business_date, description, client_request_id, "
-            "request_fingerprint, source_type, source_id, created_by) SELECT 'SETTLEMENT_CLOSE', business_date, "
-            "'Cierre', gen_random_uuid(), repeat('a', 64), 'settlement', id, created_by "
-            "FROM settlements.settlements WHERE id = :s RETURNING id"
-        ),
-        {"s": settlement_id},
-    ).scalar_one()
-    db.execute(
-        text(
-            "INSERT INTO settlements.ledger_entries (operation_id, account_id, amount) SELECT :o, id, "
-            "CASE code WHEN 'main_cash' THEN 1 ELSE -1 END FROM settlements.accounts "
-            "WHERE code IN ('main_cash', 'delivery_collections')"
-        ),
-        {"o": operation},
-    )
-    db.execute(
-        text("UPDATE settlements.settlements SET status = 'CLOSED', current_close_operation_id = :o WHERE id = :s"),
-        {"o": operation, "s": settlement_id},
-    )
-    db.commit()
 
 
 def _refused(db: Session, sql: str, **params: object) -> str:
@@ -139,8 +113,11 @@ def test_an_addition_is_only_voided(db: Session, loaded, actor) -> None:  # type
 def test_a_closed_settlement_is_frozen(db: Session, loaded, actor, accounts) -> None:  # type: ignore[no-untyped-def]
     """[18] at the database level."""
     sid = loaded["settlement"]
-    close_in_database(db, sid)
-    user = actor("operator").id
+    operator = actor("operator")
+    transfers.change_status(db, operator, sid, loaded["transfer"], schemas.TransferStatusIn(status="VERIFIED"))
+    surplus = schemas.AllocationIn(target="EMPLOYEE", employee_id=service.get(db, sid).employee_id, amount=Decimal(15))
+    closing.close(db, operator, sid, schemas.CloseIn(version=1, allocations=[surplus], confirm=True))
+    user = operator.id
     statements = [
         ("UPDATE settlements.settlements SET expected_amount = 1 WHERE id = :s", {}),
         ("UPDATE settlements.cash_count_lines SET quantity = 9 WHERE settlement_id = :s", {}),
