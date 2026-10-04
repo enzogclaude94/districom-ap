@@ -39,6 +39,22 @@ const eslintConfig = defineConfig([
       ],
     },
   },
+  {
+    files: ["src/modules/settlements/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["@/modules/*", "!@/modules/settlements"],
+              message: "A module must not import another module (or the registry).",
+            },
+          ],
+        },
+      ],
+    },
+  },
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:

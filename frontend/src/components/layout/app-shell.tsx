@@ -1,7 +1,8 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Lock, LogOut, Menu, X } from "lucide-react";
+import { ChevronsUpDown, LayoutGrid, Lock, LogOut, Menu, X } from "lucide-react";
+import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 
@@ -19,6 +20,68 @@ import { cn } from "@/lib/cn";
 import { isInModule, type AppModule } from "@/lib/modules";
 
 const ROLE_LABELS = { admin: "Administrador", viewer: "Lectura" } as const;
+
+interface ModuleSwitcherProps {
+  active: AppModule;
+  modules: AppModule[];
+}
+
+/** Module name under the wordmark; with more than one module it opens a menu to switch. */
+function ModuleSwitcher({ active, modules }: ModuleSwitcherProps) {
+  const pathname = usePathname();
+  // Remembers the path it was opened on, so navigating closes it.
+  const [openedAt, setOpenedAt] = useState<string | null>(null);
+  const open = openedAt === pathname;
+  if (modules.length < 2) {
+    return <p className="text-xs font-medium text-muted-foreground">{active.name}</p>;
+  }
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        aria-haspopup="true"
+        aria-expanded={open}
+        aria-label={`Módulo actual: ${active.name}. Cambiar de módulo`}
+        className="-mx-1 flex items-center gap-1 rounded px-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+        onClick={() => setOpenedAt(open ? null : pathname)}
+      >
+        {active.name}
+        <ChevronsUpDown className="size-3" aria-hidden />
+      </button>
+      {open && (
+        <nav
+          aria-label="Módulos"
+          className="absolute top-6 left-0 z-50 w-60 rounded-md border border-border bg-surface p-1 shadow-card"
+        >
+          {modules.map((module) => {
+            const Icon = module.icon;
+            return (
+              <Link
+                key={module.key}
+                href={module.basePath}
+                aria-current={module.key === active.key ? "true" : undefined}
+                className={cn(
+                  "flex items-center gap-2 rounded px-2 py-1.5 text-sm",
+                  module.key === active.key ? "bg-primary-soft font-medium text-primary" : "hover:bg-muted",
+                )}
+              >
+                <Icon className="size-4" aria-hidden />
+                {module.name}
+              </Link>
+            );
+          })}
+          <Link
+            href="/"
+            className="mt-1 flex items-center gap-2 border-t border-border px-2 pt-2 pb-1.5 text-sm text-muted-foreground hover:text-foreground"
+          >
+            <LayoutGrid className="size-4" aria-hidden />
+            Todos los módulos
+          </Link>
+        </nav>
+      )}
+    </div>
+  );
+}
 
 interface AppShellProps {
   /** Installed modules, passed by the app layout (shared code never imports modules). */
@@ -76,6 +139,8 @@ export function AppShell({ modules, children }: AppShellProps) {
   const accessible = modules.filter((module) => user.modules.some((access) => access.key === module.key));
   // Platform pages (e.g. Configuración) keep the navigation of the user's first module.
   const activeModule = accessible.find((module) => isInModule(pathname, module)) ?? accessible[0];
+  // A module the user has no role in: its screens are never rendered (the API also answers 403).
+  const blockedModule = modules.find((module) => isInModule(pathname, module) && !accessible.includes(module));
   if (!activeModule) {
     return (
       <div className="mx-auto max-w-lg p-8">
@@ -97,9 +162,13 @@ export function AppShell({ modules, children }: AppShellProps) {
       >
         <div className="flex h-16 flex-col justify-center gap-1 border-b border-border px-5">
           <Wordmark height={20} priority />
-          <p className="text-xs font-medium text-muted-foreground">{activeModule.name}</p>
+          <ModuleSwitcher active={activeModule} modules={accessible} />
         </div>
-        <Sidebar sections={activeModule.nav} platformAdmin={user.role === "admin"} />
+        <Sidebar
+          sections={activeModule.nav}
+          phasePrefix={activeModule.phasePrefix}
+          platformAdmin={user.role === "admin"}
+        />
       </aside>
       {menuOpen && (
         <button
@@ -141,7 +210,22 @@ export function AppShell({ modules, children }: AppShellProps) {
             </Button>
           </div>
         </header>
-        <main className="mx-auto w-full max-w-7xl flex-1 space-y-6 p-4 md:p-8">{children}</main>
+        <main className="mx-auto w-full max-w-7xl flex-1 space-y-6 p-4 md:p-8">
+          {blockedModule ? (
+            <EmptyState
+              icon={Lock}
+              title={`No tenés acceso a ${blockedModule.name}`}
+              description="Pedile a un administrador de DistriCom que te asigne un rol en este módulo."
+              action={
+                <Link href="/" className="text-sm font-medium text-primary hover:underline">
+                  Ir a mis módulos
+                </Link>
+              }
+            />
+          ) : (
+            children
+          )}
+        </main>
       </div>
     </div>
   );

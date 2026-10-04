@@ -1,8 +1,9 @@
-import { redirect } from "next/navigation";
+"use client";
 
+// Client page: the module registry holds icon components, which cannot cross the server/client boundary.
+import { ModuleSelector } from "@/components/layout/module-selector";
 import { MODULES } from "@/modules/registry";
 
-// A DistriCom home with one card per module arrives when there is more than one module.
 export default function PlatformHome() {
-  redirect(MODULES[0].basePath);
+  return <ModuleSelector modules={MODULES} />;
 }

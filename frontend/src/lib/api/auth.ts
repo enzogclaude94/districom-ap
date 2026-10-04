@@ -1,11 +1,14 @@
 import { apiFetch } from "@/lib/api/client";
 
+/** Platform role: `admin` administers the platform and is admin in every module. */
 export type Role = "admin" | "viewer";
+/** Role inside one module (ARCHITECTURE.md §8). */
+export type ModuleRole = "viewer" | "operator" | "admin";
 
 export interface ModuleAccess {
   key: string;
   name: string;
-  role: Role;
+  role: ModuleRole;
 }
 
 export interface CurrentUser {
