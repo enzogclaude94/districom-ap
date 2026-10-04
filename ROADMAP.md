@@ -38,8 +38,8 @@ DistriCom es una plataforma modular (ADR 006). Este roadmap tiene tres carriles:
 | Fase | Nombre | Estado | Depende de |
 |---|---|---|---|
 | R0 | Habilitación del módulo | **DONE** (aprobada por Enzo el 2026-10-04) | PL‑1 |
-| R1 | Ledger y cajas | **IN_PROGRESS** (aprobada el 2026-10-04; R1‑1 y R1‑2 aprobados, R1‑3 en revisión) | R0 |
-| R2 | Rendición de reparto básica | PLANNED | R1 |
+| R1 | Ledger y cajas | **DONE** (aprobada por Enzo el 2026-10-04; PRs #7–#9 mergeados) | R0 |
+| R2 | Rendición de reparto básica | **IN_PROGRESS** (propuesta aprobada el 2026-10-04; R2‑1 en revisión) | R1 |
 | R3 | Pendientes de cobro | PLANNED | R2 |
 | R4 | Cartera de cheques | PLANNED | R2 |
 | R5 | Combustible y vehículos | PLANNED | R2 |
@@ -132,6 +132,17 @@ Modelo conceptual en `DATA_MODEL.md §13`; decisiones en ADR 007. Cada fase crea
 ### R2 — Rendición de reparto básica
 **Alcance:** rendición (fecha, repartidor, importe esperado con origen `MANUAL`), conteo de efectivo por denominación con agregado, transferencias verificadas, gastos con categorías editables, diferencia y su asignación a uno o varios empleados, cierre atómico hacia el ledger, reapertura y corrección por admin con reverso.
 **Resultado visible:** pantalla de rendición con tablero fijo (esperado, efectivo, transferencias, cheques, gastos, pendientes, justificado, diferencia).
+**Decisiones de Enzo (2026-10-04):**
+- Un repartidor puede tener más de una rendición por día: `sequence_number` generado por el sistema, único por tipo, repartidor y día (R2‑D7).
+- El efectivo se cuenta por denominación con un destino por línea (Caja principal o Caja de cambio). Cada denominación sugiere un destino configurable; el operador lo cambia (R2‑D3).
+- Las denominaciones son el parámetro `settlements.cash_denominations`, con código estable. Arranca con billetes de $20.000, $10.000, $2.000, $1.000, $500, $200 y $100: la operación no usa monedas ni billetes de menos de $100 (R2‑D4, R2‑P4).
+- Un agregado es efectivo que aparece después del conteo, o que se suma sin rehacerlo. Nunca modifica el conteo, no se edita ni se borra, y se anula con motivo (R2‑D5).
+- Solo una transferencia `VERIFIED` justifica dinero. `DECLARED` y `REJECTED` no cuentan, y una rendición con transferencias `DECLARED` no se cierra. «El cliente transfiere mañana» es un pendiente (R3). El operator verifica o rechaza; un admin corrige una decisión con motivo, sin borrar la anterior (R2‑P3, R2‑P5).
+- Faltante y sobrante se asignan a uno o varios empleados, a la empresa o a ambos, con suma exacta. La empresa solo con admin y motivo; un sobrante nunca es ingreso automático (R2‑D1, R2‑D2, R2‑P2).
+- Cuentas `EMPLOYEE` solo para diferencias; sueldos, préstamos y liquidación siguen en R8 (R2‑D6).
+- Reabrir no toca el ledger: el cierre anterior sigue vigente hasta el nuevo cierre, que publica atómicamente su reverso y el cierre nuevo en la fecha de la rendición, validando el efecto neto (R2‑P1).
+
+**PRs:** R2‑1 rendición y carga, sin ledger (migración `0007`) · R2‑2 cierre y reapertura hacia el ledger · R2‑3 pantallas y E2E. Cada uno espera la aprobación de Enzo antes del siguiente.
 
 ### R3 — Pendientes de cobro
 **Alcance:** pendiente desde la rendición, pantalla global, alertas internas calculadas al leer (`settlements.pending_alert_hours`), acreditación por cualquier medio con su operación.
