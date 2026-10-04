@@ -2,7 +2,16 @@ import { apiFetch } from "@/lib/api/client";
 
 /** Cajas API (`/api/v1/settlements`, R1). Amounts travel as decimal strings ("1500.00"). */
 
-export type AccountKind = "CASH_BOX" | "BANK" | "OWNER_EQUITY" | "OPENING_BALANCE" | "ADJUSTMENT";
+export type AccountKind =
+  | "CASH_BOX"
+  | "BANK"
+  | "OWNER_EQUITY"
+  | "OPENING_BALANCE"
+  | "ADJUSTMENT"
+  | "DELIVERY_COLLECTIONS"
+  | "EXPENSE"
+  | "SETTLEMENT_DIFFERENCE"
+  | "EMPLOYEE";
 
 export type OperationType =
   | "OPENING_BALANCE"
@@ -12,6 +21,7 @@ export type OperationType =
   | "OWNER_CONTRIBUTION"
   | "OWNER_WITHDRAWAL"
   | "ADJUSTMENT"
+  | "SETTLEMENT_CLOSE"
   | "REVERSAL";
 
 export interface Account {
