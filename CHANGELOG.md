@@ -4,6 +4,13 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Added — Empleados en plataforma (R0, PR 2)
+- **Base de datos:** migración `0002` (`platform: employees and employee functions`): `employees` (identidad única, baja lógica, IDs externos con unicidad parcial) y `employee_functions` (períodos con vigencia; exclusion constraint que impide solapar la misma función y CHECK de rango).
+- **Backend:** paquete `app/platform/parties/` con servicio, API `/api/v1/employees` (listar con búsqueda, estado, función y paginación; alta; edición; baja lógica que cierra funciones vigentes; reactivación; asignar y cerrar funciones; códigos de función) solo para administradores de plataforma. Registro de funciones por módulo vía `ModuleSpec.employee_functions` (Comercial registra `commercial.salesperson`). `has_function()` para que los módulos validen funciones por fecha.
+- **Auditoría:** helper `record_change` con la convención `{action, before, after}` (ADR 007); el teléfono nunca se audita, solo `phone_changed`.
+- **Frontend:** pantallas **Empleados** (`/empleados`, `/empleados/nuevo`, `/empleados/[id]`) con historia de funciones, visibles en la navegación solo para administradores de plataforma.
+- **Tests:** API, reglas e invariantes de base de empleados; registro de funciones; componentes de frontend; E2E de alta → función → baja.
+
 ### Added — Módulo Rendiciones aprobado (ADR 007)
 - **Documentación:** ADR 007 registra el segundo módulo, **Rendiciones** (`settlements`, `/rendiciones`): empleados y roles por módulo adelantados a plataforma, clientes como texto + `customer_id` opcional hasta que exista el maestro, ledger propio (entradas inmutables, operaciones balanceadas e idempotentes, reversos, sin saldos editables), alertas internas de pendientes y logo oficial del módulo. `ARCHITECTURE.md` v0.3 (§4.6 ledger, roles Etapa 1, selector de módulos), `DATA_MODEL.md` v0.3 (`user_module_roles`, `employees` y `employee_functions` en R0, §13 modelo conceptual de Rendiciones), `ROADMAP.md` v0.4 (carril Rendiciones R0–R9, PL‑1 en DONE, PL‑2 dividido), `CLAUDE.md`, `PLAN.md §13`, README.
 - **Marca:** logo oficial de DistriCom Rendiciones en `docs/brand/districom-rendiciones-original.png` y sus reglas de uso en `docs/BRAND.md`.

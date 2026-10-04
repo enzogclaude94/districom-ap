@@ -292,7 +292,7 @@ Origen: *Informe Inicial — DistriCom Rendiciones* (2026-10-04), aprobado por E
 | PR | Contenido | Estado |
 |---|---|---|
 | 1 | Documentación: ADR 007, `CLAUDE.md`, `ARCHITECTURE.md`, `ROADMAP.md`, `DATA_MODEL.md`, `docs/BRAND.md`, PL‑1 en DONE | En revisión |
-| 2 | Plataforma: `employees` + `employee_functions`, servicio, API, pantalla de administración, registro de funciones por módulo | Pendiente |
+| 2 | Plataforma: `employees` + `employee_functions`, servicio, API, pantalla de administración, registro de funciones por módulo | En revisión |
 | 3 | Plataforma + módulo: `user_module_roles`, CLI, `require_module_access`; esqueleto `settlements`; `/rendiciones` con logo; selector de módulos | Pendiente |
 
 Límites: ninguna tabla de negocio de Rendiciones; no se avanza a R1 sin aprobación de Enzo.

@@ -17,6 +17,7 @@ Línea base de Fase 0 (detalle en `ARCHITECTURE.md §8` y ADR 004).
 | Headers | `X-Content-Type-Options`, `X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy` |
 | Contenedores | Procesos sin root; puertos publicados solo en `127.0.0.1` |
 | Redirecciones | Login solo redirige a rutas relativas del mismo sitio |
+| Datos de empleados | Administración solo para administradores de plataforma; el teléfono (PII) no se registra en auditoría ni en logs |
 
 ## Pendiente (fases siguientes)
 - Archivos subidos (Fase 1): límite de tamaño, extensión + MIME + firma, nombre sanitizado, sin macros ni fórmulas.

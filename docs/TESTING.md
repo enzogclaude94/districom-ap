@@ -24,6 +24,11 @@ cd frontend && pnpm test
 cd frontend && pnpm e2e
 ```
 
+## R0 (Rendiciones: habilitación)
+- `test_employees_api.py`: alta, edición auditada con antes/después sin PII, búsqueda y filtros, asignación y cierre de funciones con historia, solapamiento rechazado (servicio y base), baja lógica que cierra funciones, reactivación, permisos de plataforma.
+- `test_employee_functions_registry.py`: registro idempotente y prefijo obligatorio del módulo.
+- Frontend: formulario, lista y funciones de empleados. E2E: alta → función → baja (desktop y móvil).
+
 ## Fase 0
 - `test_migrations.py`: upgrade → downgrade → upgrade desde base vacía, una sola head, `source_systems` sembrado.
 - `test_health.py`: DB ok (200) y caída (503).
