@@ -478,3 +478,69 @@ def get_operation(db: Session, operation_id: int) -> FinancialOperation:
     if operation is None:
         raise AppError(404, "operation_not_found", "La operación no existe.")
     return operation
+
+
+@dataclass(frozen=True)
+class EntryDetail:
+    account_id: int
+    account_name: str
+    account_kind: str
+    amount: Decimal
+
+
+@dataclass(frozen=True)
+class OperationDetail:
+    id: int
+    type: str
+    business_date: date
+    description: str | None
+    created_by: int
+    created_by_name: str
+    created_at: datetime
+    source_type: str | None
+    source_id: int | None
+    reverses_operation_id: int | None
+    reversed_by_operation_id: int | None
+    entries: list[EntryDetail]
+
+
+def operation_detail(db: Session, operation_id: int) -> OperationDetail:
+    """An operation as the API shows it: legs with their accounts, author and reversal links."""
+    operation = get_operation(db, operation_id)
+    accounts = {
+        a.id: a for a in db.scalars(select(Account).where(Account.id.in_([e.account_id for e in operation.entries])))
+    }
+    author = db.get(User, operation.created_by)
+    return OperationDetail(
+        id=operation.id,
+        type=operation.type,
+        business_date=operation.business_date,
+        description=operation.description,
+        created_by=operation.created_by,
+        created_by_name=author.full_name if author else "",
+        created_at=operation.created_at,
+        source_type=operation.source_type,
+        source_id=operation.source_id,
+        reverses_operation_id=operation.reverses_operation_id,
+        reversed_by_operation_id=_reversed_by(db, operation.id),
+        entries=[
+            EntryDetail(e.account_id, accounts[e.account_id].name, accounts[e.account_id].kind, e.amount)
+            for e in operation.entries
+        ],
+    )
+
+
+def account_balance(db: Session, account_id: int, *, on: date | None = None) -> AccountBalance:
+    """One account with its balance (inactive accounts included)."""
+    for balance in account_balances(db, on=on, include_inactive=True):
+        if balance.account_id == account_id:
+            return balance
+    raise AppError(404, "account_not_found", "La cuenta no existe.")
+
+
+def system_account_id(db: Session, code: str) -> int:
+    """Id of a seeded system account (`opening_balance`, `adjustment`...) by its stable code."""
+    account_id = db.scalar(select(Account.id).where(Account.code == code))
+    if account_id is None:
+        raise AppError(500, "missing_system_account", "Falta una cuenta del sistema.")
+    return account_id
