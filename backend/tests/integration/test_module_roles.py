@@ -106,9 +106,10 @@ def test_settings_show_each_module_to_its_admins(login, grant) -> None:  # type:
     grant("viewer", "commercial", "operator")
     scopes = client.get("/api/v1/settings").json()
     assert [s["scope"] for s in scopes] == ["settlements"]
-    (setting,) = scopes[0]["settings"]
-    assert setting["key"] == "settlements.pending_alert_hours"
-    assert setting["value"] == 24
+    alert, denominations = scopes[0]["settings"]
+    assert (alert["key"], alert["value"]) == ("settlements.pending_alert_hours", 24)
+    assert denominations["key"] == "settlements.cash_denominations"
+    assert denominations["is_default"] is True
 
 
 def test_settlements_registers_the_delivery_driver_function(login) -> None:  # type: ignore[no-untyped-def]

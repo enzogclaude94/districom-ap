@@ -97,4 +97,34 @@ describe("SettingsTable", () => {
     expect(screen.getByText("commercial.active_window_days")).toBeInTheDocument();
     expect(screen.getByText("Personalizado")).toBeInTheDocument();
   });
+
+  it("shows a list of objects (cash denominations) item by item", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse(200, [
+        {
+          scope: "settlements",
+          label: "Rendiciones",
+          settings: [
+            {
+              key: "settlements.cash_denominations",
+              label: "Denominaciones de efectivo",
+              description: "",
+              value: [
+                { code: "ARS_20000", value: "20000.00", active: true, suggested_destination: "main_cash" },
+                { code: "ARS_100", value: "100.00", active: true, suggested_destination: "change_cash" },
+              ],
+              is_default: true,
+            },
+          ],
+        },
+      ]),
+    );
+    renderWithQuery(<SettingsTable />);
+    expect(
+      await screen.findByText(
+        "code: ARS_20000 · value: 20000.00 · active: true · suggested_destination: main_cash | " +
+          "code: ARS_100 · value: 100.00 · active: true · suggested_destination: change_cash",
+      ),
+    ).toBeInTheDocument();
+  });
 });

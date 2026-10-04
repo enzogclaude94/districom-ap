@@ -12,10 +12,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { ApiError } from "@/lib/api/client";
 import { settingsApi } from "@/lib/api/settings";
 
-function formatValue(value: unknown) {
+function formatValue(value: unknown): string {
+  // Lists of objects (e.g. settlements.cash_denominations): one item per group.
+  if (Array.isArray(value)) return value.map(formatValue).join(" | ");
   if (value !== null && typeof value === "object") {
     return Object.entries(value)
-      .map(([key, v]) => `${key}: ${String(v)}`)
+      .map(([key, v]) => `${key}: ${formatValue(v)}`)
       .join(" · ");
   }
   return String(value);
