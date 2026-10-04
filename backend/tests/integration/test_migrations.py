@@ -124,3 +124,28 @@ def test_module_roles_migration_keeps_viewers_in_commercial() -> None:
         with engine.begin() as conn:
             conn.execute(text("TRUNCATE users RESTART IDENTITY CASCADE"))
         engine.dispose()
+
+
+def test_account_name_key_backfill() -> None:
+    """0006 derives name_key from the existing names: case, accents and spacing do not count."""
+    cfg = alembic_config()
+    url = cfg.get_main_option("sqlalchemy.url")
+    assert url
+    command.downgrade(cfg, "0005")
+    engine = create_engine(url)
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO settlements.accounts (name, kind, allow_negative)"
+                    " VALUES ('  José   ÁLVAREZ ', 'OWNER_EQUITY', true)"
+                )
+            )
+        command.upgrade(cfg, "head")
+        with engine.connect() as conn:
+            keys = conn.execute(text("SELECT name_key FROM settlements.accounts ORDER BY id")).scalars().all()
+        assert keys == ["caja principal", "caja de cambio", "banco", "saldo inicial", "ajustes", "jose alvarez"]
+    finally:
+        with engine.begin() as conn:
+            conn.execute(text("DELETE FROM settlements.accounts WHERE kind = 'OWNER_EQUITY'"))
+        engine.dispose()

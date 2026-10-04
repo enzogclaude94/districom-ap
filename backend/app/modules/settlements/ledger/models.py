@@ -24,7 +24,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from app.db.base import Base, IdMixin, TimestampMixin
 
@@ -47,6 +47,17 @@ OPERATION_TYPES = (
 )
 # Operations whose description is the mandatory reason.
 REASON_REQUIRED_TYPES = ("ADJUSTMENT", "REVERSAL")
+
+
+_ACCENTS = str.maketrans("áàäâéèëêíìïîóòöôúùüû", "aaaaeeeeiiiioooouuuu")
+
+
+def account_name_key(name: str) -> str:
+    """Comparison key of an account name: case, accents and spacing do not make two accounts different.
+
+    Migration 0006 computes the same key in SQL for existing rows.
+    """
+    return " ".join(name.split()).lower().translate(_ACCENTS)
 
 
 def _in(values: tuple[str, ...]) -> str:
@@ -77,9 +88,16 @@ class Account(IdMixin, TimestampMixin, Base):
     # Stable code of system accounts (seeded); NULL for accounts created by an admin.
     code: Mapped[str | None] = mapped_column(String(40))
     name: Mapped[str] = mapped_column(String(120), unique=True)
+    # Unique: "Juan Pérez" and "juan  perez" are the same partner, active or not (no duplicate accounts).
+    name_key: Mapped[str] = mapped_column(String(120), unique=True)
     kind: Mapped[str] = mapped_column(String(30))
     allow_negative: Mapped[bool] = mapped_column(Boolean, server_default="false")
     active: Mapped[bool] = mapped_column(Boolean, server_default="true")
+
+    @validates("name")
+    def _set_name_key(self, _: str, name: str) -> str:
+        self.name_key = account_name_key(name)
+        return name
 
 
 class FinancialOperation(IdMixin, Base):

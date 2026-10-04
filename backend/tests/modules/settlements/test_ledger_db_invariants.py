@@ -126,7 +126,8 @@ def test_negative_check_follows_allow_negative(conn: Connection) -> None:
     owner = int(
         conn.execute(
             text(
-                "INSERT INTO settlements.accounts (name, kind, allow_negative) VALUES ('Socio', 'OWNER_EQUITY', true)"
+                "INSERT INTO settlements.accounts (name, name_key, kind, allow_negative)"
+                " VALUES ('Socio', 'socio', 'OWNER_EQUITY', true)"
                 " RETURNING id"
             )
         ).scalar_one()
@@ -150,8 +151,10 @@ def test_only_one_opening_balance_and_adjustment_account(conn: Connection) -> No
     for kind in ("OPENING_BALANCE", "ADJUSTMENT"):
         with pytest.raises(IntegrityError, match="uq_accounts_technical_kind"):
             conn.execute(
-                text("INSERT INTO settlements.accounts (name, kind, allow_negative) VALUES (:n, :k, true)"),
-                {"n": f"Otra {kind}", "k": kind},
+                text(
+                    "INSERT INTO settlements.accounts (name, name_key, kind, allow_negative) VALUES (:n, :n, :k, true)"
+                ),
+                {"n": f"otra {kind}", "k": kind},
             )
         conn.rollback()
 
