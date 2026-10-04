@@ -1,6 +1,5 @@
 """Cajas API (R1-2): reading, operations per role, idempotency over HTTP and error contract."""
 
-from collections.abc import Callable
 from datetime import timedelta
 from typing import Any
 from uuid import uuid4
@@ -15,25 +14,6 @@ from tests.conftest import PASSWORD
 
 BASE = "/api/v1/settlements"
 TODAY = business_today()
-
-
-@pytest.fixture
-def as_role(client: TestClient, make_user, grant) -> Callable[[str], TestClient]:  # type: ignore[no-untyped-def]
-    """Log in as the platform admin ("admin") or as a user with that role in Rendiciones only."""
-    created: set[str] = set()
-
-    def _as(role: str) -> TestClient:
-        email = f"{role}@districom.test"
-        if role not in created:
-            make_user(email=email, role="admin" if role == "admin" else "viewer")
-            if role in ("viewer", "operator"):
-                grant(role, "settlements", role)
-            created.add(role)
-        response = client.post("/api/v1/auth/login", json={"email": email, "password": PASSWORD})
-        assert response.status_code == 200, response.text
-        return client
-
-    return _as
 
 
 @pytest.fixture
