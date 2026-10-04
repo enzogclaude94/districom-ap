@@ -73,15 +73,22 @@ def test_viewer_is_forbidden_on_admin_endpoint(login) -> None:  # type: ignore[n
     assert response.json()["code"] == "forbidden"
 
 
-def test_me_lists_accessible_modules_with_role(login) -> None:  # type: ignore[no-untyped-def]
+def test_platform_admin_is_admin_in_every_module(login) -> None:  # type: ignore[no-untyped-def]
     admin = login("admin").get("/api/v1/auth/me").json()
     assert admin["role"] == "admin"
-    assert admin["modules"] == [{"key": "commercial", "name": "Inteligencia Comercial", "role": "admin"}]
+    assert admin["modules"] == [
+        {"key": "commercial", "name": "Inteligencia Comercial", "role": "admin"},
+        {"key": "settlements", "name": "Rendiciones", "role": "admin"},
+    ]
 
 
-def test_viewer_gets_viewer_role_in_modules(login) -> None:  # type: ignore[no-untyped-def]
-    viewer = login("viewer").get("/api/v1/auth/me").json()
-    assert viewer["modules"] == [{"key": "commercial", "name": "Inteligencia Comercial", "role": "viewer"}]
+def test_other_users_only_see_granted_modules(login, grant) -> None:  # type: ignore[no-untyped-def]
+    client = login("viewer")
+    assert client.get("/api/v1/auth/me").json()["modules"] == []
+    grant("viewer", "commercial", "viewer")
+    assert client.get("/api/v1/auth/me").json()["modules"] == [
+        {"key": "commercial", "name": "Inteligencia Comercial", "role": "viewer"}
+    ]
 
 
 def test_logout_revokes_session(login) -> None:  # type: ignore[no-untyped-def]

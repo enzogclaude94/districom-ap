@@ -28,7 +28,13 @@ def run_migrations_online() -> None:
         config.get_section(config.config_ini_section, {}), prefix="sqlalchemy.", poolclass=pool.NullPool
     )
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata, compare_type=True)
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            compare_type=True,
+            # One Alembic chain for the platform (`public`) and every module schema (ARCHITECTURE.md §4.4).
+            include_schemas=True,
+        )
         with context.begin_transaction():
             context.run_migrations()
 

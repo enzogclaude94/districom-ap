@@ -34,9 +34,9 @@ test("admin logs in, navigates and logs out", async ({ page, isMobile }) => {
   await expect(page).toHaveURL(/\/comercial$/);
   await expect(page.getByText("Todavía no hay datos comerciales")).toBeVisible();
 
-  // The platform home sends the user to their module.
+  // With more than one module, the platform home is the module selector.
   await page.goto("/");
-  await expect(page).toHaveURL(/\/comercial$/);
+  await expect(page.getByRole("heading", { name: "Módulos" })).toBeVisible();
 
   await page.getByRole("button", { name: "Cerrar sesión" }).click();
   await expect(page).toHaveURL(/\/login$/);
@@ -45,7 +45,12 @@ test("admin logs in, navigates and logs out", async ({ page, isMobile }) => {
 });
 
 test("brand assets are public (login page renders the wordmark)", async ({ page, request }) => {
-  for (const path of ["/brand/districom-wordmark.svg", "/brand/districom-icon-96.png", "/favicon.ico"]) {
+  for (const path of [
+    "/brand/districom-wordmark.svg",
+    "/brand/districom-icon-96.png",
+    "/brand/districom-rendiciones.png",
+    "/favicon.ico",
+  ]) {
     const response = await request.get(path, { maxRedirects: 0 });
     expect(response.status(), path).toBe(200);
   }

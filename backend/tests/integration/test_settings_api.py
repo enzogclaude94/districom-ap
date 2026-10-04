@@ -10,9 +10,9 @@ def _scopes(client: TestClient) -> dict[str, dict[str, dict]]:  # type: ignore[t
     return {scope["scope"]: {s["key"]: s for s in scope["settings"]} for scope in response.json()}
 
 
-def test_admin_sees_platform_and_commercial_scopes_with_defaults(login) -> None:  # type: ignore[no-untyped-def]
+def test_admin_sees_platform_and_module_scopes_with_defaults(login) -> None:  # type: ignore[no-untyped-def]
     scopes = _scopes(login("admin"))
-    assert list(scopes) == ["platform", "commercial"]
+    assert list(scopes) == ["platform", "commercial", "settlements"]
     assert scopes["platform"]["platform.currency"] == {
         "key": "platform.currency",
         "label": "Moneda",

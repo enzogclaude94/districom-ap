@@ -1,0 +1,30 @@
+"""Router of Rendiciones, mounted at /api/v1/settlements.
+
+Every endpoint added here must depend on `require_module_access("settlements", ...)`. R0 only
+exposes the module status; business endpoints arrive from R1 on (ROADMAP.md).
+"""
+
+from typing import Annotated
+
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel
+
+from app.platform.auth.access import module_role, require_module_access
+from app.platform.auth.models import User
+
+router = APIRouter(tags=["settlements"])
+
+ModuleViewer = Annotated[User, Depends(require_module_access("settlements", "viewer"))]
+
+
+class ModuleStatusOut(BaseModel):
+    module: str
+    role: str
+
+
+@router.get("/status", response_model=ModuleStatusOut)
+def status(user: ModuleViewer) -> ModuleStatusOut:
+    """The caller's role in Rendiciones; 403 without access."""
+    role = module_role(user, "settlements")
+    assert role is not None  # guaranteed by require_module_access
+    return ModuleStatusOut(module="settlements", role=role)

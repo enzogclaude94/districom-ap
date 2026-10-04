@@ -21,11 +21,12 @@ function isActive(pathname: string, item: NavItem) {
 interface NavLinkProps {
   item: NavItem;
   pathname: string;
+  phasePrefix: string;
   nested?: boolean;
   icon?: LucideIcon;
 }
 
-function NavLink({ item, pathname, nested, icon: Icon }: NavLinkProps) {
+function NavLink({ item, pathname, phasePrefix, nested, icon: Icon }: NavLinkProps) {
   const base = cn("flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-sm", nested && "pl-7.5");
   const label = (
     <span className="flex items-center gap-2">
@@ -37,8 +38,9 @@ function NavLink({ item, pathname, nested, icon: Icon }: NavLinkProps) {
     return (
       <span className={cn(base, "cursor-not-allowed text-muted-foreground/70")} aria-disabled="true">
         {label}
-        <Badge className="px-1.5 text-[10px]" title={`Disponible en la fase ${item.phase}`}>
-          F{item.phase}
+        <Badge className="px-1.5 text-[10px]" title={`Disponible en la fase ${phasePrefix}${item.phase}`}>
+          {phasePrefix}
+          {item.phase}
         </Badge>
       </span>
     );
@@ -55,7 +57,13 @@ function NavLink({ item, pathname, nested, icon: Icon }: NavLinkProps) {
   );
 }
 
-function Sections({ sections, pathname }: { sections: NavSection[]; pathname: string }) {
+interface SectionsProps {
+  sections: NavSection[];
+  pathname: string;
+  phasePrefix: string;
+}
+
+function Sections({ sections, pathname, phasePrefix }: SectionsProps) {
   return sections.map((section) => {
     const Icon = section.icon;
     if (section.href) {
@@ -63,6 +71,7 @@ function Sections({ sections, pathname }: { sections: NavSection[]; pathname: st
         <NavLink
           key={section.label}
           pathname={pathname}
+          phasePrefix={phasePrefix}
           icon={Icon}
           item={{ label: section.label, href: section.href, phase: section.phase, exact: section.exact }}
         />
@@ -75,23 +84,31 @@ function Sections({ sections, pathname }: { sections: NavSection[]; pathname: st
           {section.label}
         </p>
         {section.items?.map((item) => (
-          <NavLink key={item.href} item={item} pathname={pathname} nested />
+          <NavLink key={item.href} item={item} pathname={pathname} phasePrefix={phasePrefix} nested />
         ))}
       </div>
     );
   });
 }
 
+interface SidebarProps {
+  sections: NavSection[];
+  /** Roadmap phase prefix of the active module ("F", "R"). */
+  phasePrefix?: string;
+  platformAdmin?: boolean;
+}
+
 /** Navigation of the active module followed by the platform pages. */
-export function Sidebar({ sections, platformAdmin = false }: { sections: NavSection[]; platformAdmin?: boolean }) {
+export function Sidebar({ sections, phasePrefix = "F", platformAdmin = false }: SidebarProps) {
   const pathname = usePathname();
   return (
     <nav aria-label="Navegación principal" className="flex flex-col gap-4 p-3">
-      <Sections sections={sections} pathname={pathname} />
+      <Sections sections={sections} pathname={pathname} phasePrefix={phasePrefix} />
       <div className="border-t border-border pt-3">
         <Sections
           sections={platformAdmin ? [...PLATFORM_ADMIN_NAV, ...PLATFORM_NAV] : PLATFORM_NAV}
           pathname={pathname}
+          phasePrefix={phasePrefix}
         />
       </div>
     </nav>

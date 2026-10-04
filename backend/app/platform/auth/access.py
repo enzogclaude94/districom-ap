@@ -1,23 +1,28 @@
-"""Access to business modules (ARCHITECTURE.md §8, ADR 006).
+"""Access to business modules (ARCHITECTURE.md §8, ADR 006 and 007).
 
-Stage 0 (today): there are no per-module roles yet, so a user's role in every module is derived
-from the platform role. Stage 1 replaces `module_role` with a lookup in `user_module_roles`;
-endpoints keep using `require_module_access` unchanged.
+Stage 1: a platform admin (`users.role = admin`) is `admin` in every installed module; any other
+user has the role stored in `user_module_roles`, or no access. Endpoints only use
+`require_module_access`, so a future per-action stage changes this file alone.
 """
 
 from collections.abc import Callable
 
 from app.core.errors import AppError
 from app.platform.auth.deps import CurrentUser
-from app.platform.auth.models import User
+from app.platform.auth.models import MODULE_ROLES, User
 from app.platform.modules import ModuleSpec, installed_modules
-
-MODULE_ROLES = ("viewer", "admin")  # ordered from least to most privileged
 
 
 def module_role(user: User, module_key: str) -> str | None:
     """Role of `user` in the module, or None without access."""
-    return "admin" if user.role == "admin" else "viewer"
+    if module_key not in {module.key for module in installed_modules()}:
+        return None
+    if user.role == "admin":
+        return "admin"
+    for grant in user.module_roles:
+        if grant.module_key == module_key:
+            return grant.role
+    return None
 
 
 def has_module_access(user: User, module_key: str, min_role: str = "viewer") -> bool:

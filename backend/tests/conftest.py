@@ -33,6 +33,7 @@ TRUNCATED_TABLES = (
     "app_settings",
     "employees",
     "employee_functions",
+    "user_module_roles",
 )
 
 
@@ -82,6 +83,17 @@ def make_user(db: Session):  # type: ignore[no-untyped-def]
         return create_user(db, email, "Usuario Test", password, role)
 
     return _make
+
+
+@pytest.fixture
+def grant(db: Session):  # type: ignore[no-untyped-def]
+    """Give `<role>@districom.test` a role in a module (per-module access, stage 1)."""
+    from app.platform.auth.module_roles import grant_module_role
+
+    def _grant(user_role: str, module: str, module_role: str) -> None:
+        grant_module_role(db, f"{user_role}@districom.test", module, module_role)
+
+    return _grant
 
 
 @pytest.fixture

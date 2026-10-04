@@ -4,6 +4,7 @@
 """
 
 from app.modules.commercial import MODULE as COMMERCIAL
+from app.modules.settlements import MODULE as SETTLEMENTS
 from app.platform.modules import ModuleSpec
 
-MODULES: tuple[ModuleSpec, ...] = (COMMERCIAL,)
+MODULES: tuple[ModuleSpec, ...] = (COMMERCIAL, SETTLEMENTS)

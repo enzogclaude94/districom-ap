@@ -74,6 +74,17 @@ uv run alembic check                               # verifica que modelos y migr
 ```
 Nunca se modifica el schema fuera de Alembic. Política completa en [`CLAUDE.md §6`](CLAUDE.md).
 
+## Usuarios y acceso a módulos
+
+```bash
+cd backend
+uv run python -m app.cli create-admin --email ... --name ...     # administrador de plataforma: admin en todos los módulos
+uv run python -m app.cli create-viewer --email ... --name ...    # usuario sin módulos hasta que se le asigne un rol
+uv run python -m app.cli grant-module-role --email ... --module settlements --role operator   # viewer | operator | admin
+uv run python -m app.cli revoke-module-role --email ... --module settlements
+```
+Módulos: `commercial` (Inteligencia Comercial) y `settlements` (Rendiciones). Detalle en `ARCHITECTURE.md §8`.
+
 ## Tests y calidad
 
 ```bash
@@ -88,13 +99,16 @@ pnpm lint && pnpm format:check && pnpm typecheck && pnpm test && pnpm build
 
 ### Tests E2E
 
-Levantan backend y frontend solos; necesitan la base migrada y un admin:
+Levantan backend y frontend solos; necesitan la base migrada, un admin y un usuario con acceso solo a Comercial:
 
 ```bash
-cd backend && echo "e2e-password-123" | uv run python -m app.cli create-admin --email e2e-admin@districom.local --name "Admin E2E"
+cd backend
+echo "e2e-password-123" | uv run python -m app.cli create-admin --email e2e-admin@districom.local --name "Admin E2E"
+echo "viewer-password-123" | uv run python -m app.cli create-viewer --email e2e-viewer@districom.local --name "Viewer E2E"
+uv run python -m app.cli grant-module-role --email e2e-viewer@districom.local --module commercial --role viewer
 cd ../frontend && pnpm exec playwright install chromium && pnpm e2e
 ```
-(Credenciales configurables con `E2E_ADMIN_EMAIL` / `E2E_ADMIN_PASSWORD`.)
+(Credenciales configurables con `E2E_ADMIN_EMAIL` / `E2E_ADMIN_PASSWORD` y `E2E_VIEWER_EMAIL` / `E2E_VIEWER_PASSWORD`.)
 
 CI (GitHub Actions) corre todo lo anterior más un smoke test de Docker Compose en cada push y PR. Detalle en [`docs/TESTING.md`](docs/TESTING.md).
 
