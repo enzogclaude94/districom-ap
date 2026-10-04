@@ -12,7 +12,16 @@ EXPECTED_TABLES = {
     "source_systems",
     "employees",
     "employee_functions",
+    "user_module_roles",
 }
+
+
+def _schemas(url: str) -> set[str]:
+    engine = create_engine(url)
+    try:
+        return set(inspect(engine).get_schema_names())
+    finally:
+        engine.dispose()
 
 
 def _tables(url: str) -> set[str]:
@@ -30,9 +39,11 @@ def test_migrations_upgrade_downgrade_upgrade_from_scratch() -> None:
 
     command.downgrade(cfg, "base")
     assert _tables(url) == set()
+    assert "settlements" not in _schemas(url)
 
     command.upgrade(cfg, "head")
     assert _tables(url) >= EXPECTED_TABLES
+    assert "settlements" in _schemas(url)
 
     command.downgrade(cfg, "base")
     assert _tables(url) == set()
@@ -53,3 +64,30 @@ def test_source_systems_seeded(migrated_db: None) -> None:
         codes = set(conn.execute(text("SELECT code FROM source_systems")).scalars())
     engine.dispose()
     assert codes == {"AXUM", "STORE_SYS", "MANUAL", "DEMO"}
+
+
+def test_module_roles_migration_keeps_viewers_in_commercial() -> None:
+    """Stage 0 viewers could read Inteligencia Comercial; after 0003 they keep it as an explicit role."""
+    cfg = alembic_config()
+    url = cfg.get_main_option("sqlalchemy.url")
+    assert url
+    command.downgrade(cfg, "0002")
+    engine = create_engine(url)
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO users (email, full_name, role) VALUES "
+                    "('v@districom.test', 'V', 'viewer'), ('a@districom.test', 'A', 'admin')"
+                )
+            )
+        command.upgrade(cfg, "head")
+        with engine.connect() as conn:
+            rows = conn.execute(
+                text("SELECT u.email, r.module_key, r.role FROM user_module_roles r JOIN users u ON u.id = r.user_id")
+            ).all()
+        assert [tuple(row) for row in rows] == [("v@districom.test", "commercial", "viewer")]
+    finally:
+        with engine.begin() as conn:
+            conn.execute(text("TRUNCATE users RESTART IDENTITY CASCADE"))
+        engine.dispose()
