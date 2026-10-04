@@ -34,7 +34,11 @@ TRUNCATED_TABLES = (
     "employees",
     "employee_functions",
     "user_module_roles",
+    "settlements.ledger_entries",
+    "settlements.financial_operations",
 )
+# Rendiciones accounts seeded by migration 0005; tests may add others, which are removed afterwards.
+SEEDED_ACCOUNTS = ("main_cash", "change_cash", "bank", "opening_balance", "adjustment")
 
 
 def alembic_config() -> Config:
@@ -60,6 +64,10 @@ def db(migrated_db: None) -> Iterator[Session]:
     session.close()
     with session.get_bind().begin() as conn:  # type: ignore[union-attr]
         conn.execute(text(f"TRUNCATE {', '.join(TRUNCATED_TABLES)} RESTART IDENTITY CASCADE"))
+        conn.execute(
+            text("DELETE FROM settlements.accounts WHERE code IS NULL OR code <> ALL(:codes)"),
+            {"codes": list(SEEDED_ACCOUNTS)},
+        )
 
 
 @pytest.fixture
