@@ -1,5 +1,6 @@
 """Import every model module so Base.metadata is complete (used by Alembic)."""
 
+from app.modules.settlements.delivery import models as settlements_delivery_models
 from app.modules.settlements.ledger import models as settlements_ledger_models
 from app.platform.audit import models as audit_models
 from app.platform.auth import models as auth_models
@@ -12,6 +13,7 @@ __all__ = [
     "auth_models",
     "parties_models",
     "settings_models",
+    "settlements_delivery_models",
     "settlements_ledger_models",
     "sources_models",
 ]
