@@ -2,11 +2,19 @@ import { apiFetch } from "@/lib/api/client";
 
 export type Role = "admin" | "viewer";
 
+export interface ModuleAccess {
+  key: string;
+  name: string;
+  role: Role;
+}
+
 export interface CurrentUser {
   id: number;
   email: string;
   full_name: string;
+  /** Platform role. Per-module access is in `modules`. */
   role: Role;
+  modules: ModuleAccess[];
 }
 
 export const authApi = {

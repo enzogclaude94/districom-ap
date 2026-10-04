@@ -1,8 +1,8 @@
-# DistriCom · Inteligencia Comercial
+# DistriCom
 
-Plataforma web de inteligencia comercial para una distribuidora de bebidas. Analiza datos de **AXUM** (preventa) y **STORE SYS** (facturación) para responder qué está pasando, dónde se pierden oportunidades y qué acción concreta tomar. No reemplaza a esos sistemas: es una capa de análisis.
+Plataforma web modular para una distribuidora de bebidas: un núcleo compartido (usuarios, configuración, identidades) y módulos de negocio en una sola aplicación. El módulo en desarrollo es **Inteligencia Comercial**, que analiza datos de **AXUM** (preventa) y **STORE SYS** (facturación) para responder qué está pasando, dónde se pierden oportunidades y qué acción concreta tomar. No reemplaza a esos sistemas: es una capa de análisis.
 
-**Estado:** Fase 0 (fundación). Ver [`PLAN.md`](PLAN.md) y [`ROADMAP.md`](ROADMAP.md).
+**Estado:** Fase 0 DONE; preparación de la plataforma modular (ADR 006) y de la Fase 1. Ver [`PLAN.md`](PLAN.md) y [`ROADMAP.md`](ROADMAP.md).
 
 ## Arquitectura
 
@@ -10,7 +10,7 @@ Plataforma web de inteligencia comercial para una distribuidora de bebidas. Anal
 Navegador → Next.js (frontend, :3000) → /api/* → FastAPI (backend, :8000) → PostgreSQL
 ```
 
-Monorepo con monolito modular. Detalle en [`ARCHITECTURE.md`](ARCHITECTURE.md); decisiones en [`docs/ADR/`](docs/ADR).
+Monorepo con monolito modular: una sola aplicación con un núcleo de **plataforma** (`backend/app/platform/`) y **módulos** (`backend/app/modules/<módulo>/`, `frontend/src/modules/<módulo>/`), una base PostgreSQL con un schema por módulo. Detalle en [`ARCHITECTURE.md`](ARCHITECTURE.md); decisiones en [`docs/ADR/`](docs/ADR) (ver ADR 006).
 
 | Carpeta | Contenido |
 |---|---|
@@ -76,7 +76,7 @@ Nunca se modifica el schema fuera de Alembic. Política completa en [`CLAUDE.md 
 ```bash
 # Backend: usa TEST_DATABASE_URL (base descartable; se migra desde cero en cada corrida)
 cd backend
-uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run pytest
+uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run lint-imports && uv run pytest
 
 # Frontend
 cd frontend

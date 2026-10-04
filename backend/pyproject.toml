@@ -1,7 +1,7 @@
 [project]
 name = "districom-backend"
 version = "0.1.0"
-description = "Districom commercial intelligence API"
+description = "DistriCom modular platform API"
 requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.20.0",
@@ -18,6 +18,7 @@ dependencies = [
 dev = [
     "fastapi[standard]>=0.142.2",
     "httpx>=0.28.1",
+    "import-linter>=2.15",
     "mypy>=2.4.0",
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
@@ -45,3 +46,20 @@ files = ["app"]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
 markers = ["integration: requires PostgreSQL"]
+
+# Module boundaries (ARCHITECTURE.md §4.2). Run with `uv run lint-imports`.
+[tool.importlinter]
+root_package = "app"
+include_external_packages = false
+
+[[tool.importlinter.contracts]]
+name = "Layers: api -> modules -> platform -> db -> core"
+type = "layers"
+layers = ["app.api", "app.modules", "app.platform", "app.db", "app.core"]
+# db/models.py imports every model only to register it on Base.metadata for Alembic.
+ignore_imports = ["app.db.models -> app.platform.**"]  # add app.modules.** when a module has models
+
+[[tool.importlinter.contracts]]
+name = "Modules do not import each other (only a declared public.py, none today)"
+type = "independence"
+modules = ["app.modules.*"]

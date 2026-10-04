@@ -3,10 +3,16 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from app.audit.service import record_event
-from app.auth.models import ROLES, User, UserSession
-from app.auth.security import MIN_PASSWORD_LENGTH, hash_password, hash_token, new_session_token, verify_password
 from app.core.config import Settings
+from app.platform.audit.service import record_event
+from app.platform.auth.models import ROLES, User, UserSession
+from app.platform.auth.security import (
+    MIN_PASSWORD_LENGTH,
+    hash_password,
+    hash_token,
+    new_session_token,
+    verify_password,
+)
 
 
 def authenticate(db: Session, email: str, password: str) -> User | None:

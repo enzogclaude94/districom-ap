@@ -10,8 +10,8 @@ const manrope = Manrope({ variable: "--font-manrope", subsets: ["latin"], weight
 const inter = Inter({ variable: "--font-inter", subsets: ["latin"], weight: ["400", "500", "600"] });
 
 export const metadata: Metadata = {
-  title: { default: "DistriCom · Inteligencia Comercial", template: "%s · DistriCom" },
-  description: "Inteligencia comercial para distribuidoras.",
+  title: { default: "DistriCom", template: "%s · DistriCom" },
+  description: "Plataforma de gestión para distribuidoras.",
   robots: { index: false, follow: false },
 };
 

@@ -25,10 +25,18 @@ test("admin logs in, navigates and logs out", async ({ page, isMobile }) => {
   await expect(page).toHaveURL(/\/configuracion$/);
   await expect(page.getByRole("heading", { name: "Configuración" })).toBeVisible();
   await expect(page.getByRole("cell", { name: /Moneda/ })).toBeVisible();
+  // One section per settings scope: general (platform) and the commercial module.
+  await expect(page.getByText("General", { exact: true })).toBeVisible();
+  await expect(page.getByRole("cell", { name: /commercial\.active_window_days/ })).toBeVisible();
 
   if (isMobile) await page.getByRole("button", { name: "Abrir menú" }).click();
   await page.getByRole("link", { name: "Inicio" }).click();
+  await expect(page).toHaveURL(/\/comercial$/);
   await expect(page.getByText("Todavía no hay datos comerciales")).toBeVisible();
+
+  // The platform home sends the user to their module.
+  await page.goto("/");
+  await expect(page).toHaveURL(/\/comercial$/);
 
   await page.getByRole("button", { name: "Cerrar sesión" }).click();
   await expect(page).toHaveURL(/\/login$/);

@@ -4,11 +4,11 @@ from typing import Annotated
 from fastapi import Depends, Request
 from sqlalchemy.orm import Session
 
-from app.auth.models import User
-from app.auth.service import resolve_session
 from app.core.config import Settings, get_settings
 from app.core.errors import AppError
 from app.db.session import get_db
+from app.platform.auth.models import User
+from app.platform.auth.service import resolve_session
 
 SESSION_COOKIE = "districom_session"
 

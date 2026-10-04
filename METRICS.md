@@ -1,7 +1,9 @@
 # METRICS — Fuente de verdad de métricas comerciales
 
+> **Módulo:** Inteligencia Comercial (`commercial`). Las métricas de otros módulos, cuando existan, se documentan aparte.
+
 > v0.1 · 2026-10-02
-> **Regla:** ningún KPI aparece en la interfaz si no está definido aquí. Cada métrica tiene un `id` estable que coincide con el registro en `backend/app/analytics/metrics/`. El frontend nunca calcula métricas: muestra el valor, el numerador, el denominador y la definición que devuelve la API.
+> **Regla:** ningún KPI aparece en la interfaz si no está definido aquí. Cada métrica tiene un `id` estable que coincide con el registro en `backend/app/modules/commercial/analytics/metrics/`. El frontend nunca calcula métricas: muestra el valor, el numerador, el denominador y la definición que devuelve la API.
 
 ## 1. Conceptos base
 

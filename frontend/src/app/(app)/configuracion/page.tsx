@@ -8,7 +8,7 @@ export const metadata: Metadata = { title: "Configuración" };
 export default function SettingsPage() {
   return (
     <>
-      <PageHeader title="Configuración" description="Parámetros que gobiernan métricas, estados y oportunidades." />
+      <PageHeader title="Configuración" description="Parámetros generales y de cada módulo." />
       <SettingsTable />
     </>
   );

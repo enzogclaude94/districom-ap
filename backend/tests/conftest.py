@@ -53,8 +53,8 @@ def db(migrated_db: None) -> Iterator[Session]:
 
 @pytest.fixture
 def client(db: Session) -> Iterator[TestClient]:
-    from app.auth.router import login_limiter
     from app.main import app
+    from app.platform.auth.router import login_limiter
 
     login_limiter._failures.clear()
     with TestClient(app, headers={"X-Requested-With": "test"}) as test_client:
@@ -66,7 +66,7 @@ PASSWORD = "correct-horse-battery"
 
 @pytest.fixture
 def make_user(db: Session):  # type: ignore[no-untyped-def]
-    from app.auth.service import create_user
+    from app.platform.auth.service import create_user
 
     def _make(email: str = "admin@districom.test", role: str = "admin", password: str = PASSWORD):  # type: ignore[no-untyped-def]
         return create_user(db, email, "Usuario Test", password, role)

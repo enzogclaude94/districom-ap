@@ -4,6 +4,15 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Changed — Plataforma modular (ADR 006)
+- **Documentación:** DistriCom pasa a describirse como plataforma modular (núcleo compartido + módulos) con Inteligencia Comercial como único módulo en desarrollo. ADR 006; `ARCHITECTURE.md` v0.2 (estructura `platform/` + `modules/`, regla de dependencias, excepción analítica acotada al módulo, patrón para agregar módulos, acceso por módulo en etapas); `CLAUDE.md`, `ROADMAP.md` (carril Plataforma), README.
+- **Backend reorganizado:** `auth`, `audit`, `settings_store` (ahora `settings`) y `sources` pasan a `app/platform/`; `app/modules/` aloja los módulos. Sin cambios de comportamiento, tablas ni endpoints.
+- **Configuración por scope:** parámetros con claves `platform.*` (moneda, inicio de semana) y `commercial.*` (los 14 de `METRICS.md §6`), cada scope con defaults y etiquetas junto a su dueño; `GET /api/v1/settings` devuelve secciones según los permisos del usuario y la pantalla Configuración muestra "General" e "Inteligencia Comercial". La zona horaria de negocio queda solo como variable de entorno `BUSINESS_TIMEZONE` (ya no figura como parámetro).
+- **Acceso por módulo (Etapa 0):** `require_module_access(módulo, rol mínimo)` y `GET /auth/me` con `modules: [{key, name, role}]`, derivados del rol de plataforma; el módulo comercial se monta en `/api/v1/commercial` (sin endpoints todavía).
+- **Frontend modular:** Inteligencia Comercial vive bajo `/comercial` (Inicio y la navegación del módulo); `/` redirige al módulo; la sidebar muestra el nombre del módulo, su navegación y las páginas de plataforma (Configuración); la sección "Comercial" pasa a llamarse "Equipo y clientes"; título de la app y login dicen "DistriCom".
+- **Límites verificados en CI:** `import-linter` (capas api → modules → platform → db → core e independencia entre módulos) y reglas `no-restricted-imports` de ESLint en el frontend.
+- **Modelo de datos (`DATA_MODEL.md` v0.2, aún no implementado):** ownership por plataforma/módulo y schema `commercial`; `employees` + `employee_functions` (identidad única y funciones con historia) reemplazan a `salespeople`; identidad de `customers` en plataforma con `commercial.customer_profiles` para segmentación y derivados; rutas documentadas como rutas de preventa; catálogo `suppliers` diferido; tipos de import y de mapping extensibles por registro en lugar de CHECK.
+
 ### Added
 - `docs/DATA_INTAKE.md`: exportaciones reales que hacen falta de AXUM y STORE SYS, período recomendado y qué se valida en cada archivo, como entrada a la Fase 1.
 

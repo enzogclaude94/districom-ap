@@ -1,4 +1,4 @@
-from app.auth.rate_limit import LoginRateLimiter
+from app.platform.auth.rate_limit import LoginRateLimiter
 
 
 def test_blocks_after_max_failures_and_resets() -> None:

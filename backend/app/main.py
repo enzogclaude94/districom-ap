@@ -13,7 +13,7 @@ def create_app() -> FastAPI:
     configure_logging(settings.log_level)
 
     app = FastAPI(
-        title="DistriCom · Inteligencia Comercial",
+        title="DistriCom",
         version="0.1.0",
         openapi_url="/api/v1/openapi.json",
         docs_url="/api/docs",

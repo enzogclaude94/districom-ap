@@ -5,9 +5,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.audit.models import AuditEvent
-from app.auth.deps import SESSION_COOKIE
-from app.auth.models import User, UserSession
+from app.platform.audit.models import AuditEvent
+from app.platform.auth.deps import SESSION_COOKIE
+from app.platform.auth.models import User, UserSession
 from tests.conftest import PASSWORD
 
 LOGIN = "/api/v1/auth/login"
@@ -73,12 +73,15 @@ def test_viewer_is_forbidden_on_admin_endpoint(login) -> None:  # type: ignore[n
     assert response.json()["code"] == "forbidden"
 
 
-def test_admin_can_read_settings_with_defaults(login) -> None:  # type: ignore[no-untyped-def]
-    client = login("admin")
-    response = client.get("/api/v1/settings")
-    assert response.status_code == 200
-    settings = {s["key"]: s for s in response.json()}
-    assert settings["currency"] == {"key": "currency", "value": "ARS", "is_default": True}
+def test_me_lists_accessible_modules_with_role(login) -> None:  # type: ignore[no-untyped-def]
+    admin = login("admin").get("/api/v1/auth/me").json()
+    assert admin["role"] == "admin"
+    assert admin["modules"] == [{"key": "commercial", "name": "Inteligencia Comercial", "role": "admin"}]
+
+
+def test_viewer_gets_viewer_role_in_modules(login) -> None:  # type: ignore[no-untyped-def]
+    viewer = login("viewer").get("/api/v1/auth/me").json()
+    assert viewer["modules"] == [{"key": "commercial", "name": "Inteligencia Comercial", "role": "viewer"}]
 
 
 def test_logout_revokes_session(login) -> None:  # type: ignore[no-untyped-def]

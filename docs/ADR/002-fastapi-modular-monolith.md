@@ -1,6 +1,6 @@
 # ADR 002 — FastAPI y monolito modular
 
-- Estado: Aceptado · 2026-10-02
+- Estado: Aceptado · 2026-10-02 · Organización de paquetes y alcance de la excepción analítica **ampliados por ADR 006** (2026-10-03)
 
 ## Contexto
 3 preventistas, ~600 clientes, pocos usuarios internos. Mucha lógica de datos, reglas y scoring que puede evolucionar hacia estadística/ML.
