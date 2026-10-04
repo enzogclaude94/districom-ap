@@ -10,11 +10,29 @@ interface DialogProps {
   description?: ReactNode;
   onClose: () => void;
   children: ReactNode;
-  /** Visual accent for administrative actions; colours stay within the tokens. */
   className?: string;
 }
 
-/** Modal panel: Escape or the close button dismisses it; focus moves into it and returns on close. */
+const FOCUSABLE = [
+  "a[href]",
+  "button:not([disabled])",
+  "input:not([disabled]):not([type='hidden'])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  "[tabindex]:not([tabindex='-1'])",
+].join(",");
+
+function focusables(container: HTMLElement) {
+  return Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
+    (element) => !element.closest("fieldset[disabled]") && element.getAttribute("aria-hidden") !== "true",
+  );
+}
+
+/**
+ * Modal panel. While open, focus stays inside it: Tab and Shift+Tab cycle through its controls and focus
+ * that escapes (a click on the backdrop, a programmatic focus) is brought back. Escape or the close button
+ * dismisses it, and focus returns to the control that opened it.
+ */
 export function Dialog({ title, description, onClose, children, className }: DialogProps) {
   const titleId = useId();
   const panel = useRef<HTMLDivElement>(null);
@@ -24,16 +42,47 @@ export function Dialog({ title, description, onClose, children, className }: Dia
   }, [onClose]);
 
   useEffect(() => {
-    const previous = document.activeElement as HTMLElement | null;
-    const first = panel.current?.querySelector<HTMLElement>("input, select, textarea, button:not([data-close])");
-    first?.focus();
+    const opener = document.activeElement as HTMLElement | null;
+    const container = panel.current;
+    if (!container) return;
+    const first = focusables(container).find((element) => !element.hasAttribute("data-close"));
+    (first ?? container).focus();
+
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") close.current();
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        close.current();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const items = focusables(container);
+      if (items.length === 0) {
+        event.preventDefault();
+        container.focus();
+        return;
+      }
+      const firstItem = items[0];
+      const lastItem = items[items.length - 1];
+      const active = document.activeElement;
+      if (event.shiftKey && (active === firstItem || !container.contains(active))) {
+        event.preventDefault();
+        lastItem.focus();
+      } else if (!event.shiftKey && (active === lastItem || !container.contains(active))) {
+        event.preventDefault();
+        firstItem.focus();
+      }
+    };
+    const onFocusIn = (event: FocusEvent) => {
+      if (event.target instanceof Node && !container.contains(event.target)) {
+        (focusables(container)[0] ?? container).focus();
+      }
     };
     document.addEventListener("keydown", onKey);
+    document.addEventListener("focusin", onFocusIn);
     return () => {
       document.removeEventListener("keydown", onKey);
-      previous?.focus?.();
+      document.removeEventListener("focusin", onFocusIn);
+      if (opener?.isConnected) opener.focus();
     };
   }, []);
 
@@ -44,8 +93,9 @@ export function Dialog({ title, description, onClose, children, className }: Dia
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
+        tabIndex={-1}
         className={cn(
-          "max-h-[100dvh] w-full overflow-y-auto rounded-t-lg border border-border bg-surface shadow-card sm:max-w-lg sm:rounded-lg",
+          "max-h-[100dvh] w-full overflow-y-auto rounded-t-lg border border-border bg-surface shadow-card focus:outline-none sm:max-w-lg sm:rounded-lg",
           className,
         )}
       >
