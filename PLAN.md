@@ -282,3 +282,17 @@ Origen: revisión arquitectónica del 2026-10-03 (`/mnt/project-files/districom/
 | 3 | P0‑6 Acceso por módulo, Etapa 0 (`require_module_access`, `modules` en `/auth/me`) | Preparación | Hecho |
 | 3 | P0‑7 Frontend: Inteligencia Comercial bajo `/comercial`, shell de plataforma | Cambio visible menor | Hecho |
 
+
+---
+
+## 13. Rendiciones — R0 (habilitación del módulo)
+
+Origen: *Informe Inicial — DistriCom Rendiciones* (2026-10-04), aprobado por Enzo con las resoluciones C1–C6; decisión registrada en ADR 007. Alcance, criterios y fases siguientes en `ROADMAP.md` (carril Rendiciones).
+
+| PR | Contenido | Estado |
+|---|---|---|
+| 1 | Documentación: ADR 007, `CLAUDE.md`, `ARCHITECTURE.md`, `ROADMAP.md`, `DATA_MODEL.md`, `docs/BRAND.md`, PL‑1 en DONE | En revisión |
+| 2 | Plataforma: `employees` + `employee_functions`, servicio, API, pantalla de administración, registro de funciones por módulo | Pendiente |
+| 3 | Plataforma + módulo: `user_module_roles`, CLI, `require_module_access`; esqueleto `settlements`; `/rendiciones` con logo; selector de módulos | Pendiente |
+
+Límites: ninguna tabla de negocio de Rendiciones; no se avanza a R1 sin aprobación de Enzo.

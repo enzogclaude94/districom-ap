@@ -24,6 +24,23 @@ Se escribe **DistriCom** (D y C mayúsculas) en toda la interfaz y en los docume
 - En React usar siempre `<Wordmark />` y `<BrandIcon />` (`frontend/src/components/brand/`), nunca `<img>` sueltos.
 - **No** cambiar colores, no distorsionar, no agregar efectos ni íconos al wordmark. Respetar espacio libre alrededor (al menos la altura de la "o").
 
+## Logo de módulo: DistriCom Rendiciones
+
+Logo oficial actual del módulo Rendiciones, entregado por Enzo el 2026-10-04 (ADR 007, decisión C4). Jerarquía: **DistriCom** es la marca de la plataforma; **RENDICIONES** identifica el módulo.
+
+| Asset | Archivo | Uso |
+|---|---|---|
+| Original (referencia) | `docs/brand/districom-rendiciones-original.png` (2172 × 724, fondo blanco) | Fuente de verdad visual. No se usa en la app. |
+| Versión web | `frontend/public/brand/districom-rendiciones.png` (R0) | Recorte del original con fondo transparente, optimizado. Mismo arte. |
+
+Reglas:
+- **El PNG entregado manda.** No se modifican colores, tipografía, proporciones ni composición, y no se adapta al wordmark de plataforma (sus azules y su peso difieren a propósito; la unificación del branding general queda fuera de alcance).
+- Adaptaciones técnicas permitidas sin nueva aprobación: recorte, fondo transparente, optimización web. Un SVG solo si reproduce exactamente la apariencia del PNG. Cualquier otra variante (modo oscuro, compacta, isotipo, favicon, sidebar) se propone a Enzo antes de crearla.
+- Uso **estratégico**: inicio de Rendiciones, tarjeta del módulo en el selector de módulos, documentación. **No** en cada pantalla: dentro del módulo, la sidebar mantiene el wordmark de DistriCom con el texto "Rendiciones" debajo, para que siempre se lea que se está dentro de DistriCom.
+- Sin íconos de dinero, billetes, monedas, calculadoras ni cajas agregados al logo.
+- En React, solo a través del componente del módulo (`frontend/src/modules/settlements/`), nunca `<img>` sueltos.
+- Rendiciones no tiene color de acento propio: hereda tokens, tipografías y componentes. La diferencia visual con Comercial es solo el nombre del módulo, su ícono en el selector y este logo en su inicio.
+
 ## Tipografía
 
 | Rol | Fuente | Pesos | Token |
@@ -79,3 +96,4 @@ El color nunca es la única señal: siempre con ícono, texto o símbolo (▲ �
 - Variantes de wordmark (tecnológica / premium / cálida) que el Brand Concept propone explorar; hoy se usa la versión base.
 - Tamaños mínimos y espacio libre formales.
 - Sidebar colapsada: todavía no existe; cuando se implemente, usa `<BrandIcon />`.
+- Logo de Rendiciones: versión vectorial y versión para fondo oscuro, solo si se aprueban (ver arriba).
