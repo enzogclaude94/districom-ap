@@ -4,6 +4,10 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Added — Módulo Rendiciones aprobado (ADR 007)
+- **Documentación:** ADR 007 registra el segundo módulo, **Rendiciones** (`settlements`, `/rendiciones`): empleados y roles por módulo adelantados a plataforma, clientes como texto + `customer_id` opcional hasta que exista el maestro, ledger propio (entradas inmutables, operaciones balanceadas e idempotentes, reversos, sin saldos editables), alertas internas de pendientes y logo oficial del módulo. `ARCHITECTURE.md` v0.3 (§4.6 ledger, roles Etapa 1, selector de módulos), `DATA_MODEL.md` v0.3 (`user_module_roles`, `employees` y `employee_functions` en R0, §13 modelo conceptual de Rendiciones), `ROADMAP.md` v0.4 (carril Rendiciones R0–R9, PL‑1 en DONE, PL‑2 dividido), `CLAUDE.md`, `PLAN.md §13`, README.
+- **Marca:** logo oficial de DistriCom Rendiciones en `docs/brand/districom-rendiciones-original.png` y sus reglas de uso en `docs/BRAND.md`.
+
 ### Changed — Plataforma modular (ADR 006)
 - **Documentación:** DistriCom pasa a describirse como plataforma modular (núcleo compartido + módulos) con Inteligencia Comercial como único módulo en desarrollo. ADR 006; `ARCHITECTURE.md` v0.2 (estructura `platform/` + `modules/`, regla de dependencias, excepción analítica acotada al módulo, patrón para agregar módulos, acceso por módulo en etapas); `CLAUDE.md`, `ROADMAP.md` (carril Plataforma), README.
 - **Backend reorganizado:** `auth`, `audit`, `settings_store` (ahora `settings`) y `sources` pasan a `app/platform/`; `app/modules/` aloja los módulos. Sin cambios de comportamiento, tablas ni endpoints.

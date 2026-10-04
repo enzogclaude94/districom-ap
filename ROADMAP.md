@@ -1,24 +1,27 @@
 # ROADMAP — DistriCom
 
-> v0.3 · 2026-10-03. Estados: `PLANNED`, `PREPARATION` (análisis previo, sin implementación), `IN_PROGRESS`, `BLOCKED`, `DONE`.
+> v0.4 · 2026-10-04. v0.4: carril **Rendiciones** (ADR 007); PL‑1 en DONE; empleados y roles por módulo adelantados a R0.
+> Estados: `PLANNED`, `PREPARATION` (análisis previo, sin implementación), `IN_PROGRESS`, `BLOCKED`, `DONE`.
 > Una fase es `DONE` solo si cumple la Definition of Done de fase (`CLAUDE.md §7`) y todos sus criterios críticos están en PASS.
 
-DistriCom es una plataforma modular (ADR 006). Este roadmap tiene dos carriles: **Plataforma** (núcleo compartido) e **Inteligencia Comercial**, el único módulo en desarrollo. Otros módulos no tienen fases hasta que se aprueben.
+DistriCom es una plataforma modular (ADR 006). Este roadmap tiene tres carriles: **Plataforma** (núcleo compartido), **Inteligencia Comercial** y **Rendiciones** (ADR 007). Otros módulos no tienen fases hasta que se aprueben.
 
 ### Plataforma
 
 | Ítem | Nombre | Estado | Depende de |
 |---|---|---|---|
-| PL‑1 | Preparación modular (P0‑1 … P0‑7 de la revisión del 2026-10-03) | **IN_PROGRESS** | Fase 0 |
-| PL‑2 | Identidades compartidas (`employees`, `employee_functions`, `customers`, `localities`) y framework de importación | PLANNED (se construye dentro de la Fase 1) | PL‑1 |
-| PL‑3 | Roles por módulo (`user_module_roles`) y gestión de usuarios | PLANNED (solo cuando exista un segundo módulo) | PL‑1 |
+| PL‑1 | Preparación modular (P0‑1 … P0‑7 de la revisión del 2026-10-03) | **DONE** (PR #3, mergeado el 2026-10-04) | Fase 0 |
+| PL‑2a | Empleados: `employees` + `employee_functions` con alta manual y registro de funciones por módulo | **IN_PROGRESS** (se construye en R0, ADR 007) | PL‑1 |
+| PL‑2b | Identidades `customers`, `localities`, vinculación por imports y framework de importación | PLANNED (se construye dentro de la Fase 1) | PL‑2a |
+| PL‑3 | Roles por módulo (`user_module_roles`, `viewer < operator < admin`) y selector de módulos | **IN_PROGRESS** (se construye en R0) | PL‑1 |
+| PL‑4 | Pantalla de gestión de usuarios | PLANNED (mientras tanto, CLI) | PL‑3 |
 
 ### Inteligencia Comercial
 
 | Fase | Nombre | Estado | Depende de |
 |---|---|---|---|
 | 0 | Fundación y arquitectura | **DONE** (aprobada y mergeada el 2026-10-02, PR #1) | — |
-| 1 | Importación y maestros | **PREPARATION** (análisis de exportaciones reales, `docs/DATA_INTAKE.md`) | 0 · PL‑1 · muestras reales y aprobación de Enzo para implementar |
+| 1 | Importación y maestros | **PREPARATION** (análisis de exportaciones reales, `docs/DATA_INTAKE.md`) | 0 · PL‑1 · PL‑2a · muestras reales y aprobación de Enzo para implementar |
 | 2 | Dashboard general | PLANNED | 1 |
 | 3 | Rutas y preventistas | PLANNED | 2 |
 | 4 | Cliente 360° y estados | PLANNED | 1 (puede ir en paralelo con 3) |
@@ -29,6 +32,23 @@ DistriCom es una plataforma modular (ADR 006). Este roadmap tiene dos carriles: 
 | 9 | Reuniones, reportes y mensajes | PLANNED | 3–8 |
 | 10 | Boca de expendio | PLANNED | 2 (independiente del resto) |
 | 11 | Hardening y futuro | PLANNED | todas |
+
+### Rendiciones
+
+| Fase | Nombre | Estado | Depende de |
+|---|---|---|---|
+| R0 | Habilitación del módulo | **IN_PROGRESS** (aprobada el 2026-10-04) | PL‑1 |
+| R1 | Ledger y cajas | PLANNED | R0 |
+| R2 | Rendición de reparto básica | PLANNED | R1 |
+| R3 | Pendientes de cobro | PLANNED | R2 |
+| R4 | Cartera de cheques | PLANNED | R2 |
+| R5 | Combustible y vehículos | PLANNED | R2 |
+| R6 | Pagos a proveedores y terceros | PLANNED | R1 · R4 |
+| R7 | Boca de expendio | PLANNED | R2–R5 |
+| R8 | Cuenta interna de empleados y liquidación semanal | PLANNED | R1 · R2 |
+| R9 | Endurecimiento | PLANNED | todas |
+
+Cada fase empieza solo con aprobación explícita de Enzo y termina con un informe y una pausa para revisión.
 
 ---
 
@@ -90,3 +110,44 @@ DistriCom es una plataforma modular (ADR 006). Este roadmap tiene dos carriles: 
 ## Fase 11 — Hardening y futuro
 **Alcance:** performance medida, observabilidad, pulido UX, backup/restore probado, documentación final, readiness de APIs, puntos de extensión ML/IA (sin ML productivo).
 **Criterios:** Definition of Done de V1 (`CLAUDE.md §7.3`).
+
+---
+
+## Rendiciones — detalle por fase
+
+Modelo conceptual en `DATA_MODEL.md §13`; decisiones en ADR 007. Cada fase crea solo sus tablas, con migración `settlements: …`, tests desde el inicio y docs actualizadas.
+
+### R0 — Habilitación del módulo
+**Alcance:** ADR 007 y documentación; `employees` + `employee_functions` en plataforma (servicio, API, alta/edición/baja lógica, registro de funciones por módulo, pantalla de administración); `user_module_roles` (`viewer < operator < admin`) con CLI de asignación y `require_module_access` adaptado; módulo `settlements` (schema vacío, router, parámetros, función `settlements.delivery_driver`); `/rendiciones` con el logo oficial; home de plataforma con selector de módulos; bloqueo de rutas de módulos sin acceso.
+**Fuera de alcance:** ledger, cajas, rendiciones, pendientes, cheques, gastos, combustible, pagos, liquidaciones (ninguna tabla de negocio de Rendiciones).
+**Criterios:** suite anterior en verde; un usuario sin rol en Rendiciones recibe 403 en `/api/v1/settlements/*` y ve "sin acceso" en `/rendiciones`; un usuario con dos módulos cambia entre ellos; los contratos de dependencias fallan si un módulo importa otro; funciones de empleado sin solapamientos (verificado en la base) y sin UPDATE in place; migraciones up/down/up.
+
+### R1 — Ledger y cajas
+**Alcance:** `accounts`, `financial_operations`, `ledger_entries`; servicio de operaciones (balance, idempotencia, reversos); Caja principal, Caja de cambio y Banco; aportes y devoluciones de socios, depósitos, movimientos entre cajas.
+**Resultado visible:** pantalla Cajas con saldos y movimientos con su origen.
+**Criterios:** suma cero garantizada por la base; doble envío no duplica; reverso deja saldo y rastro; saldos = suma de entradas; auditoría.
+
+### R2 — Rendición de reparto básica
+**Alcance:** rendición (fecha, repartidor, importe esperado con origen `MANUAL`), conteo de efectivo por denominación con agregado, transferencias verificadas, gastos con categorías editables, diferencia y su asignación a uno o varios empleados, cierre atómico hacia el ledger, reapertura y corrección por admin con reverso.
+**Resultado visible:** pantalla de rendición con tablero fijo (esperado, efectivo, transferencias, cheques, gastos, pendientes, justificado, diferencia).
+
+### R3 — Pendientes de cobro
+**Alcance:** pendiente desde la rendición, pantalla global, alertas internas calculadas al leer (`settlements.pending_alert_hours`), acreditación por cualquier medio con su operación.
+
+### R4 — Cartera de cheques
+**Alcance:** cheque único (físico / ECHEQ) con titular y entregador, historial de estados (en cartera, depositado, rechazado, entregado con destinatario), alta desde rendición, pendiente u operación extraordinaria.
+
+### R5 — Combustible y vehículos
+**Alcance:** vehículos; carga de combustible como detalle de un gasto (camión, empleado, litros, precio por litro), desde rendición o desde caja; historial de combustible.
+
+### R6 — Pagos a proveedores y terceros
+**Alcance:** terceros; pagos realizados con uno o varios medios (efectivo de una caja, transferencia, cheques de cartera), cuya suma es el total.
+
+### R7 — Boca de expendio
+**Alcance:** boca como punto que rinde (`outlets`), una rendición diaria con entregas parciales, misma lógica de rendición.
+
+### R8 — Empleados: cuenta interna y liquidación semanal
+**Alcance:** condiciones de pago, consumos, adelantos, préstamos y cuotas, liquidación semanal (sueldo, bonos, incentivos, faltantes, sobrantes) y su pago.
+
+### R9 — Endurecimiento
+**Alcance:** reportes de cierre diario, contrato para recibir el importe esperado desde Store Sys (sin implementar la integración), performance, E2E del flujo de punta a punta.

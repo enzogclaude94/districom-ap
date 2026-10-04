@@ -1,6 +1,6 @@
 # ARCHITECTURE — DistriCom
 
-> v0.2 · 2026-10-03 · Fase 0 implementada. v0.2: DistriCom como **plataforma modular** (ADR 006).
+> v0.3 · 2026-10-04 · Fase 0 implementada. v0.2: DistriCom como **plataforma modular** (ADR 006). v0.3: módulo **Rendiciones** aprobado (ADR 007), empleados y roles por módulo en plataforma.
 
 ## 1. Contexto
 
@@ -8,9 +8,10 @@
 
 | Pieza | Estado | Alcance |
 |---|---|---|
-| **Plataforma (DistriCom Core)** | En construcción | Usuarios, sesiones, acceso por módulo, configuración, auditoría, sistemas fuente, identidades compartidas (empleados, clientes, localidades), framework de importación. |
-| **Inteligencia Comercial** (`commercial`) | Único módulo funcional en desarrollo | Capa de **inteligencia comercial** sobre AXUM y STORE SYS. Alcance en `ROADMAP.md`. |
-| Futuros módulos | Sin desarrollar | Se agregan con el patrón de §4.5. Nada de su modelo se anticipa. |
+| **Plataforma (DistriCom Core)** | En construcción | Usuarios, sesiones, roles por módulo, configuración, auditoría, sistemas fuente, identidades compartidas (empleados y funciones; clientes y localidades en Fase 1), framework de importación. |
+| **Inteligencia Comercial** (`commercial`, `/comercial`) | En desarrollo | Capa de **inteligencia comercial** sobre AXUM y STORE SYS. Alcance en `ROADMAP.md`. |
+| **Rendiciones** (`settlements`, `/rendiciones`) | En desarrollo (R0) | Rendiciones de reparto y boca de expendio, cajas, cheques, pendientes, gastos, combustible, pagos y liquidación semanal, con ledger propio (ADR 007, §4.6). |
+| Otros módulos | Sin desarrollar | Se agregan con el patrón de §4.5. Nada de su modelo se anticipa. |
 
 Sistemas fuente:
 
@@ -35,12 +36,13 @@ Escala: 3 preventistas, 7 rutas, ~600 clientes, 500+ SKU, historia desde 2026-01
                 │  ├─ platform/      DistriCom Core    │  auth, settings, audit, sources,
                 │  │                                   │  (Fase 1) imports, identity, parties
                 │  ├─ modules/                         │
-                │  │   └─ commercial/  Intel. Comercial │  /api/v1/commercial/*
+                │  │   ├─ commercial/  Intel. Comercial │  /api/v1/commercial/*
+                │  │   └─ settlements/ Rendiciones      │  /api/v1/settlements/*
                 │  └─ api/v1/router  composición       │
                 └──────────────────┬───────────────────┘
                                    │ SQLAlchemy 2 (Core para analítica, ORM para CRUD)
                 ┌──────────────────▼───────────────────┐
-                │  PostgreSQL 17 — una base            │  public (plataforma) · commercial (módulo)
+                │  PostgreSQL 17 — una base            │  public (plataforma) · commercial · settlements
                 └──────────────────────────────────────┘
 ```
 
@@ -72,13 +74,13 @@ backend/app/
 ├── db/                    técnico: Base declarativa, convenciones, sesión, registro de modelos
 ├── platform/              DistriCom Core — negocio compartido
 │   ├── modules.py         contrato ModuleSpec + módulos instalados
-│   ├── auth/              users, user_sessions, acceso por módulo (access.py: require_module_access)
+│   ├── auth/              users, user_sessions, user_module_roles (access.py: require_module_access)
 │   ├── audit/             audit_events
 │   ├── settings/          app_settings + registro de parámetros por scope (platform.*, <módulo>.*)
 │   ├── sources/           source_systems
 │   ├── imports/           [Fase 1] framework: batches, files, staging, errors, plantillas, TabularReader, registro de tipos
 │   ├── identity/          [Fase 1] external_entity_mappings
-│   └── parties/           [Fase 1] employees, employee_functions, customers (identidad), localities
+│   └── parties/           [R0] employees, employee_functions, registro de funciones · [Fase 1] customers (identidad), localities
 ├── modules/
 │   ├── __init__.py        MODULES: lista literal de módulos instalados
 │   └── commercial/        Inteligencia Comercial
@@ -90,6 +92,12 @@ backend/app/
 │       ├── imports/       [Fase 1] adaptadores AXUM / STORE SYS + tipos commercial.*
 │       ├── analytics/     [Fase 2] REGISTRO ÚNICO de métricas (IDs = METRICS.md), filtros, períodos
 │       └── customer_status/  opportunities/  goals/  incentives/  reports/   [Fases 4–9]
+│   └── settlements/       Rendiciones (ADR 007)
+│       ├── __init__.py    MODULE: ModuleSpec (key `settlements`, "Rendiciones", router, settings, funciones de empleado)
+│       ├── api.py         router montado en /api/v1/settlements
+│       ├── settings.py    parámetros settlements.*
+│       ├── ledger/        [R1] accounts, financial_operations, ledger_entries y el servicio de operaciones
+│       └── cash/ settlements/ pending/ cheques/ expenses/ payments/ payroll/   [R1–R8]
 └── api/v1/router.py       raíz de composición: monta routers de plataforma y de cada módulo
 ```
 
@@ -136,24 +144,35 @@ Dentro de un módulo, los paquetes **operacionales** (en Comercial: `imports/`, 
 
 ### 4.4 Base de datos y migraciones
 
-- Una sola base PostgreSQL. Plataforma en `public`; cada módulo en su schema (`commercial`). Detalle y reglas de FKs en `DATA_MODEL.md §0`.
+- Una sola base PostgreSQL. Plataforma en `public`; cada módulo en su schema (`commercial`, `settlements`). Detalle y reglas de FKs en `DATA_MODEL.md §0`.
 - **Una sola cadena Alembic** para toda la aplicación (`env.py` con `include_schemas=True`). La primera migración de un módulo crea su schema.
-- Cada revisión pertenece a un solo dueño y su mensaje empieza con él: `platform: …`, `commercial: …`.
+- Cada revisión pertenece a un solo dueño y su mensaje empieza con él: `platform: …`, `commercial: …`, `settlements: …`.
 
 ### 4.5 Patrón para agregar un módulo
 
 | Aspecto | Qué se agrega |
 |---|---|
-| Backend | `app/modules/<key>/` con `MODULE` (ModuleSpec), `api.py`, `settings.py`; una entrada en `MODULES` (`app/modules/__init__.py`) |
+| Backend | `app/modules/<key>/` con `MODULE` (ModuleSpec), `api.py`, `settings.py` y, si usa personas, sus códigos de función de empleado; una entrada en `MODULES` (`app/modules/__init__.py`) |
 | API | `/api/v1/<key>/…` |
 | Acceso | `require_module_access("<key>", …)`; roles por módulo cuando existan (§8) |
 | Configuración | Parámetros `<key>.*` en `settings.py`; aparecen solos en Configuración |
 | Base de datos | Migración `<key>: create schema` con su schema y tablas |
-| Frontend | `src/modules/<key>/` (nav, api, features), `src/app/(app)/<ruta>/`, una entrada en `src/modules/registry.ts` |
+| Frontend | `src/modules/<key>/` (nav, api, features), `src/app/(app)/<ruta>/`, una entrada en `src/modules/registry.ts`, override de ESLint para la carpeta del módulo |
 | Tests | `backend/tests/modules/<key>/`, tests de frontend y un E2E de humo; los contratos de dependencias lo cubren sin configuración extra |
 | Docs | Sección propia en ROADMAP y docs del módulo |
 
 No hay carga dinámica, descubrimiento automático, plugins ni feature flags por módulo: el registro es una lista literal en código.
+
+### 4.6 Rendiciones: ledger de valores
+
+Fuente de verdad de dónde está cada valor del módulo (cajas, banco, cartera de cheques, pendientes de cobro, cuentas internas de empleados, aportes de socios). Detalle en ADR 007 y `DATA_MODEL.md §13`.
+
+- `accounts` (pocas filas: lugares y conceptos, no un plan de cuentas) · `financial_operations` (un hecho económico, con su documento origen) · `ledger_entries` (patas inmutables con signo).
+- **Un solo escritor:** el servicio de operaciones del módulo. Los documentos (rendición, pago, pendiente…) lo invocan en su misma transacción; ningún otro código inserta entradas.
+- **Invariantes en la base:** suma cero por operación (constraint trigger diferido), `client_request_id` único, unicidad del documento origen para operaciones que existen una sola vez, un cheque sale de cartera una sola vez.
+- **Correcciones por reverso:** nunca UPDATE ni DELETE de entradas. Reabrir una rendición revierte su cierre.
+- **Saldos derivados:** suma de entradas por cuenta. Sin tablas de saldo mantenidas a mano; si algún día hace falta performance, un saldo materializado se agrega sin cambiar el modelo.
+- Sin event sourcing, bus de eventos ni contabilidad formal.
 
 ## 5. Frontend
 
@@ -161,8 +180,10 @@ No hay carga dinámica, descubrimiento automático, plugins ni feature flags por
 frontend/src/
 ├── app/(auth)/login              login de DistriCom
 ├── app/(app)/                    shell de plataforma (sesión, topbar, sidebar del módulo activo)
-│   ├── page.tsx                  "/" → redirige al módulo por defecto del usuario (hoy /comercial)
 │   ├── configuracion/            configuración: General + una sección por módulo
+│   ├── page.tsx (selector)       home de plataforma: una tarjeta por módulo; con uno solo, redirige
+│   ├── empleados/                empleados y funciones (administración de plataforma)
+│   ├── rendiciones/              Rendiciones (inicio en R0; pantallas por fase R1–R8)
 │   └── comercial/                Inteligencia Comercial
 │       ├── page.tsx              Inicio comercial (dashboard)
 │       ├── preventistas/ rutas/ clientes/ oportunidades/
@@ -172,6 +193,7 @@ frontend/src/
 │       └── datos/{importaciones,calidad}
 ├── modules/registry.ts           registro de módulos (key, nombre, ruta base, navegación); lo usan solo las rutas de app/
 ├── modules/commercial/           navegación, API y features del módulo
+├── modules/settlements/          ídem para Rendiciones (incluye su logo oficial)
 ├── features/                     features de plataforma (auth, settings)
 ├── components/ui/                design system (shadcn/ui)
 ├── components/common/            KpiCard, DataTable, EmptyState, ErrorState, PeriodPicker...
@@ -180,7 +202,7 @@ frontend/src/
 └── lib/filters/                  estado de filtros globales sincronizado con la URL
 ```
 
-- **Una sola aplicación:** mismo login, sesión, shell, branding y design system para todos los módulos. Cada módulo tiene su prefijo de URL y su navegación; el AppShell muestra la del módulo activo. El selector de módulos aparece solo cuando un usuario tiene acceso a más de uno.
+- **Una sola aplicación:** mismo login, sesión, shell, branding y design system para todos los módulos. Cada módulo tiene su prefijo de URL y su navegación; el AppShell muestra la del módulo activo y bloquea (pantalla "sin acceso") las rutas de un módulo que el usuario no tiene. El selector de módulos (home `/` y menú bajo el wordmark) aparece solo cuando un usuario tiene acceso a más de uno.
 - **Dependencias:** `modules/<m>` puede importar `components/`, `lib/` y `features/` de plataforma; nunca otro `modules/<otro>` ni el registro. `components/`, `lib/` y `features/` nunca importan de `modules/`. Las únicas raíces de composición son las rutas de `app/` y `modules/registry.ts`: el layout pasa el módulo activo al AppShell por props (ESLint `no-restricted-imports`).
 - **Filtros globales en la URL** (`?from=…&to=…&salesperson=…`) → enlaces compartibles y coherencia entre vistas.
 - **Tipos de API generados desde OpenAPI** (`openapi-typescript`), para que frontend y backend no diverjan.
@@ -244,10 +266,10 @@ Son procesos del módulo comercial. Se ejecutan como comandos CLI (`python -m ap
 - Usuarios locales, password Argon2id, política de longitud mínima 12.
 - Sesión: token aleatorio de 256 bits; en DB se guarda **solo su hash**; cookie `HttpOnly; Secure; SameSite=Lax`; expiración deslizante (8 h) y absoluta (7 días).
 - **Acceso por módulo, en etapas** (ADR 006):
-  - **Etapa 0 (actual):** `users.role` (`admin`, `viewer`) es el rol de plataforma. Todo endpoint de módulo usa `require_module_access("<módulo>", min_role)`, que hoy deriva el rol del módulo del rol de plataforma. `GET /auth/me` devuelve `modules: [{key, role}]`.
-  - **Etapa 1 (cuando exista un segundo módulo):** tabla `user_module_roles(user_id, module, role)` con roles `viewer < operator < admin`; `users.role` pasa a distinguir administrador de plataforma. Solo cambia `require_module_access`.
+  - **Etapa 0 (hasta R0):** `users.role` (`admin`, `viewer`) era el único rol; `require_module_access` derivaba de él el rol en cada módulo.
+  - **Etapa 1 (R0, ADR 007):** tabla `user_module_roles(user_id, module_key, role)` con roles `viewer < operator < admin`. `users.role = admin` es el **administrador de plataforma** (usuarios, empleados, configuración general) y tiene `admin` en todos los módulos; los demás usuarios acceden solo a los módulos asignados. Todo endpoint de módulo usa `require_module_access("<módulo>", min_role)`; `GET /auth/me` devuelve `modules: [{key, name, role}]`. Asignación por CLI (`grant-module-role`, `revoke-module-role`).
   - **Etapa 2 (solo si hace falta):** permisos por acción como mapa en código rol → permisos.
-  - `admin` de plataforma: usuarios y configuración general. `admin` de módulo: imports, configuración y aprobaciones del módulo. `viewer`: lectura.
+  - `admin` de plataforma: usuarios, empleados y configuración general. `admin` de módulo: imports, configuración, correcciones y aprobaciones del módulo. `operator`: operación diaria (en Rendiciones: cargar y cerrar rendiciones, acreditar pendientes, registrar pagos). `viewer`: lectura.
 - CSRF: `SameSite=Lax` + header custom obligatorio en métodos mutantes.
 - Rate limit simple en login (en memoria, por IP+usuario).
 - Validación estricta Pydantic en todos los endpoints; queries parametrizadas.
@@ -288,3 +310,4 @@ Son procesos del módulo comercial. Se ejecutan como comandos CLI (`python -m ap
 - 004 Sesiones server‑side en lugar de JWT.
 - 005 Registro centralizado de métricas en backend.
 - 006 Plataforma modular (núcleo compartido + módulos).
+- 007 Módulo Rendiciones (`settlements`): identidad, empleados en plataforma, roles por módulo, ledger propio, logo.

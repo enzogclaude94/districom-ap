@@ -2,15 +2,17 @@
 
 > v0.2 · 2026-10-03 · Propuesta. Las tablas se crean por migraciones Alembic en la fase indicada.
 > v0.2: modelo revisado para la **plataforma modular** (ADR 006): ownership por plataforma/módulo, `employees` + `employee_functions` en lugar de `salespeople`, identidad de clientes en plataforma, tipos de import y de mapping extensibles, `suppliers` diferido.
+> v0.3 · 2026-10-04: módulo **Rendiciones** (schema `settlements`, ADR 007); `employees` + `employee_functions` y `user_module_roles` adelantados a R0; modelo conceptual de Rendiciones en §13.
 
 ## 0. Ownership y schemas
 
-Una sola base PostgreSQL. **Plataforma** (DistriCom Core) en el schema `public`; cada **módulo** en su propio schema. Hoy el único módulo es **Inteligencia Comercial** (`commercial`).
+Una sola base PostgreSQL. **Plataforma** (DistriCom Core) en el schema `public`; cada **módulo** en su propio schema: **Inteligencia Comercial** (`commercial`) y **Rendiciones** (`settlements`).
 
 | Dueño | Schema | Tablas |
 |---|---|---|
-| Plataforma | `public` | `users`, `user_sessions`, `app_settings`, `audit_events`, `source_systems` (Fase 0) · `employees`, `employee_functions`, `customers`, `localities`, `external_entity_mappings`, `import_batches`, `import_files`, `import_column_mappings`, `import_errors`, `import_staging_rows` (Fase 1) |
+| Plataforma | `public` | `users`, `user_sessions`, `app_settings`, `audit_events`, `source_systems` (Fase 0) · `employees`, `employee_functions`, `user_module_roles` (R0) · `customers`, `localities`, `external_entity_mappings`, `import_batches`, `import_files`, `import_column_mappings`, `import_errors`, `import_staging_rows` (Fase 1) |
 | Inteligencia Comercial | `commercial` | `customer_profiles`, `customer_types`, `routes`, `route_schedules`, `customer_route_assignments`, `customer_salesperson_assignments`, `product_categories`, `brands`, `products`, `sales_channels`, `sales`, `sale_items`, `orders`, `order_items`, `scheduled_visits`, `visits` (Fase 1) · `customer_status_*`, `customer_recovery_events`, `opportunities`, `opportunity_status_history`, `cross_sell_rules`, `commercial_goals`, `incentives` (Fases 4–8) |
+| Rendiciones | `settlements` | Schema vacío en R0. Tablas por fase desde R1 (§13). |
 
 Reglas:
 - Una tabla tiene **un solo dueño**, que la define, la migra y es el único que escribe en ella. Un módulo escribe en tablas de plataforma solo a través de servicios de plataforma.
@@ -80,7 +82,7 @@ erDiagram
 | email | citext UNIQUE NOT NULL | |
 | password_hash | text NULL | Argon2id; NULL si identidad externa futura |
 | full_name | text NOT NULL | |
-| role | text NOT NULL CHECK (`admin`,`viewer`) | **Rol de plataforma.** El acceso a cada módulo se resuelve con `require_module_access` (Etapa 0: deriva del rol de plataforma). Roles por módulo (`user_module_roles`) recién cuando exista un segundo módulo (ARCHITECTURE.md §8). |
+| role | text NOT NULL CHECK (`admin`,`viewer`) | **Rol de plataforma.** `admin` = administrador de plataforma (usuarios, empleados, configuración general) con `admin` en todos los módulos. El acceso de los demás usuarios a cada módulo está en `user_module_roles` (R0, ARCHITECTURE.md §8). |
 | active | bool NOT NULL DEFAULT true | |
 | last_login_at | timestamptz | |
 
@@ -96,40 +98,57 @@ Parámetros de negocio editables. `key text PK`, `value jsonb NOT NULL`, `descri
 ### source_systems
 `id`, `code` UNIQUE (`AXUM`, `STORE_SYS`, `MANUAL`, `DEMO`), `name`.
 
-## 4. Maestros (Fase 1)
+### user_module_roles (R0)
+Rol de un usuario en un módulo (Etapa 1 de ARCHITECTURE.md §8).
+| Columna | Notas |
+|---|---|
+| id | PK |
+| user_id | FK `users` NOT NULL, `ON DELETE CASCADE` |
+| module_key | text NOT NULL — key del módulo (`commercial`, `settlements`); validado contra los módulos instalados por el servicio (sin CHECK en la base) |
+| role | text NOT NULL CHECK (`viewer`, `operator`, `admin`) |
+| granted_by | FK `users` NULL |
+| timestamps | |
+
+`UNIQUE (user_id, module_key)`. Sin fila = sin acceso (salvo administradores de plataforma). La migración que la crea da `viewer` en `commercial` a los usuarios `viewer` existentes, para que nadie pierda acceso. Altas, cambios y bajas se auditan (`platform.module_role.*`).
+
+## 4. Maestros (R0 y Fase 1)
 
 ### 4.1 Plataforma (`public`)
+
+> `employees` y `employee_functions` se implementan en R0 (ADR 007), con alta manual e independientes de los imports. `localities` y `customers` siguen en Fase 1.
 
 #### localities
 `id`, `name`, `province`, `zone` (texto, para segmentar), `normalized_name` UNIQUE.
 
-#### employees
-Identidad **única** de cada persona que trabaja en la empresa, sea cual sea su función o módulo. Solo identidad: los datos propios de cada función viven en el módulo que la usa.
+#### employees (R0)
+Identidad **única** de cada persona que trabaja en la empresa, sea cual sea su función o módulo. Solo identidad: los datos propios de cada función viven en el módulo que la usa. Baja **lógica** (`active = false`); nunca se borra una fila.
 | Columna | Notas |
 |---|---|
 | id | PK |
 | full_name | text NOT NULL |
-| external_axum_id, external_store_id | text, unique parcial `WHERE … IS NOT NULL` |
+| external_axum_id, external_store_id | text, unique parcial `WHERE … IS NOT NULL`. Vacíos en las altas manuales; los completa la vinculación de Fase 1. |
 | active | bool NOT NULL DEFAULT true |
 | hire_date | date NULL |
 | phone | text NULL — PII |
 | timestamps | |
 
-#### employee_functions
+#### employee_functions (R0)
 Funciones del empleado con historia. Una persona puede tener varias funciones a la vez o cambiar de función sin duplicarse.
 | Columna | Notas |
 |---|---|
 | id | PK |
 | employee_id | FK `employees` NOT NULL |
-| function_code | text NOT NULL — código registrado en código por el módulo dueño de la función (sin CHECK en la base). **Fase 1: solo `commercial.salesperson`** (preventista). |
+| function_code | text NOT NULL — código registrado en código por el módulo dueño de la función (`ModuleSpec.employee_functions`), validado por el servicio (sin CHECK en la base). Hoy: `commercial.salesperson` (Preventista) y `settlements.delivery_driver` (Repartidor). |
 | valid_from | date NOT NULL |
-| valid_to | date NULL — NULL = vigente |
-| source | `AXUM`, `STORE_SYS`, `MANUAL` |
-| import_batch_id | FK NULL |
+| valid_to | date NULL — NULL = vigente; inclusive; CHECK `valid_to >= valid_from` |
+| source | `AXUM`, `STORE_SYS`, `MANUAL` (R0: siempre `MANUAL`) |
+| import_batch_id | FK NULL — se agrega en Fase 1, cuando exista `import_batches` |
 | created_by | FK users NULL |
+| timestamps | |
 
-- Exclusion constraint: `(employee_id, function_code, daterange(valid_from, valid_to))` sin solapamientos.
-- Un cambio de función cierra la vigente y abre otra; nunca UPDATE in place.
+- Exclusion constraint: `(employee_id, function_code, daterange(valid_from, valid_to, '[]'))` sin solapamientos.
+- Un cambio de función cierra la vigente (`valid_to`) y abre otra; la única modificación permitida de una fila es cerrar su vigencia. Nunca UPDATE in place de código ni fechas de inicio.
+- Dar de baja a un empleado cierra sus funciones vigentes en la fecha de baja.
 - Que un `salesperson_id` de una tabla comercial sea preventista **en esa fecha** lo valida el servicio comercial contra esta tabla (no es una FK).
 
 #### customers
@@ -371,3 +390,28 @@ Diseñados desde las queries previstas; se revisan con `EXPLAIN ANALYZE` al impl
 ## 12. Datos demo (estrategia)
 
 Generador reproducible con seed fijo (`scripts/seed_demo_data.py --seed 42`) que **pasa por el pipeline de importación** (genera XLSX/CSV con formato AXUM/STORE SYS simulado), para probar el pipeline real además de poblar datos. Patrones inyectados y verificables (prompt §103): ruta con baja cobertura, preventista con cobertura alta y conversión baja, ruta con baja penetración de energizantes, dormidos, recuperados, mix chico, premium, categorías correlacionadas, estacionalidad semanal, pico de boca viernes 18–20 h. Cada patrón tiene un test que verifica que la métrica correspondiente lo detecta.
+
+## 13. Rendiciones (`settlements`, R1–R8)
+
+Modelo **conceptual** aprobado (ADR 007, *Informe Inicial — DistriCom Rendiciones*). Cada tabla se diseña en detalle y se crea en su fase; nada de esta sección existe en R0. Convenciones de §1 (dinero `numeric(14,2)`, fechas de negocio `date`, enums `text + CHECK`).
+
+### 13.1 Ledger (R1)
+| Tabla | Rol |
+|---|---|
+| `accounts` | Dónde puede estar un valor: `CASH_BOX` (Caja principal, Caja de cambio), `BANK`, `CHEQUE_PORTFOLIO`, `PENDING_RECEIVABLE`, `EMPLOYEE` (cuenta interna por empleado), `OWNER_EQUITY` (por socio) y cuentas de resultado (`SETTLEMENT_INCOME`, `EXPENSE`, `PAYMENT_OUT`, `PAYROLL`). Pocas filas; no es un plan de cuentas. |
+| `financial_operations` | Un hecho económico: tipo, fecha de negocio, usuario, `client_request_id` UNIQUE, documento origen (`source_type`, `source_id`), `reverses_operation_id`. |
+| `ledger_entries` | Patas inmutables con signo: operación, cuenta, importe y referencias opcionales (`cheque_id`, `pending_id`, `employee_id`, `counterparty_id`). Suma cero por operación (constraint trigger diferido). |
+
+### 13.2 Rendiciones y conteo (R2, R7)
+`settlements` (tipo `DELIVERY`/`OUTLET`, fecha, `employee_id` o `outlet_id`, importe esperado, `expected_source` `MANUAL`/`STORE_SYS`, referencia externa, estado `OPEN`/`CLOSED`, `version`) · `settlement_items` (una tabla de líneas: `CASH`, `TRANSFER`, `CHEQUE`, `EXPENSE`, `PENDING`, con referencia a su detalle) · `cash_counts` + `cash_count_lines` (denominación × cantidad y "agregados") · `settlement_differences` + `difference_allocations` (faltante/sobrante histórico y su reparto entre empleados) · `outlets` (bocas de expendio, R7).
+
+### 13.3 Pendientes, cheques, gastos (R3–R5)
+`pending_collections` (cliente en texto + `customer_id` opcional, importe, motivo, responsable, rendición origen, estado, operación de acreditación) · `cheques` + `cheque_events` (cheque único, titular ≠ entregador, estados con historial, destinatario obligatorio si se entrega) · `expenses` + `expense_categories` (editables) · `fuel_loads` (detalle 1:1 de un gasto de combustible) · `vehicles`.
+
+### 13.4 Pagos y terceros (R6)
+`counterparties` (proveedores, beneficiarios, titulares, socios; `customer_id` opcional) · `payments` (los medios de pago son las entradas del ledger de su operación). Aportes, devoluciones y depósitos son operaciones, no tablas.
+
+### 13.5 Empleados (R8)
+`employee_pay_terms` (con vigencia) · `loans` + `loan_installments` · `payroll_runs` + `payroll_lines`. Consumos, adelantos y bonos son operaciones contra la cuenta interna del empleado.
+
+**Clientes (ADR 007, C3):** hasta que exista `public.customers`, las tablas de Rendiciones guardan el nombre del cliente en texto y un `customer_id` opcional; no hay catálogo de clientes propio.

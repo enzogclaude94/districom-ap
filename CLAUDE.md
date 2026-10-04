@@ -1,10 +1,13 @@
 # CLAUDE.md — Guía operativa del repositorio
 
-**DistriCom** — **plataforma modular** para una distribuidora de bebidas: un núcleo compartido (plataforma) + módulos de negocio, en una sola aplicación. Hoy el único módulo funcional es **Inteligencia Comercial** (`commercial`): capa de análisis sobre AXUM (preventa) y STORE SYS (facturación). No es ERP ni facturador; nunca escribe en los sistemas fuente.
+**DistriCom** — **plataforma modular** para una distribuidora de bebidas: un núcleo compartido (plataforma) + módulos de negocio, en una sola aplicación. Módulos aprobados:
 
-No se desarrollan otros módulos ni se anticipan sus modelos sin aprobación explícita de Enzo (ADR 006).
+- **Inteligencia Comercial** (`commercial`, `/comercial`): capa de análisis sobre AXUM (preventa) y STORE SYS (facturación). No es ERP ni facturador; nunca escribe en los sistemas fuente.
+- **Rendiciones** (`settlements`, `/rendiciones`): rendiciones de reparto y boca de expendio, cajas, cheques, pendientes, gastos, combustible, pagos y liquidación semanal de empleados, con un ledger propio como fuente de verdad (ADR 007). Avanza por fases R0–R9.
 
-Leer antes de cualquier tarea: este archivo → `PLAN.md` → `ROADMAP.md` → documentos del módulo afectado.
+No se desarrollan otros módulos ni se anticipan sus modelos sin aprobación explícita de Enzo (ADR 006). Dentro de Rendiciones, cada fase crea solo lo suyo (ADR 007).
+
+Leer antes de cualquier tarea: este archivo → `PLAN.md` → `ROADMAP.md` → documentos del módulo afectado (Rendiciones: ADR 007 y `DATA_MODEL.md §13`).
 
 ## 1. Arquitectura (resumen)
 
@@ -21,13 +24,14 @@ scripts/    seed demo, backup/restore, utilidades de desarrollo
 Principios no negociables:
 - **Reglas de negocio y métricas solo en el backend.** El frontend no calcula KPIs.
 - **Regla de dependencias** (verificada en CI): módulo → plataforma → core/db. La plataforma nunca importa de un módulo; un módulo nunca importa internals de otro (`ARCHITECTURE.md §4.2`).
-- **Única fuente de verdad:** personas (`employees` + `employee_functions`), clientes, localidades e identidades externas viven una sola vez en plataforma. Preventista, repartidor, etc. son **funciones** del empleado, no personas nuevas.
+- **Única fuente de verdad:** personas (`employees` + `employee_functions`), clientes, localidades e identidades externas viven una sola vez en plataforma. Preventista, repartidor, etc. son **funciones** del empleado, no personas nuevas; cada módulo registra sus códigos de función en código.
+- **Dinero en Rendiciones:** todo movimiento de valores pasa por el servicio de operaciones del ledger (`settlements`): entradas inmutables, operaciones balanceadas e idempotentes, correcciones por reverso, ningún saldo editable (ADR 007).
 - **Toda métrica se define primero en `METRICS.md`** y se implementa una sola vez en `backend/app/modules/commercial/analytics/metrics/` con el mismo `id`.
 - **La analítica opera sobre el modelo canónico**, nunca sobre columnas de archivos. `analytics/` de un módulo puede cruzar directamente sus tablas y las de plataforma con SQL de **solo lectura**, nunca las de otro módulo; los paquetes operacionales mantienen su encapsulación (`ARCHITECTURE.md §4.3`).
 - **Nunca fusionar entidades por nombre** sin confirmación; usar `external_entity_mappings`.
 - **Nunca destruir historia** de asignaciones ni estados (tablas con vigencia).
-- **Parámetros en `app_settings`** con defaults en código junto a su dueño, claves con scope (`platform.*`, `commercial.*`); nada hardcodeado en componentes.
-- **Marca:** colores y tipografías solo vía tokens; wordmark e ícono solo vía `<Wordmark />` / `<BrandIcon />` (`docs/BRAND.md`). Verde/ámbar/rojo únicamente para estados de negocio.
+- **Parámetros en `app_settings`** con defaults en código junto a su dueño, claves con scope (`platform.*`, `commercial.*`, `settlements.*`); nada hardcodeado en componentes.
+- **Marca:** colores y tipografías solo vía tokens; wordmark e ícono solo vía `<Wordmark />` / `<BrandIcon />`; logo de Rendiciones solo vía su componente y sin modificar su apariencia (`docs/BRAND.md`). Verde/ámbar/rojo únicamente para estados de negocio.
 
 ## 2. Comandos habituales
 
@@ -57,7 +61,7 @@ Este bloque debe reflejar siempre los comandos reales. Seed de demo: Fase 1.
 
 ## 3. Estructura
 
-Ver `ARCHITECTURE.md §4–5`. Primero por **dueño** (plataforma o módulo) y dentro de cada uno por **dominio** (`imports/`, `analytics/`, `customer_status/`, `opportunities/`…), no por capa técnica global. Endpoints de módulo bajo `/api/v1/<módulo>/` con `require_module_access`; pantallas bajo su prefijo (`/comercial/…`). Prohibido un `utils.py` genérico o servicios sin responsabilidad definida.
+Ver `ARCHITECTURE.md §4–5`. Primero por **dueño** (plataforma o módulo) y dentro de cada uno por **dominio** (`imports/`, `analytics/`, `customer_status/`, `opportunities/`, `ledger/`…), no por capa técnica global. Endpoints de módulo bajo `/api/v1/<módulo>/` con `require_module_access`; pantallas bajo su prefijo (`/comercial/…`, `/rendiciones/…`). Prohibido un `utils.py` genérico o servicios sin responsabilidad definida.
 
 ## 4. Convenciones
 
@@ -79,7 +83,7 @@ Ver `ARCHITECTURE.md §4–5`. Primero por **dueño** (plataforma o módulo) y d
 ## 6. Migraciones
 
 - Todo cambio de schema por **Alembic**; nunca DDL manual.
-- Una migración por cambio coherente y por dueño (mensaje `platform: …` / `commercial: …`), con `downgrade` cuando sea razonable. Una sola cadena Alembic.
+- Una migración por cambio coherente y por dueño (mensaje `platform: …` / `commercial: …` / `settlements: …`), con `downgrade` cuando sea razonable. Una sola cadena Alembic.
 - Test de migraciones: `upgrade head` desde vacío, `downgrade base`, `upgrade head`.
 - Migraciones ya mergeadas **no se editan**; se crea una nueva.
 - Cambios destructivos (drop de columnas/tablas con datos) requieren confirmación explícita de Enzo.
@@ -94,7 +98,8 @@ Criterios críticos en PASS · migraciones desde base limpia · seed funciona ·
 Al cerrar una fase, reportar: qué se implementó, archivos/módulos, decisiones, tests ejecutados con resultado, criterios con PASS/FAIL/PARTIAL, problemas, deuda técnica, próximo paso. **No declarar "fase completada" con un criterio crítico en FAIL.**
 
 ### 7.3 V1
-Flujo completo importar → validar → normalizar → dashboard → rutas → preventistas → clientes → riesgos → penetración → oportunidades → seguimiento → objetivos → incentivos → reunión, más los requisitos de datos, analítica, seguridad, UX y calidad del prompt maestro §162.
+**Inteligencia Comercial:** flujo completo importar → validar → normalizar → dashboard → rutas → preventistas → clientes → riesgos → penetración → oportunidades → seguimiento → objetivos → incentivos → reunión, más los requisitos de datos, analítica, seguridad, UX y calidad del prompt maestro §162.
+**Rendiciones:** fases R0–R9 de `ROADMAP.md` en DONE; el flujo de punta a punta (importe esperado → rendición → efectivo, transferencias, cheque, combustible, pendiente, diferencia → cierre → acreditación del pendiente) probado E2E y trazable en el ledger.
 
 ## 8. Archivos que no se modifican sin razón explícita
 
