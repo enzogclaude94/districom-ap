@@ -1,7 +1,7 @@
 "use client";
 
 import type { LucideIcon } from "lucide-react";
-import { Settings } from "lucide-react";
+import { IdCard, Settings } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -11,6 +11,8 @@ import { cn } from "@/lib/cn";
 
 /** Platform pages, shown under every module's navigation. */
 const PLATFORM_NAV: NavSection[] = [{ label: "Configuración", icon: Settings, href: "/configuracion" }];
+/** Platform pages only platform admins can use. */
+const PLATFORM_ADMIN_NAV: NavSection[] = [{ label: "Empleados", icon: IdCard, href: "/empleados" }];
 
 function isActive(pathname: string, item: NavItem) {
   return item.exact ? pathname === item.href : pathname === item.href || pathname.startsWith(`${item.href}/`);
@@ -81,13 +83,16 @@ function Sections({ sections, pathname }: { sections: NavSection[]; pathname: st
 }
 
 /** Navigation of the active module followed by the platform pages. */
-export function Sidebar({ sections }: { sections: NavSection[] }) {
+export function Sidebar({ sections, platformAdmin = false }: { sections: NavSection[]; platformAdmin?: boolean }) {
   const pathname = usePathname();
   return (
     <nav aria-label="Navegación principal" className="flex flex-col gap-4 p-3">
       <Sections sections={sections} pathname={pathname} />
       <div className="border-t border-border pt-3">
-        <Sections sections={PLATFORM_NAV} pathname={pathname} />
+        <Sections
+          sections={platformAdmin ? [...PLATFORM_ADMIN_NAV, ...PLATFORM_NAV] : PLATFORM_NAV}
+          pathname={pathname}
+        />
       </div>
     </nav>
   );

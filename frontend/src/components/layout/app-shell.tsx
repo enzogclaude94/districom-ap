@@ -99,7 +99,7 @@ export function AppShell({ modules, children }: AppShellProps) {
           <Wordmark height={20} priority />
           <p className="text-xs font-medium text-muted-foreground">{activeModule.name}</p>
         </div>
-        <Sidebar sections={activeModule.nav} />
+        <Sidebar sections={activeModule.nav} platformAdmin={user.role === "admin"} />
       </aside>
       {menuOpen && (
         <button

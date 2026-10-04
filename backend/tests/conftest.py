@@ -25,6 +25,16 @@ from sqlalchemy.orm import Session
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 
+# Tables emptied after each test that uses the database.
+TRUNCATED_TABLES = (
+    "users",
+    "user_sessions",
+    "audit_events",
+    "app_settings",
+    "employees",
+    "employee_functions",
+)
+
 
 def alembic_config() -> Config:
     cfg = Config(str(BACKEND_DIR / "alembic.ini"))
@@ -48,7 +58,7 @@ def db(migrated_db: None) -> Iterator[Session]:
     yield session
     session.close()
     with session.get_bind().begin() as conn:  # type: ignore[union-attr]
-        conn.execute(text("TRUNCATE users, user_sessions, audit_events, app_settings RESTART IDENTITY CASCADE"))
+        conn.execute(text(f"TRUNCATE {', '.join(TRUNCATED_TABLES)} RESTART IDENTITY CASCADE"))
 
 
 @pytest.fixture

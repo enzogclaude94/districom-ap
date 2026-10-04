@@ -4,7 +4,15 @@ from sqlalchemy import create_engine, inspect, text
 
 from tests.conftest import alembic_config
 
-EXPECTED_TABLES = {"users", "user_sessions", "app_settings", "audit_events", "source_systems"}
+EXPECTED_TABLES = {
+    "users",
+    "user_sessions",
+    "app_settings",
+    "audit_events",
+    "source_systems",
+    "employees",
+    "employee_functions",
+}
 
 
 def _tables(url: str) -> set[str]:
