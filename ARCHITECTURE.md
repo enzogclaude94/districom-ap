@@ -189,6 +189,7 @@ frontend/src/
 │   ├── page.tsx (selector)       home de plataforma: una tarjeta por módulo; con uno solo, redirige
 │   ├── empleados/                empleados y funciones (administración de plataforma)
 │   ├── rendiciones/              Rendiciones (inicio en R0; pantallas por fase R1–R8)
+│   │   └── cajas/                Cajas (R1): tablero y operaciones/[id]
 │   └── comercial/                Inteligencia Comercial
 │       ├── page.tsx              Inicio comercial (dashboard)
 │       ├── preventistas/ rutas/ clientes/ oportunidades/
@@ -198,7 +199,7 @@ frontend/src/
 │       └── datos/{importaciones,calidad}
 ├── modules/registry.ts           registro de módulos (key, nombre, ruta base, navegación); lo usan solo las rutas de app/
 ├── modules/commercial/           navegación, API y features del módulo
-├── modules/settlements/          ídem para Rendiciones (incluye su logo oficial)
+├── modules/settlements/          ídem para Rendiciones (incluye su logo oficial); cash/ = API y pantallas de Cajas
 ├── features/                     features de plataforma (auth, settings)
 ├── components/ui/                design system (shadcn/ui)
 ├── components/common/            KpiCard, DataTable, EmptyState, ErrorState, PeriodPicker...

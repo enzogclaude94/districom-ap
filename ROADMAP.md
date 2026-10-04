@@ -38,7 +38,7 @@ DistriCom es una plataforma modular (ADR 006). Este roadmap tiene tres carriles:
 | Fase | Nombre | Estado | Depende de |
 |---|---|---|---|
 | R0 | Habilitación del módulo | **DONE** (aprobada por Enzo el 2026-10-04) | PL‑1 |
-| R1 | Ledger y cajas | **IN_PROGRESS** (aprobada el 2026-10-04; R1‑1 aprobado, R1‑2 en revisión) | R0 |
+| R1 | Ledger y cajas | **IN_PROGRESS** (aprobada el 2026-10-04; R1‑1 y R1‑2 aprobados, R1‑3 en revisión) | R0 |
 | R2 | Rendición de reparto básica | PLANNED | R1 |
 | R3 | Pendientes de cobro | PLANNED | R2 |
 | R4 | Cartera de cheques | PLANNED | R2 |

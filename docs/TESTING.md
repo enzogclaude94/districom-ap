@@ -24,6 +24,11 @@ cd frontend && pnpm test
 cd frontend && pnpm e2e
 ```
 
+## R1‑3 (Rendiciones: pantalla Cajas)
+- `frontend/tests/cash.test.tsx`: formato de dinero y lectura de importes argentinos, id de solicitud sin `crypto.randomUUID`, mensajes de cada error de negocio sin texto técnico; tablero con saldos del backend y sin cuentas técnicas, loading/error/reintento, movimientos (autor, signo, origen, revertida, detalle, paginación), acciones visibles por rol, traspaso con id y fecha y recarga de saldos, reintento tras error de red con el mismo id y un id nuevo para la siguiente operación, doble envío bloqueado, conflicto que empieza una operación nueva, validación local, ajuste con signo y motivo, cuenta de socio duplicada; detalle con patas y cuentas técnicas, revertida con vínculos, reverso con confirmación y motivo, ya revertida, inexistente.
+- `frontend/e2e/cash.spec.ts` (desktop): admin crea una cuenta de socio y carga saldo inicial → operador traspasa y deposita → admin registra aporte y ajuste y revierte el traspaso → saldos finales correctos → historial con original y reverso → el lector no ve acciones y la API le responde 403. Usa saldos relativos, así que se puede repetir sobre la misma base. Móvil: tablero legible y formulario dentro de la pantalla, sin scroll horizontal.
+- `test_cash_api.py`: los movimientos incluyen el nombre del autor.
+
 ## R1‑2 (Rendiciones: API de cajas)
 - `tests/modules/settlements/test_cash_api.py`: lectura de cuentas, saldos a una fecha, movimientos (paginación, fechas, rango inválido) y detalle; 401 sin sesión y 403 sin rol; matriz de permisos por operación (`viewer`, `operator`, `admin`); saldos tras traspasos, depósitos y extracciones; aportes y devoluciones de socios; ajustes con motivo y de ambos signos; reverso por HTTP (reintento, ya revertido, reverso de reverso, inexistente); idempotencia por HTTP (`201`, `200` con la misma respuesta, `409` con otro contenido o en otro endpoint); saldo insuficiente hoy y retroactivo; cuenta inactiva; validaciones (decimales, signo, campos extra, fecha futura, `client_request_id` obligatorio); cuentas de socio duplicadas por mayúsculas, acentos o espacios, contra cuentas del sistema, auditadas, con nombre validado.
 - `test_migrations.py`: `0006` calcula `name_key` de las cuentas existentes.
