@@ -14,12 +14,12 @@ import { Sidebar } from "@/components/layout/sidebar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { authApi, currentUserQueryKey } from "@/lib/api/auth";
+import { authApi, currentUserQueryKey, moduleRole } from "@/lib/api/auth";
 import { ApiError } from "@/lib/api/client";
 import { cn } from "@/lib/cn";
 import { isInModule, type AppModule } from "@/lib/modules";
 
-const ROLE_LABELS = { admin: "Administrador", viewer: "Lectura" } as const;
+const ROLE_LABELS = { admin: "Administrador", operator: "Operador", viewer: "Lector" } as const;
 
 interface ModuleSwitcherProps {
   active: AppModule;
@@ -141,6 +141,12 @@ export function AppShell({ modules, children }: AppShellProps) {
   const activeModule = accessible.find((module) => isInModule(pathname, module)) ?? accessible[0];
   // A module the user has no role in: its screens are never rendered (the API also answers 403).
   const blockedModule = modules.find((module) => isInModule(pathname, module) && !accessible.includes(module));
+  // Inside a module the badge shows the effective role there (the platform admin is admin in every module);
+  // on platform pages (Empleados, Configuración…) it shows the platform role.
+  const insideModule = activeModule !== undefined && isInModule(pathname, activeModule);
+  const role = insideModule ? (moduleRole(user, activeModule.key) ?? user.role) : user.role;
+  const roleTitle = insideModule ? `Tu rol en ${activeModule.name}` : "Tu rol en la plataforma";
+
   if (!activeModule) {
     return (
       <div className="mx-auto max-w-lg p-8">
@@ -196,7 +202,9 @@ export function AppShell({ modules, children }: AppShellProps) {
           <div className="flex items-center gap-3">
             <div className="hidden text-right sm:block">
               <p className="text-sm leading-tight font-medium">{user.full_name}</p>
-              <Badge className="mt-0.5">{ROLE_LABELS[user.role]}</Badge>
+              <Badge className="mt-0.5" title={roleTitle} aria-label={`${roleTitle}: ${ROLE_LABELS[role]}`}>
+                {ROLE_LABELS[role]}
+              </Badge>
             </div>
             <Button
               variant="ghost"

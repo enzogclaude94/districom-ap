@@ -20,7 +20,7 @@ export default function SettlementsHomePage() {
       <EmptyState
         icon={CalendarClock}
         title="El módulo está habilitado"
-        description="Las primeras funciones llegan por etapas: cajas (R1), rendiciones de reparto (R2), pendientes (R3) y cartera de cheques (R4)."
+        description="Ya podés usar Cajas, en Tesorería. Las próximas funciones llegan por etapas: rendiciones de reparto (R2), pendientes (R3) y cartera de cheques (R4)."
       />
     </>
   );

@@ -90,6 +90,10 @@ jobs:
       E2E_ADMIN_PASSWORD: e2e-password-123
       E2E_VIEWER_EMAIL: e2e-viewer@districom.local
       E2E_VIEWER_PASSWORD: viewer-password-123
+      E2E_OPERATOR_EMAIL: e2e-operator@districom.local
+      E2E_OPERATOR_PASSWORD: operator-password-123
+      E2E_CASH_VIEWER_EMAIL: e2e-cash-viewer@districom.local
+      E2E_CASH_VIEWER_PASSWORD: cash-viewer-password-123
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -112,6 +116,10 @@ jobs:
           echo "$E2E_ADMIN_PASSWORD" | uv run python -m app.cli create-admin --email "$E2E_ADMIN_EMAIL" --name "Admin E2E"
           echo "$E2E_VIEWER_PASSWORD" | uv run python -m app.cli create-viewer --email "$E2E_VIEWER_EMAIL" --name "Viewer E2E"
           uv run python -m app.cli grant-module-role --email "$E2E_VIEWER_EMAIL" --module commercial --role viewer
+          echo "$E2E_OPERATOR_PASSWORD" | uv run python -m app.cli create-viewer --email "$E2E_OPERATOR_EMAIL" --name "Operador E2E"
+          uv run python -m app.cli grant-module-role --email "$E2E_OPERATOR_EMAIL" --module settlements --role operator
+          echo "$E2E_CASH_VIEWER_PASSWORD" | uv run python -m app.cli create-viewer --email "$E2E_CASH_VIEWER_EMAIL" --name "Lector Cajas E2E"
+          uv run python -m app.cli grant-module-role --email "$E2E_CASH_VIEWER_EMAIL" --module settlements --role viewer
       - name: Prepare frontend
         working-directory: frontend
         run: |

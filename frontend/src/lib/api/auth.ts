@@ -28,3 +28,17 @@ export const authApi = {
 };
 
 export const currentUserQueryKey = ["auth", "me"] as const;
+
+const MODULE_ROLE_RANK: Record<ModuleRole, number> = { viewer: 0, operator: 1, admin: 2 };
+
+/** The user's role in a module: the platform admin is admin in every module (ADR 007, D1). */
+export function moduleRole(user: CurrentUser | undefined, moduleKey: string): ModuleRole | null {
+  if (!user) return null;
+  if (user.role === "admin") return "admin";
+  return user.modules.find((module) => module.key === moduleKey)?.role ?? null;
+}
+
+/** Whether `role` reaches `required` (`viewer < operator < admin`). Only hides UI: the API decides. */
+export function roleAtLeast(role: ModuleRole | null, required: ModuleRole) {
+  return role !== null && MODULE_ROLE_RANK[role] >= MODULE_ROLE_RANK[required];
+}

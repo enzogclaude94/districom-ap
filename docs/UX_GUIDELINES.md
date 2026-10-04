@@ -25,6 +25,15 @@ Ver [`docs/BRAND.md`](BRAND.md): wordmark e ícono, paleta oficial como tokens, 
 - Tablas: paginación, orden y filtros del lado del servidor; headers sticky; drill-down.
 - Gráficos según la pregunta: línea (evolución), barras (comparación), barras apiladas (composición), heatmap (intensidad), scatter (relación), funnel (pipeline). Donuts solo en casos simples; sin gauges decorativos.
 
+## Formularios de dinero (Rendiciones)
+- Cada formulario genera su `client_request_id` al abrirse y lo reusa en cada reintento. Si el resultado de un envío es incierto (error de red, timeout, 5xx), el pedido exacto queda en `sessionStorage` (por formulario y usuario) hasta que se confirme o el usuario lo descarte tras una advertencia: reabrir el formulario ofrece reintentar la misma operación con el mismo id. Solo una operación nueva genera otro id.
+- Los diálogos atrapan el foco mientras están abiertos y lo devuelven al control que los abrió.
+- Siempre envían `business_date` explícita; el botón queda deshabilitado mientras se espera la respuesta.
+- Los saldos se vuelven a leer de la API después de cada operación: el frontend solo muestra provisionalmente el importe interpretado.
+- Los errores de negocio se explican en palabras del usuario (nunca códigos, SQLSTATE ni texto interno).
+- Ajustes, saldo inicial y reversos se presentan como acciones administrativas, separadas de los movimientos cotidianos. Un reverso se llama “Revertir operación”, nunca “Eliminar”.
+- Las cuentas técnicas (Saldo inicial, Ajustes) no se muestran como dinero disponible; solo en el detalle de una operación.
+
 ## Responsive
 Desktop excelente → tablet → móvil de consulta. Matrices grandes pueden simplificarse en móvil, pero nada se rompe.
 

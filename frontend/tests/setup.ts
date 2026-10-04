@@ -6,3 +6,7 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
 });
+
+afterEach(() => {
+  sessionStorage.clear();
+});

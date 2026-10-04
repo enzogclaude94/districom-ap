@@ -33,7 +33,7 @@ describe("AppShell with Rendiciones", () => {
     renderShell([commercial, settlements]);
     expect(await screen.findByRole("link", { name: "Inicio" })).toHaveAttribute("href", "/rendiciones");
     expect(screen.getByText("Tesorería")).toBeInTheDocument();
-    expect(screen.getByTitle("Disponible en la fase R1")).toHaveTextContent("R1");
+    expect(screen.getByTitle("Disponible en la fase R2")).toHaveTextContent("R2");
     expect(screen.getByText("contenido")).toBeInTheDocument();
   });
 
@@ -59,6 +59,28 @@ describe("AppShell with Rendiciones", () => {
     renderShell([commercial]);
     expect(await screen.findByText("No tenés acceso a Rendiciones")).toBeInTheDocument();
     expect(screen.queryByText("contenido")).not.toBeInTheDocument();
+  });
+
+  it("shows the effective role in the active module, and the platform role outside modules", async () => {
+    navigation.pathname = "/rendiciones/cajas";
+    const { unmount } = renderShell([commercial, settlements]);
+    expect(await screen.findByLabelText("Tu rol en Rendiciones: Operador")).toHaveTextContent("Operador");
+    unmount();
+
+    navigation.pathname = "/comercial";
+    const second = renderShell([commercial, settlements]);
+    expect(await screen.findByLabelText("Tu rol en Inteligencia Comercial: Lector")).toBeInTheDocument();
+    second.unmount();
+
+    navigation.pathname = "/rendiciones";
+    // The platform admin is admin in every module, whatever role the list carries (D1).
+    const third = renderShell([commercial, { ...settlements, role: "viewer" }], "admin");
+    expect(await screen.findByLabelText("Tu rol en Rendiciones: Administrador")).toBeInTheDocument();
+    third.unmount();
+
+    navigation.pathname = "/configuracion";
+    renderShell([commercial, settlements]);
+    expect(await screen.findByLabelText("Tu rol en la plataforma: Lector")).toBeInTheDocument();
   });
 
   it("shows Empleados only to platform admins", async () => {

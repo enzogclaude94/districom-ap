@@ -101,6 +101,7 @@ def test_viewer_reads_movements_and_operation_detail(as_role, funded) -> None:  
     assert movement["operation_type"] == "CASH_TRANSFER"
     assert movement["amount"] == "2500.50"
     assert movement["reversed_by_operation_id"] is None
+    assert movement["created_by_name"] == "Usuario Test"
 
     detail = viewer.get(f"{BASE}/operations/{transfer['id']}").json()
     assert detail["description"] == "Cambio para repartos"

@@ -87,6 +87,7 @@ class Movement:
     description: str | None
     amount: Decimal
     created_by: int
+    created_by_name: str
     created_at: datetime
     source_type: str | None
     source_id: int | None
@@ -437,8 +438,9 @@ def account_movements(
         raise AppError(404, "account_not_found", "La cuenta no existe.")
     reversal = aliased(FinancialOperation)
     query = (
-        select(LedgerEntry, FinancialOperation, reversal.id)
+        select(LedgerEntry, FinancialOperation, reversal.id, User.full_name)
         .join(FinancialOperation, LedgerEntry.operation_id == FinancialOperation.id)
+        .join(User, User.id == FinancialOperation.created_by)
         .outerjoin(reversal, reversal.reverses_operation_id == FinancialOperation.id)
         .where(LedgerEntry.account_id == account_id)
     )
@@ -461,13 +463,14 @@ def account_movements(
             description=op.description,
             amount=entry.amount,
             created_by=op.created_by,
+            created_by_name=author,
             created_at=op.created_at,
             source_type=op.source_type,
             source_id=op.source_id,
             reverses_operation_id=op.reverses_operation_id,
             reversed_by_operation_id=reversed_by,
         )
-        for entry, op, reversed_by in rows
+        for entry, op, reversed_by, author in rows
     ]
     return movements, total
 
