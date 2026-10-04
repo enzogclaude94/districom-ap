@@ -127,7 +127,7 @@ Modelo conceptual en `DATA_MODEL.md §13`; decisiones en ADR 007. Cada fase crea
 **Resultado visible:** pantalla Cajas con saldos y movimientos con su origen.
 **Criterios:** suma cero garantizada por la base; doble envío no duplica; mismo id con otro contenido es conflicto; reverso deja saldo y rastro; saldos = suma de entradas; cajas y Banco nunca negativos, ni hoy ni históricamente, también con operaciones simultáneas; ajustes solo admin con motivo; auditoría.
 **Decisiones de Enzo (2026-10-04):** cajas solo por importe, sin denominaciones (P2); cuentas de aportes por socio creadas por un admin, sin cantidad ni nombres fijos (P3); cuentas técnicas Saldo inicial y Ajustes (D4); sin negativo en cajas, Banco arranca sin negativo (D5); idempotencia con huella y única puerta de escritura (ADR 008). En R2 el efectivo de una rendición podrá repartirse entre Caja principal y Caja de cambio (P1): ningún código asume una caja destino fija.
-**PRs:** R1‑1 núcleo del ledger (migración `0005`, servicio, invariantes, tests) · R1‑2 API de cajas · R1‑3 pantalla Cajas. Cada uno espera la aprobación de Enzo antes del siguiente.
+**PRs:** R1‑1 núcleo del ledger (migración `0005`, servicio, invariantes, tests) · R1‑2 API de cajas (migración `0006`, endpoints por rol) · R1‑3 pantalla Cajas. Cada uno espera la aprobación de Enzo antes del siguiente.
 
 ### R2 — Rendición de reparto básica
 **Alcance:** rendición (fecha, repartidor, importe esperado con origen `MANUAL`), conteo de efectivo por denominación con agregado, transferencias verificadas, gastos con categorías editables, diferencia y su asignación a uno o varios empleados, cierre atómico hacia el ledger, reapertura y corrección por admin con reverso.
