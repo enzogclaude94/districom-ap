@@ -1,7 +1,7 @@
 "use client";
 
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { ArrowLeftRight, CheckCircle2, Landmark, Plus, ShieldCheck, Wallet } from "lucide-react";
+import { AlertTriangle, ArrowLeftRight, CheckCircle2, Landmark, Plus, ShieldCheck, Wallet } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 
@@ -21,6 +21,7 @@ import { formatDate, formatDateTime, formatMoney } from "@/lib/format";
 import { ACCOUNT_KIND_LABELS, OPERATION_LABELS, sourceLabel } from "./labels";
 import { OperationFormDialog, type CashAction } from "./operation-forms";
 import { OwnerAccountDialog } from "./owner-account-dialog";
+import { listPending } from "./pending-operations";
 
 const PAGE_SIZE = 20;
 
@@ -242,6 +243,9 @@ export function CashBoard() {
   const visible = [...money, ...partners];
   const selected = visible.find((account) => account.id === selectedId) ?? visible[0];
 
+  // Attempts with an unknown outcome stay visible until they are retried or explicitly abandoned.
+  const unconfirmed = me.data && dialog === null ? listPending(me.data.id) : [];
+
   const done = (operation: Operation) => {
     const amount = operation.entries.find((entry) => entry.amount.startsWith("-"))?.amount.slice(1);
     setNotice({
@@ -274,6 +278,43 @@ export function CashBoard() {
           )
         }
       />
+
+      {unconfirmed.length > 0 && (
+        <section
+          aria-label="Operaciones sin confirmar"
+          className="space-y-2 rounded-md border border-warning/40 bg-warning-soft px-4 py-3 text-sm"
+        >
+          <p className="flex items-center gap-2 font-medium">
+            <AlertTriangle className="size-4 text-warning" aria-hidden />
+            {unconfirmed.length === 1
+              ? "Hay una operación sin confirmar"
+              : `Hay ${unconfirmed.length} operaciones sin confirmar`}
+          </p>
+          <ul className="space-y-1">
+            {unconfirmed.map((entry) => {
+              const reversed = entry.slot.startsWith("reverse:") ? Number(entry.slot.slice(8)) : null;
+              return (
+                <li key={entry.slot} className="flex flex-wrap items-center gap-2">
+                  <span>{entry.summary}</span>
+                  {reversed !== null ? (
+                    <Link href={`/rendiciones/cajas/operaciones/${reversed}`} className="text-primary hover:underline">
+                      Revisar
+                    </Link>
+                  ) : (
+                    <button
+                      type="button"
+                      className="text-primary hover:underline"
+                      onClick={() => setDialog(entry.slot as CashAction)}
+                    >
+                      Revisar
+                    </button>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
 
       {notice && (
         <div

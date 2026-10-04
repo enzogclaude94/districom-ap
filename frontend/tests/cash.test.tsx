@@ -372,6 +372,145 @@ describe("CashBoard", () => {
     expect(ids[2]).not.toBe(ids[0]);
   });
 
+  it("keeps an uncertain operation after the form is closed and retries it with the same id and body", async () => {
+    const spy = mockApi(
+      boardRoutes("operator", {
+        "POST /settlements/operations/cash-transfer": (_init, call) => {
+          if (call === 1) throw new TypeError("Failed to fetch");
+          return jsonResponse(200, { ...OPERATION, id: 50, type: "CASH_TRANSFER" });
+        },
+      }),
+    );
+    renderWithQuery(<CashBoard />);
+    await userEvent.click(await screen.findByRole("button", { name: /Mover entre cajas/ }));
+    let dialog = screen.getByRole("dialog", { name: "Mover entre cajas" });
+    await userEvent.type(within(dialog).getByLabelText("Importe"), "1.500");
+    await userEvent.type(within(dialog).getByLabelText("Descripción (opcional)"), "Cambio");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Registrar traspaso" }));
+    await within(dialog).findByRole("alert");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancelar" }));
+
+    // The board keeps it in sight.
+    const banner = screen.getByRole("region", { name: "Operaciones sin confirmar" });
+    expect(banner).toHaveTextContent("Mover entre cajas · $ 1.500,00 · Caja principal → Caja de cambio");
+
+    // Reopening the form offers the stored attempt instead of a blank form with a new id.
+    await userEvent.click(screen.getByRole("button", { name: /Mover entre cajas/ }));
+    dialog = screen.getByRole("dialog", { name: "Mover entre cajas" });
+    expect(dialog).toHaveTextContent("Hay una operación sin confirmar");
+    expect(within(dialog).queryByLabelText("Importe")).not.toBeInTheDocument();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Reintentar la misma operación" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("Operación registrada");
+
+    const sent = bodies(spy, "/settlements/operations/cash-transfer");
+    expect(sent).toHaveLength(2);
+    expect(sent[1]).toEqual(sent[0]);
+    expect(sessionStorage.length).toBe(0);
+    expect(screen.queryByRole("region", { name: "Operaciones sin confirmar" })).not.toBeInTheDocument();
+  });
+
+  it("abandons an uncertain operation only after a warning, and then uses a new id", async () => {
+    const spy = mockApi(
+      boardRoutes("operator", {
+        "POST /settlements/operations/bank-deposit": (_init, call) =>
+          call === 1 ? apiError(503, "http_error") : jsonResponse(201, { ...OPERATION, type: "BANK_DEPOSIT" }),
+      }),
+    );
+    renderWithQuery(<CashBoard />);
+    await userEvent.click(await screen.findByRole("button", { name: /Depositar en banco/ }));
+    let dialog = screen.getByRole("dialog");
+    await userEvent.type(within(dialog).getByLabelText("Importe"), "500");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Registrar depósito" }));
+    await within(dialog).findByRole("alert");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cerrar" }));
+
+    await userEvent.click(screen.getByRole("button", { name: /Depositar en banco/ }));
+    dialog = screen.getByRole("dialog");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Descartar…" }));
+    expect(within(dialog).getByRole("alertdialog")).toHaveTextContent("el movimiento quedaría duplicado");
+    expect(sessionStorage.length).toBe(1);
+    await userEvent.click(within(dialog).getByRole("button", { name: "Descartar el intento" }));
+    expect(sessionStorage.length).toBe(0);
+
+    await userEvent.type(within(dialog).getByLabelText("Importe"), "700");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Registrar depósito" }));
+    await screen.findByRole("status");
+    const ids = bodies(spy, "/settlements/operations/bank-deposit").map((body) => body.client_request_id);
+    expect(ids).toHaveLength(2);
+    expect(ids[1]).not.toBe(ids[0]);
+  });
+
+  it("never mixes stored attempts of different operations or users, and keeps nothing sensitive", async () => {
+    mockApi(
+      boardRoutes("operator", {
+        "POST /settlements/operations/cash-transfer": () => {
+          throw new TypeError("Failed to fetch");
+        },
+      }),
+    );
+    renderWithQuery(<CashBoard />);
+    await userEvent.click(await screen.findByRole("button", { name: /Mover entre cajas/ }));
+    let dialog = screen.getByRole("dialog");
+    await userEvent.type(within(dialog).getByLabelText("Importe"), "10");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Registrar traspaso" }));
+    await within(dialog).findByRole("alert");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancelar" }));
+
+    const stored = JSON.parse(sessionStorage.getItem("districom:settlements:pending:cash-transfer")!) as Record<
+      string,
+      unknown
+    >;
+    expect(Object.keys(stored).sort()).toEqual(["body", "path", "savedAt", "slot", "summary", "userId"]);
+    expect(Object.keys(stored.body as object).sort()).toEqual([
+      "amount",
+      "business_date",
+      "client_request_id",
+      "description",
+      "from_account_id",
+      "to_account_id",
+    ]);
+
+    // Another operation opens blank.
+    await userEvent.click(screen.getByRole("button", { name: /Depositar en banco/ }));
+    dialog = screen.getByRole("dialog", { name: "Depositar en banco" });
+    expect(within(dialog).getByLabelText("Importe")).toBeInTheDocument();
+    expect(dialog).not.toHaveTextContent("sin confirmar");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancelar" }));
+
+    // Another user in the same tab does not get it.
+    sessionStorage.setItem("districom:settlements:pending:cash-transfer", JSON.stringify({ ...stored, userId: 999 }));
+    await userEvent.click(screen.getByRole("button", { name: /Mover entre cajas/ }));
+    expect(within(screen.getByRole("dialog")).getByLabelText("Importe")).toBeInTheDocument();
+  });
+
+  it("forgets the attempt when the retry gets a definitive answer", async () => {
+    mockApi(
+      boardRoutes("operator", {
+        "POST /settlements/operations/cash-transfer": (_init, call) =>
+          call === 1
+            ? apiError(504, "http_error")
+            : apiError(409, "insufficient_funds", {
+                account_id: 1,
+                business_date: todayIso(),
+                balance: "5.00",
+                amount: "-10.00",
+              }),
+      }),
+    );
+    renderWithQuery(<CashBoard />);
+    await userEvent.click(await screen.findByRole("button", { name: /Mover entre cajas/ }));
+    let dialog = screen.getByRole("dialog");
+    await userEvent.type(within(dialog).getByLabelText("Importe"), "10");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Registrar traspaso" }));
+    await within(dialog).findByRole("alert");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancelar" }));
+    await userEvent.click(screen.getByRole("button", { name: /Mover entre cajas/ }));
+    dialog = screen.getByRole("dialog");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Reintentar la misma operación" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("No hay saldo suficiente en Caja principal");
+    expect(sessionStorage.length).toBe(0);
+  });
+
   it("blocks a second submit while waiting for the answer", async () => {
     let release: (response: Response) => void = () => {};
     const spy = mockApi(
@@ -543,6 +682,34 @@ describe("OperationDetail", () => {
       business_date: todayIso(),
     });
     expect(await screen.findByText("Esta operación fue revertida y ya no afecta los saldos.")).toBeInTheDocument();
+  });
+
+  it("keeps an uncertain reversal for that operation only", async () => {
+    const spy = mockApi({
+      "GET /auth/me": () => jsonResponse(200, me("admin")),
+      "GET /settlements/operations/30": () => jsonResponse(200, OPERATION),
+      "POST /settlements/operations/30/reverse": (_init, call) => {
+        if (call === 1) throw new TypeError("Failed to fetch");
+        return jsonResponse(200, { ...OPERATION, id: 31, type: "REVERSAL", reverses_operation_id: 30 });
+      },
+    });
+    renderWithQuery(<OperationDetail operationId={30} />);
+    await userEvent.click(await screen.findByRole("button", { name: "Revertir operación" }));
+    let dialog = screen.getByRole("dialog");
+    await userEvent.type(within(dialog).getByLabelText("Motivo"), "Duplicada");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Revertir operación" }));
+    await within(dialog).findByRole("alert");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancelar" }));
+    expect(sessionStorage.getItem("districom:settlements:pending:reverse:30")).not.toBeNull();
+
+    await userEvent.click(screen.getByRole("button", { name: "Revertir operación" }));
+    dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveTextContent("Reverso de la operación n.º 30");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Reintentar la misma operación" }));
+    expect(await screen.findByText(/Se registró el reverso n.º 31/)).toBeInTheDocument();
+    const sent = bodies(spy, "/settlements/operations/30/reverse");
+    expect(sent[1]).toEqual(sent[0]);
+    expect(sessionStorage.length).toBe(0);
   });
 
   it("explains an already reversed operation", async () => {

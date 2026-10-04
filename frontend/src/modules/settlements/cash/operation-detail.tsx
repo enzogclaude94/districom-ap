@@ -18,11 +18,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { authApi, currentUserQueryKey, moduleRole, roleAtLeast } from "@/lib/api/auth";
 import { ApiError } from "@/lib/api/client";
-import { cashApi, cashQueryKey, type Operation } from "@/modules/settlements/cash/api";
+import { cashApi, cashQueryKey, reversePath, type Operation } from "@/modules/settlements/cash/api";
 import { formatDate, formatDateTime, formatMoney, todayIso } from "@/lib/format";
 
 import { cashErrorView } from "./errors";
 import { ACCOUNT_KIND_LABELS, OPERATION_LABELS, sourceLabel } from "./labels";
+import { StoredAttempt } from "./stored-attempt";
 import { useCashOperation } from "./use-cash-operation";
 
 const operationHref = (id: number) => `/rendiciones/cajas/operaciones/${id}`;
@@ -34,15 +35,7 @@ function ReverseDialog({ operation, onClose }: { operation: Operation; onClose: 
   const [businessDate, setBusinessDate] = useState(todayIso);
   const [problem, setProblem] = useState<string | null>(null);
   const [reversal, setReversal] = useState<Operation | null>(null);
-  const reverse = useCashOperation(
-    (requestId) =>
-      cashApi.reverse(operation.id, {
-        client_request_id: requestId,
-        reason: reason.trim(),
-        business_date: businessDate,
-      }),
-    setReversal,
-  );
+  const reverse = useCashOperation(`reverse:${operation.id}`, setReversal);
   const pending = reverse.mutation.isPending;
   const names = (id: number) => operation.entries.find((entry) => entry.account_id === id)?.account_name;
   const error = reverse.mutation.error ? cashErrorView(reverse.mutation.error, names, businessDate) : null;
@@ -55,7 +48,13 @@ function ReverseDialog({ operation, onClose }: { operation: Operation; onClose: 
         ? "La fecha de negocio no puede ser posterior a hoy."
         : null;
     setProblem(local);
-    if (!local) reverse.submit();
+    if (!local) {
+      reverse.submit((requestId) => ({
+        path: reversePath(operation.id),
+        body: { client_request_id: requestId, reason: reason.trim(), business_date: businessDate },
+        summary: `Reverso de la operación n.º ${operation.id} · ${formatDate(businessDate)}`,
+      }));
+    }
   };
 
   if (reversal) {
@@ -78,6 +77,14 @@ function ReverseDialog({ operation, onClose }: { operation: Operation; onClose: 
             </Button>
           </div>
         </div>
+      </Dialog>
+    );
+  }
+
+  if (reverse.stored) {
+    return (
+      <Dialog title="Revertir operación" onClose={onClose}>
+        <StoredAttempt operation={reverse} names={names} onClose={onClose} />
       </Dialog>
     );
   }

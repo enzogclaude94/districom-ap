@@ -8,7 +8,7 @@ import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  cashApi,
+  operationPath,
   type Account,
   type AccountKind,
   type Operation,
@@ -18,7 +18,8 @@ import { formatMoney, todayIso } from "@/lib/format";
 
 import { parseAmount } from "./amount";
 import { cashErrorView } from "./errors";
-import { useCashOperation } from "./use-cash-operation";
+import { StoredAttempt, summarize } from "./stored-attempt";
+import { useCashOperation, type CashRequest } from "./use-cash-operation";
 
 export type CashAction = OperationKind;
 
@@ -26,12 +27,6 @@ interface FormProps {
   accounts: Account[];
   onClose: () => void;
   onDone: (operation: Operation) => void;
-}
-
-interface Base {
-  client_request_id: string;
-  business_date: string;
-  description: string | null;
 }
 
 const selectClass =
@@ -126,9 +121,12 @@ interface OperationDialogProps {
   accounts: Account[];
   onClose: () => void;
   onDone: (operation: Operation) => void;
+  /** Endpoint of the operation; also names the slot of its pending attempt. */
+  kind: OperationKind;
   /** Form-level check before sending; returns the message to show or null. */
   validate: () => string | null;
-  send: (base: Base) => Promise<Operation>;
+  /** Operation-specific fields of the body. */
+  fields: () => Record<string, unknown>;
   children: ReactNode;
 }
 
@@ -142,8 +140,9 @@ function OperationDialog({
   accounts,
   onClose,
   onDone,
+  kind,
   validate,
-  send,
+  fields,
   children,
 }: OperationDialogProps) {
   const dateId = useId();
@@ -151,16 +150,21 @@ function OperationDialog({
   const [businessDate, setBusinessDate] = useState(todayIso);
   const [text, setText] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
-  const operation = useCashOperation(
-    (requestId) =>
-      send({ client_request_id: requestId, business_date: businessDate, description: text.trim() || null }),
-    (done) => {
-      onDone(done);
-      onClose();
-    },
-  );
+  const operation = useCashOperation(kind, (done) => {
+    onDone(done);
+    onClose();
+  });
   const pending = operation.mutation.isPending;
   const names = (id: number) => accounts.find((account) => account.id === id)?.name;
+  const build = (requestId: string): CashRequest => {
+    const body = {
+      client_request_id: requestId,
+      business_date: businessDate,
+      description: text.trim() || null,
+      ...fields(),
+    };
+    return { path: operationPath(kind), body, summary: summarize(title, body, names) };
+  };
   const error = operation.mutation.error ? cashErrorView(operation.mutation.error, names, businessDate) : null;
 
   const submit = (event: FormEvent) => {
@@ -171,8 +175,16 @@ function OperationDialog({
       (businessDate > todayIso() ? "La fecha de negocio no puede ser posterior a hoy." : null) ??
       (descriptionMode === "reason" && !text.trim() ? "Indicá el motivo." : null);
     setProblem(local);
-    if (!local) operation.submit();
+    if (!local) operation.submit(build);
   };
+
+  if (operation.stored) {
+    return (
+      <Dialog title={title} description={description} onClose={onClose}>
+        <StoredAttempt operation={operation} names={names} onClose={onClose} />
+      </Dialog>
+    );
+  }
 
   return (
     <Dialog title={title} description={description} onClose={onClose}>
@@ -257,14 +269,8 @@ function TransferForm({ accounts, onClose, onDone }: FormProps) {
       validate={() =>
         required(from, to) ?? (from === to ? "Elegí dos cajas distintas." : null) ?? amountProblem(amount)
       }
-      send={(base) =>
-        cashApi.post("cash-transfer", {
-          ...base,
-          from_account_id: from!,
-          to_account_id: to!,
-          amount: parseAmount(amount)!,
-        })
-      }
+      kind="cash-transfer"
+      fields={() => ({ from_account_id: from, to_account_id: to, amount: parseAmount(amount) })}
     >
       <AccountSelect label="Desde" accounts={boxes} value={from} onChange={setFrom} />
       <AccountSelect label="Hacia" accounts={boxes} value={to} onChange={setTo} />
@@ -309,20 +315,11 @@ function BankForm({ accounts, onClose, onDone, direction }: FormProps & { direct
       onClose={onClose}
       onDone={onDone}
       validate={() => required(cash, bank) ?? amountProblem(amount)}
-      send={(base) =>
+      kind={deposit ? "bank-deposit" : "bank-withdrawal"}
+      fields={() =>
         deposit
-          ? cashApi.post("bank-deposit", {
-              ...base,
-              cash_account_id: cash!,
-              bank_account_id: bank!,
-              amount: parseAmount(amount)!,
-            })
-          : cashApi.post("bank-withdrawal", {
-              ...base,
-              bank_account_id: bank!,
-              cash_account_id: cash!,
-              amount: parseAmount(amount)!,
-            })
+          ? { cash_account_id: cash, bank_account_id: bank, amount: parseAmount(amount) }
+          : { bank_account_id: bank, cash_account_id: cash, amount: parseAmount(amount) }
       }
     >
       {deposit ? cashSelect : bankSelect}
@@ -353,7 +350,8 @@ function OpeningBalanceForm({ accounts, onClose, onDone }: FormProps) {
       onClose={onClose}
       onDone={onDone}
       validate={() => required(account) ?? amountProblem(amount)}
-      send={(base) => cashApi.post("opening-balance", { ...base, account_id: account!, amount: parseAmount(amount)! })}
+      kind="opening-balance"
+      fields={() => ({ account_id: account, amount: parseAmount(amount) })}
     >
       <AccountSelect label="Cuenta" accounts={targets} value={account} onChange={setAccount} />
       <AmountField value={amount} onChange={setAmount} label="Saldo existente" />
@@ -389,14 +387,8 @@ function OwnerForm({ accounts, onClose, onDone, direction }: FormProps & { direc
         required(owner, account) ??
         amountProblem(amount)
       }
-      send={(base) =>
-        cashApi.post(contribution ? "owner-contribution" : "owner-withdrawal", {
-          ...base,
-          owner_account_id: owner!,
-          account_id: account!,
-          amount: parseAmount(amount)!,
-        })
-      }
+      kind={contribution ? "owner-contribution" : "owner-withdrawal"}
+      fields={() => ({ owner_account_id: owner, account_id: account, amount: parseAmount(amount) })}
     >
       <AccountSelect label="Socio" accounts={owners} value={owner} onChange={setOwner} />
       <AccountSelect
@@ -436,14 +428,8 @@ function AdjustmentForm({ accounts, onClose, onDone }: FormProps) {
       onClose={onClose}
       onDone={onDone}
       validate={() => required(account, direction) ?? amountProblem(amount)}
-      send={(base) =>
-        cashApi.post("adjustment", {
-          ...base,
-          description: base.description ?? "",
-          account_id: account!,
-          amount: `${direction === "shortage" ? "-" : ""}${parseAmount(amount)!}`,
-        })
-      }
+      kind="adjustment"
+      fields={() => ({ account_id: account, amount: `${direction === "shortage" ? "-" : ""}${parseAmount(amount)}` })}
     >
       <AccountSelect label="Cuenta" accounts={targets} value={account} onChange={setAccount} />
       <fieldset className="space-y-1.5">

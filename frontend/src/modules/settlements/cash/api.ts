@@ -99,6 +99,9 @@ export interface MovementFilters {
 
 const BASE = "/settlements";
 
+export const operationPath = (kind: OperationKind) => `/operations/${kind}`;
+export const reversePath = (operationId: number) => `/operations/${operationId}/reverse`;
+
 const post = <T>(path: string, body: unknown) =>
   apiFetch<T>(`${BASE}${path}`, { method: "POST", body: JSON.stringify(body) });
 
@@ -107,8 +110,10 @@ export const cashApi = {
   movements: (accountId: number, { limit, offset }: MovementFilters) =>
     apiFetch<MovementPage>(`${BASE}/accounts/${accountId}/movements?limit=${limit}&offset=${offset}`),
   operation: (id: number) => apiFetch<Operation>(`${BASE}/operations/${id}`),
-  post: <K extends OperationKind>(kind: K, body: OperationBodies[K]) => post<Operation>(`/operations/${kind}`, body),
-  reverse: (id: number, body: ReversalBody) => post<Operation>(`/operations/${id}/reverse`, body),
+  post: <K extends OperationKind>(kind: K, body: OperationBodies[K]) => post<Operation>(operationPath(kind), body),
+  /** Resends a stored request as is (retry of an operation whose outcome was unknown). */
+  send: (path: string, body: unknown) => post<Operation>(path, body),
+  reverse: (id: number, body: ReversalBody) => post<Operation>(reversePath(id), body),
   createOwnerAccount: (name: string) => post<Account>("/accounts", { name }),
 };
 
