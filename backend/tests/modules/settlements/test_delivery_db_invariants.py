@@ -60,6 +60,32 @@ def loaded(db: Session, actor, driver, accounts) -> dict[str, int]:  # type: ign
     return {"settlement": sid, "addition": addition.id, "transfer": transfer.id, "expense": expense}
 
 
+def close_in_database(db: Session, settlement_id: int) -> None:
+    """Close a settlement with raw SQL: a SETTLEMENT_CLOSE of it in effect, as the close flow leaves it."""
+    operation = db.execute(
+        text(
+            "INSERT INTO settlements.financial_operations (type, business_date, description, client_request_id, "
+            "request_fingerprint, source_type, source_id, created_by) SELECT 'SETTLEMENT_CLOSE', business_date, "
+            "'Cierre', gen_random_uuid(), repeat('a', 64), 'settlement', id, created_by "
+            "FROM settlements.settlements WHERE id = :s RETURNING id"
+        ),
+        {"s": settlement_id},
+    ).scalar_one()
+    db.execute(
+        text(
+            "INSERT INTO settlements.ledger_entries (operation_id, account_id, amount) SELECT :o, id, "
+            "CASE code WHEN 'main_cash' THEN 1 ELSE -1 END FROM settlements.accounts "
+            "WHERE code IN ('main_cash', 'delivery_collections')"
+        ),
+        {"o": operation},
+    )
+    db.execute(
+        text("UPDATE settlements.settlements SET status = 'CLOSED', current_close_operation_id = :o WHERE id = :s"),
+        {"o": operation, "s": settlement_id},
+    )
+    db.commit()
+
+
 def _refused(db: Session, sql: str, **params: object) -> str:
     def _write() -> None:
         db.execute(text(sql), params)
@@ -113,8 +139,7 @@ def test_an_addition_is_only_voided(db: Session, loaded, actor) -> None:  # type
 def test_a_closed_settlement_is_frozen(db: Session, loaded, actor, accounts) -> None:  # type: ignore[no-untyped-def]
     """[18] at the database level."""
     sid = loaded["settlement"]
-    db.execute(text("UPDATE settlements.settlements SET status = 'CLOSED' WHERE id = :id"), {"id": sid})
-    db.commit()
+    close_in_database(db, sid)
     user = actor("operator").id
     statements = [
         ("UPDATE settlements.settlements SET expected_amount = 1 WHERE id = :s", {}),

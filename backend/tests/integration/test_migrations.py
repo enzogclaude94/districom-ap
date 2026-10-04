@@ -35,6 +35,9 @@ SETTLEMENTS_TABLES = {
     "transfer_status_events",
     "expense_categories",
     "expenses",
+    "settlement_closings",
+    "settlement_differences",
+    "difference_allocations",
 }
 
 
@@ -107,6 +110,9 @@ def test_settlements_system_accounts_seeded(migrated_db: None) -> None:
         ("bank", "BANK", False),
         ("opening_balance", "OPENING_BALANCE", True),
         ("adjustment", "ADJUSTMENT", True),
+        ("delivery_collections", "DELIVERY_COLLECTIONS", True),
+        ("expense", "EXPENSE", True),
+        ("settlement_difference", "SETTLEMENT_DIFFERENCE", True),
     ]
 
 
@@ -155,7 +161,17 @@ def test_account_name_key_backfill() -> None:
         command.upgrade(cfg, "head")
         with engine.connect() as conn:
             keys = conn.execute(text("SELECT name_key FROM settlements.accounts ORDER BY id")).scalars().all()
-        assert keys == ["caja principal", "caja de cambio", "banco", "saldo inicial", "ajustes", "jose alvarez"]
+        assert keys == [
+            "caja principal",
+            "caja de cambio",
+            "banco",
+            "saldo inicial",
+            "ajustes",
+            "jose alvarez",
+            "cobranzas de reparto",
+            "gastos operativos",
+            "diferencias de rendicion",
+        ]
     finally:
         with engine.begin() as conn:
             conn.execute(text("DELETE FROM settlements.accounts WHERE kind = 'OWNER_EQUITY'"))

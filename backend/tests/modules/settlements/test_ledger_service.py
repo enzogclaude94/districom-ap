@@ -61,6 +61,9 @@ def test_opening_balance_and_transfer_derive_balances_from_entries(db: Session, 
         "Banco": Decimal("50000.00"),
         "Saldo inicial": Decimal("-150000.00"),
         "Ajustes": Decimal("0"),
+        "Cobranzas de reparto": Decimal("0"),
+        "Gastos operativos": Decimal("0"),
+        "Diferencias de rendición": Decimal("0"),
     }
     # The balance is the sum of the entries, and the whole ledger sums zero.
     assert db.scalar(select(func.sum(LedgerEntry.amount))) == 0

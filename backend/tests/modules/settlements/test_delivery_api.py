@@ -15,6 +15,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.clock import business_today
+from tests.modules.settlements.test_delivery_db_invariants import close_in_database
 
 BASE = "/api/v1/settlements"
 TODAY = business_today()
@@ -558,8 +559,7 @@ def test_a_closed_settlement_admits_no_load_changes(as_role, ids, opened, catego
     addition_id = addition.json()["additions"][0]["id"]
     transfer = _transfer(operator, opened, "7")
     expense = post(operator, f"/deliveries/{opened}/expenses", category_id=tolls, amount="3").json()["expenses"][0]
-    db.execute(text("UPDATE settlements.settlements SET status = 'CLOSED' WHERE id = :id"), {"id": opened})
-    db.commit()
+    close_in_database(db, opened)
 
     path = f"{BASE}/deliveries/{opened}"
     admin = as_role("admin")

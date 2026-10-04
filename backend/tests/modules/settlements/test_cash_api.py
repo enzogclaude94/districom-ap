@@ -55,6 +55,9 @@ def test_viewer_reads_accounts_with_balances_as_decimal_strings(as_role, funded)
         ("bank", "Banco", "BANK", "50000.00"),
         ("opening_balance", "Saldo inicial", "OPENING_BALANCE", "-150000.00"),
         ("adjustment", "Ajustes", "ADJUSTMENT", "0.00"),
+        ("delivery_collections", "Cobranzas de reparto", "DELIVERY_COLLECTIONS", "0.00"),
+        ("expense", "Gastos operativos", "EXPENSE", "0.00"),
+        ("settlement_difference", "Diferencias de rendición", "SETTLEMENT_DIFFERENCE", "0.00"),
     ]
     one = viewer.get(f"{BASE}/accounts/{funded['main_cash']}").json()
     assert one["balance"] == "100000.00"
@@ -220,6 +223,9 @@ def test_cash_and_bank_operations_move_the_balances(as_role, funded) -> None:  #
         "bank": "98999.75",
         "opening_balance": "-150000.00",
         "adjustment": "0.00",
+        "delivery_collections": "0.00",
+        "expense": "0.00",
+        "settlement_difference": "0.00",
     }
 
 
