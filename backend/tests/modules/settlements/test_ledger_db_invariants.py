@@ -4,6 +4,7 @@ These tests write raw SQL on purpose: application code must never do this (singl
 """
 
 from collections.abc import Iterator
+from datetime import date, timedelta
 from uuid import uuid4
 
 import pytest
@@ -38,13 +39,14 @@ def _insert_operation(conn: Connection, *legs: tuple[str, str], type: str = "CAS
         "client_request_id": uuid4(),
         "fingerprint": FINGERPRINT,
         "user": _user_id(conn),
+        "business_date": date.today(),
         **columns,
     }
     op_id = int(
         conn.execute(
             text(
                 "INSERT INTO settlements.financial_operations (type, business_date, description, client_request_id,"
-                " request_fingerprint, reverses_operation_id, created_by) VALUES (:type, current_date, :description,"
+                " request_fingerprint, reverses_operation_id, created_by) VALUES (:type, :business_date, :description,"
                 " :client_request_id, :fingerprint, :reverses_operation_id, :user) RETURNING id"
             ),
             values,
@@ -217,3 +219,19 @@ def test_concurrent_raw_withdrawals_cannot_overdraw(db: Session, conn: Connectio
             other.commit()
     finally:
         other.close()
+
+
+def test_retroactive_raw_withdrawal_cannot_leave_a_past_day_negative(conn: Connection) -> None:
+    """Enzo's example: +100.000, -80.000, +200.000 on three days; -50.000 on day 2 is rejected."""
+    day1, day2, day3 = (date.today() - timedelta(days=n) for n in (3, 2, 1))
+    _committed(
+        conn, ("main_cash", "100000"), ("opening_balance", "-100000"), type="OPENING_BALANCE", business_date=day1
+    )
+    _committed(conn, ("main_cash", "-80000"), ("change_cash", "80000"), business_date=day2)
+    _committed(
+        conn, ("main_cash", "200000"), ("adjustment", "-200000"), type="ADJUSTMENT", description="x", business_date=day3
+    )
+    message = _fails_at_commit(conn, ("main_cash", "-50000"), ("change_cash", "50000"), business_date=day2)
+    assert "negative balance" in message
+    assert day2.isoformat() in message
+    _committed(conn, ("main_cash", "-20000"), ("change_cash", "20000"), business_date=day2)

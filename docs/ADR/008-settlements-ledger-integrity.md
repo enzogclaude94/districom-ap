@@ -7,7 +7,7 @@
 ADR 007 aprobó un ledger propio de Rendiciones (`accounts`, `financial_operations`, `ledger_entries`) con entradas inmutables, operaciones balanceadas, idempotencia y reversos. Al aprobar R1, Enzo pidió:
 1. que un `client_request_id` reutilizado por error con **otro contenido** no reciba en silencio la operación anterior;
 2. que el servicio de operaciones sea la **única puerta** de escritura del ledger, como regla arquitectónica del módulo, con una protección automatizada razonable;
-3. que las cajas físicas nunca queden en negativo, tampoco con operaciones simultáneas, y que Banco arranque sin descubierto (D5).
+3. que las cajas físicas nunca queden en negativo, tampoco con operaciones simultáneas ni con operaciones retroactivas (revisión de R1‑1), y que Banco arranque sin descubierto (D5).
 
 ## Decisión
 1. **Idempotencia por huella del comando.** Cada operación guarda `client_request_id` (UNIQUE) y `request_fingerprint`: el SHA‑256 de una representación canónica del comando (usuario, tipo, fecha de negocio, descripción, patas ordenadas con importes normalizados a dos decimales, documento origen y operación revertida).
@@ -20,10 +20,11 @@ ADR 007 aprobó un ledger propio de Rendiciones (`accounts`, `financial_operatio
 4. **Invariantes también en la base** (migración 0005), para código que se saltee el servicio:
    - suma cero y al menos dos patas por operación (constraint trigger diferido, verificado al commit);
    - `financial_operations` y `ledger_entries` sin UPDATE ni DELETE (trigger);
-   - sin saldo negativo en cuentas con `allow_negative = false` (constraint trigger diferido que bloquea la cuenta y suma sus entradas);
+   - sin saldo negativo en cuentas con `allow_negative = false`, **ni actual ni histórico**: al commit, con la cuenta bloqueada, el saldo de cierre de la fecha de negocio del débito y de cada fecha posterior con movimientos debe ser ≥ 0 (constraint trigger diferido);
    - una caja (`CASH_BOX`) no puede tener `allow_negative = true` (CHECK); Banco se crea con `false`;
    - motivo obligatorio en ajustes y reversos, vínculo obligatorio del reverso, un único reverso por operación y una única cuenta técnica de cada tipo.
 5. **Concurrencia.** Antes de validar saldos, el servicio bloquea con `SELECT … FOR NO KEY UPDATE`, en orden de id, cada cuenta sin saldo negativo permitido que pierde valor en la operación. Dos retiros simultáneos de la misma caja se serializan: el segundo ve lo que el primero confirmó y, si no alcanza, recibe `409 insufficient_funds`. `NO KEY UPDATE` no choca con los controles de clave foránea de otras inserciones y el orden fijo evita esperas cruzadas (traspasos opuestos simultáneos no se bloquean entre sí). Requiere el aislamiento por defecto de PostgreSQL (READ COMMITTED).
+6. **Saldo histórico** (pedido de Enzo al revisar R1‑1). Un débito con fecha `d` baja el saldo de cierre de `d` y de todos los días siguientes. El servicio, con la cuenta bloqueada, calcula en una pasada indexada sobre las entradas de la cuenta el menor saldo de cierre entre `d` y hoy (`d` y cada día posterior con movimientos, únicos días donde el saldo cambia) y rechaza con `409 insufficient_funds` si el débito lo deja negativo, informando el primer día afectado. La base repite el mismo control al commit. La unidad es el **día de negocio**: dentro de un día no hay orden entre operaciones y cuenta el saldo de cierre. Con el volumen de una distribuidora (decenas a cientos de movimientos diarios por caja) la consulta es barata; si algún día no lo fuera, se agrega un saldo diario materializado sin cambiar la regla.
 
 ## Consecuencias
 - Las fases siguientes (cierre de rendición, acreditación de pendientes, pagos, liquidación) publican sus movimientos llamando al servicio, nunca escribiendo tablas.

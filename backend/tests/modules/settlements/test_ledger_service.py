@@ -400,7 +400,13 @@ def test_reversal_cannot_leave_cash_negative(db: Session, post, funded, actor, o
 
 def test_balances_at_a_past_business_date(db: Session, post, funded) -> None:  # type: ignore[no-untyped-def]
     yesterday = TODAY - timedelta(days=1)
-    db.rollback()
+    # The fixture funds Caja principal today; yesterday it needs money of its own.
+    post(
+        "OPENING_BALANCE",
+        (funded["main_cash"], "100"),
+        (funded["opening_balance"], "-100"),
+        business_date=yesterday - timedelta(days=1),
+    )
     post("CASH_TRANSFER", (funded["main_cash"], "-100"), (funded["change_cash"], "100"), business_date=yesterday)
     post("CASH_TRANSFER", (funded["main_cash"], "-50"), (funded["change_cash"], "50"))
     assert balances(db, on=yesterday - timedelta(days=1))["Caja de cambio"] == 0
@@ -443,3 +449,105 @@ def test_post_without_commit_writes_nothing(db: Session, funded, actor) -> None:
     )
     db.rollback()
     assert operations_count(db) == 1
+
+
+# --- historical balances (Enzo, review of R1-1) ------------------------------------------------------
+
+
+@pytest.fixture
+def history(db: Session, post, accounts) -> dict[str, int]:  # type: ignore[no-untyped-def]
+    """Enzo's example on Caja principal: day 1 +100.000, day 2 -80.000, day 3 +200.000 (today: 220.000)."""
+    day1, day2, day3 = (TODAY - timedelta(days=n) for n in (3, 2, 1))
+    post(
+        "OPENING_BALANCE",
+        (accounts["main_cash"], "100000"),
+        (accounts["opening_balance"], "-100000"),
+        business_date=day1,
+    )
+    post("CASH_TRANSFER", (accounts["main_cash"], "-80000"), (accounts["change_cash"], "80000"), business_date=day2)
+    post(
+        "ADJUSTMENT",
+        (accounts["main_cash"], "200000"),
+        (accounts["adjustment"], "-200000"),
+        business_date=day3,
+        description="Fondos",
+    )
+    return accounts
+
+
+def test_retroactive_withdrawal_cannot_leave_a_past_day_negative(db: Session, post, history) -> None:  # type: ignore[no-untyped-def]
+    day2 = TODAY - timedelta(days=2)
+    assert balances(db)["Caja principal"] == Decimal("220000.00")
+    with pytest.raises(AppError) as excinfo:
+        post("CASH_TRANSFER", (history["main_cash"], "-50000"), (history["change_cash"], "50000"), business_date=day2)
+    assert error_code(excinfo) == (409, "insufficient_funds")
+    assert excinfo.value.details["business_date"] == day2.isoformat()
+    assert excinfo.value.details["balance"] == "20000.00"
+    assert day2.strftime("%d/%m/%Y") in excinfo.value.message
+    db.rollback()
+    assert balances(db, on=day2)["Caja principal"] == Decimal("20000.00")
+
+
+def test_retroactive_withdrawal_that_fits_every_later_day_is_accepted(db: Session, post, history) -> None:  # type: ignore[no-untyped-def]
+    day2 = TODAY - timedelta(days=2)
+    post("CASH_TRANSFER", (history["main_cash"], "-20000"), (history["change_cash"], "20000"), business_date=day2)
+    assert balances(db, on=day2)["Caja principal"] == 0
+    assert balances(db)["Caja principal"] == Decimal("200000.00")
+
+
+def test_withdrawal_dated_before_the_first_deposit_is_rejected(post, history) -> None:  # type: ignore[no-untyped-def]
+    with pytest.raises(AppError) as excinfo:
+        post(
+            "CASH_TRANSFER",
+            (history["main_cash"], "-1"),
+            (history["change_cash"], "1"),
+            business_date=TODAY - timedelta(days=10),
+        )
+    assert error_code(excinfo) == (409, "insufficient_funds")
+
+
+def test_a_later_day_is_protected_too(post, history) -> None:  # type: ignore[no-untyped-def]
+    """Day 1 has 100.000, but day 2 drops to 20.000: a 30.000 withdrawal on day 1 breaks day 2."""
+    with pytest.raises(AppError) as excinfo:
+        post(
+            "CASH_TRANSFER",
+            (history["main_cash"], "-30000"),
+            (history["change_cash"], "30000"),
+            business_date=TODAY - timedelta(days=3),
+        )
+    assert excinfo.value.details["business_date"] == (TODAY - timedelta(days=2)).isoformat()
+
+
+def test_balance_is_checked_at_the_end_of_the_business_day(db: Session, post, accounts) -> None:  # type: ignore[no-untyped-def]
+    """Within a day there is no order between operations: what counts is each day's closing balance."""
+    day1, day2 = TODAY - timedelta(days=2), TODAY - timedelta(days=1)
+    post(
+        "OPENING_BALANCE",
+        (accounts["change_cash"], "100"),
+        (accounts["main_cash"], "50"),
+        (accounts["opening_balance"], "-150"),
+        business_date=day1,
+    )
+    post("CASH_TRANSFER", (accounts["main_cash"], "-50"), (accounts["change_cash"], "50"), business_date=day2)
+    post("CASH_TRANSFER", (accounts["change_cash"], "-120"), (accounts["main_cash"], "120"), business_date=day2)
+    # Day 2 closes at 30: another 30 out on day 2 leaves it at 0 and is accepted; one more peso is not.
+    post("CASH_TRANSFER", (accounts["change_cash"], "-30"), (accounts["main_cash"], "30"), business_date=day2)
+    assert balances(db, on=day2)["Caja de cambio"] == 0
+    with pytest.raises(AppError) as excinfo:
+        post("CASH_TRANSFER", (accounts["change_cash"], "-0.01"), (accounts["main_cash"], "0.01"), business_date=day1)
+    assert excinfo.value.details["business_date"] == day2.isoformat()
+
+
+def test_retroactive_reversal_is_checked_too(db: Session, post, history, actor) -> None:  # type: ignore[no-untyped-def]
+    """Undoing the day-1 opening with a reversal dated day 1 would leave day 2 at -80.000."""
+    opening = db.scalars(select(FinancialOperation).where(FinancialOperation.type == "OPENING_BALANCE")).one()
+    with pytest.raises(AppError) as excinfo:
+        reverse_operation(
+            db,
+            actor=actor("admin"),
+            operation_id=opening.id,
+            reason="Error de carga",
+            client_request_id=uuid4(),
+            business_date=TODAY - timedelta(days=3),
+        )
+    assert error_code(excinfo) == (409, "insufficient_funds")

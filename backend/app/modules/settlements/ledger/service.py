@@ -10,8 +10,9 @@ Guarantees, in the service and again in the database (migration 0005):
 - idempotent: a `client_request_id` publishes once. Repeating it with the same command returns the
   original operation; repeating it with a different command is `409 idempotency_conflict`;
 - no negative cash: accounts with `allow_negative = false` are locked (`FOR NO KEY UPDATE`, in id
-  order) before their balance is checked, so concurrent operations cannot overdraw them. Requires the
-  default READ COMMITTED isolation.
+  order) before their balance is checked, so concurrent operations cannot overdraw them, and a
+  retroactive operation cannot leave any past end-of-day balance negative. Requires the default
+  READ COMMITTED isolation.
 """
 
 import hashlib
@@ -199,7 +200,7 @@ def _post(
             raise AppError(422, "invalid_legs", shape_error)
     elif _reversed_by(db, reverses.id) is not None:
         raise AppError(409, "operation_already_reversed", "La operación ya fue revertida.")
-    _check_funds(db, legs, accounts)
+    _check_funds(db, legs, accounts, business_date)
 
     operation = FinancialOperation(
         type=type,
@@ -305,11 +306,14 @@ def _load_accounts(db: Session, legs: list[Leg]) -> dict[int, Account]:
     return accounts
 
 
-def _check_funds(db: Session, legs: list[Leg], accounts: dict[int, Account]) -> None:
-    """Lock every account that cannot go negative and loses value here, then check its balance.
+def _check_funds(db: Session, legs: list[Leg], accounts: dict[int, Account], business_date: date) -> None:
+    """Lock every account that cannot go negative and loses value here, then check its balances.
 
-    Locks are taken in id order so two operations never wait on each other in a cycle; `NO KEY
-    UPDATE` does not block the foreign-key checks of concurrent inserts into other accounts.
+    The leg changes the end-of-day balance of `business_date` and of every later day, so the lowest of
+    those balances must cover it: a retroactive withdrawal cannot leave a past day negative even if
+    today's balance stays positive. Locks are taken in id order so two operations never wait on each
+    other in a cycle; `NO KEY UPDATE` does not block the foreign-key checks of concurrent inserts into
+    other accounts.
     """
     debits = sorted(
         (leg for leg in legs if leg.amount < 0 and not accounts[leg.account_id].allow_negative),
@@ -317,15 +321,47 @@ def _check_funds(db: Session, legs: list[Leg], accounts: dict[int, Account]) -> 
     )
     for leg in debits:
         db.execute(select(Account.id).where(Account.id == leg.account_id).with_for_update(key_share=True))
-        balance = _balance(db, leg.account_id)
-        if balance + leg.amount < 0:
+        lowest, on = _lowest_balance_since(db, leg.account_id, business_date)
+        if lowest + leg.amount < 0:
             account = accounts[leg.account_id]
             raise AppError(
                 409,
                 "insufficient_funds",
-                f"{account.name} no tiene saldo suficiente para esta operación.",
-                {"account_id": account.id, "balance": str(balance), "amount": str(leg.amount)},
+                f"{account.name} quedaría con saldo negativo el {on.strftime('%d/%m/%Y')}.",
+                {
+                    "account_id": account.id,
+                    "business_date": on.isoformat(),
+                    "balance": str(lowest),
+                    "amount": str(leg.amount),
+                },
             )
+
+
+def _lowest_balance_since(db: Session, account_id: int, since: date) -> tuple[Decimal, date]:
+    """Lowest end-of-day balance of the account on `since` or any later business date, and that date.
+
+    Balances only change on days with entries, so the candidates are `since` itself and those days.
+    One indexed pass over the account's entries: a few hundred a day at most for a distributor.
+    """
+    daily = (
+        select(FinancialOperation.business_date.label("day"), func.sum(LedgerEntry.amount).label("amount"))
+        .join(FinancialOperation, LedgerEntry.operation_id == FinancialOperation.id)
+        .where(LedgerEntry.account_id == account_id)
+        .group_by(FinancialOperation.business_date)
+        .subquery()
+    )
+    running = select(daily.c.day, func.sum(daily.c.amount).over(order_by=daily.c.day).label("balance")).subquery()
+    lowest = Decimal(db.scalar(select(func.coalesce(func.sum(daily.c.amount), 0)).where(daily.c.day <= since)) or 0)
+    on = since
+    later = db.execute(
+        select(running.c.day, running.c.balance)
+        .where(running.c.day > since)
+        .order_by(running.c.balance, running.c.day)
+        .limit(1)
+    ).first()
+    if later is not None and later.balance < lowest:
+        lowest, on = Decimal(later.balance), later.day
+    return lowest, on
 
 
 def _find_by_request_id(db: Session, client_request_id: UUID) -> FinancialOperation | None:
@@ -362,13 +398,6 @@ def _audit(db: Session, actor: User, operation: FinancialOperation, reverses: Fi
 
 
 # --- reading -------------------------------------------------------------------------------------
-
-
-def _balance(db: Session, account_id: int) -> Decimal:
-    total = db.scalar(
-        select(func.coalesce(func.sum(LedgerEntry.amount), 0)).where(LedgerEntry.account_id == account_id)
-    )
-    return Decimal(total or 0)
 
 
 def account_balances(db: Session, *, on: date | None = None, include_inactive: bool = False) -> list[AccountBalance]:

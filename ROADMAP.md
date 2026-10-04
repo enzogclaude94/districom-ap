@@ -38,7 +38,7 @@ DistriCom es una plataforma modular (ADR 006). Este roadmap tiene tres carriles:
 | Fase | Nombre | Estado | Depende de |
 |---|---|---|---|
 | R0 | Habilitación del módulo | **DONE** (aprobada por Enzo el 2026-10-04) | PL‑1 |
-| R1 | Ledger y cajas | **IN_PROGRESS** (aprobada el 2026-10-04; R1‑1 en revisión) | R0 |
+| R1 | Ledger y cajas | **IN_PROGRESS** (aprobada el 2026-10-04; R1‑1 aprobado, R1‑2 en revisión) | R0 |
 | R2 | Rendición de reparto básica | PLANNED | R1 |
 | R3 | Pendientes de cobro | PLANNED | R2 |
 | R4 | Cartera de cheques | PLANNED | R2 |
@@ -125,7 +125,7 @@ Modelo conceptual en `DATA_MODEL.md §13`; decisiones en ADR 007. Cada fase crea
 ### R1 — Ledger y cajas
 **Alcance:** `accounts`, `financial_operations`, `ledger_entries`; servicio de operaciones (balance, idempotencia, reversos); Caja principal, Caja de cambio y Banco; aportes y devoluciones de socios, depósitos, movimientos entre cajas.
 **Resultado visible:** pantalla Cajas con saldos y movimientos con su origen.
-**Criterios:** suma cero garantizada por la base; doble envío no duplica; mismo id con otro contenido es conflicto; reverso deja saldo y rastro; saldos = suma de entradas; cajas y Banco nunca negativos, también con operaciones simultáneas; ajustes solo admin con motivo; auditoría.
+**Criterios:** suma cero garantizada por la base; doble envío no duplica; mismo id con otro contenido es conflicto; reverso deja saldo y rastro; saldos = suma de entradas; cajas y Banco nunca negativos, ni hoy ni históricamente, también con operaciones simultáneas; ajustes solo admin con motivo; auditoría.
 **Decisiones de Enzo (2026-10-04):** cajas solo por importe, sin denominaciones (P2); cuentas de aportes por socio creadas por un admin, sin cantidad ni nombres fijos (P3); cuentas técnicas Saldo inicial y Ajustes (D4); sin negativo en cajas, Banco arranca sin negativo (D5); idempotencia con huella y única puerta de escritura (ADR 008). En R2 el efectivo de una rendición podrá repartirse entre Caja principal y Caja de cambio (P1): ningún código asume una caja destino fija.
 **PRs:** R1‑1 núcleo del ledger (migración `0005`, servicio, invariantes, tests) · R1‑2 API de cajas · R1‑3 pantalla Cajas. Cada uno espera la aprobación de Enzo antes del siguiente.
 

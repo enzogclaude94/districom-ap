@@ -64,12 +64,16 @@ CREATE CONSTRAINT TRIGGER trg_ledger_entries_balanced
 """
 
 # Checked at commit with the account row locked, so two concurrent transactions cannot both
-# overdraw it (READ COMMITTED: the sum after the lock sees what the other one committed).
+# overdraw it (READ COMMITTED: the query after the lock sees what the other one committed). A debit
+# dated `since` lowers the end-of-day balance of that day and every later one: all of them must stay
+# >= 0, so a retroactive withdrawal cannot leave a past day negative.
 NOT_NEGATIVE = """
 CREATE FUNCTION settlements.check_account_not_negative() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE
     negative_allowed boolean;
-    balance numeric;
+    since date;
+    lowest numeric;
+    lowest_day date;
 BEGIN
     IF NEW.amount > 0 THEN
         RETURN NULL;
@@ -79,10 +83,19 @@ BEGIN
     IF negative_allowed THEN
         RETURN NULL;
     END IF;
-    SELECT coalesce(sum(amount), 0) INTO balance
-        FROM settlements.ledger_entries WHERE account_id = NEW.account_id;
-    IF balance < 0 THEN
-        RAISE EXCEPTION 'account % cannot have a negative balance (%)', NEW.account_id, balance
+    SELECT business_date INTO since FROM settlements.financial_operations WHERE id = NEW.operation_id;
+    SELECT day, balance INTO lowest_day, lowest FROM (
+        SELECT o.business_date AS day, sum(sum(e.amount)) OVER (ORDER BY o.business_date) AS balance
+        FROM settlements.ledger_entries e
+        JOIN settlements.financial_operations o ON o.id = e.operation_id
+        WHERE e.account_id = NEW.account_id
+        GROUP BY o.business_date
+    ) daily
+    WHERE day >= since
+    ORDER BY balance, day
+    LIMIT 1;
+    IF lowest < 0 THEN
+        RAISE EXCEPTION 'account % cannot have a negative balance (% on %)', NEW.account_id, lowest, lowest_day
             USING ERRCODE = 'check_violation';
     END IF;
     RETURN NULL;
