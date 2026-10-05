@@ -322,3 +322,67 @@ test("the settlements list is usable on a phone", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Nueva rendición" })).toBeVisible();
   await expect(page.getByLabel("Estado")).toBeVisible();
 });
+
+test("an admin manages expense categories without deleting them or changing earlier expenses", async ({
+  page,
+  isMobile,
+}) => {
+  test.skip(isMobile, "full flow runs on desktop");
+  const run = Date.now();
+  const name = `Lavado E2E ${run}`;
+
+  await login(page, "/rendiciones/configuracion", adminEmail, adminPassword);
+  await expect(page.getByRole("heading", { name: "Configuración de Rendiciones" })).toBeVisible();
+  const input = page.getByLabel("Nueva categoría");
+  await input.fill(`  ${name.replace(" ", "   ")} `);
+  await page.getByRole("button", { name: "Crear categoría" }).click();
+  await expect(page.getByRole("status")).toHaveText(`Categoría «${name}» creada.`);
+  await input.fill(name.toUpperCase());
+  await page.getByRole("button", { name: "Crear categoría" }).click();
+  await expect(page.getByText(`Ya existe la categoría «${name.toUpperCase()}».`)).toBeVisible();
+
+  // An expense with it in an open settlement.
+  const driverId = await employee(page.request, `Repartidor categorías ${run}`, true);
+  const categories = await api<{ id: number; name: string }[]>(page.request, "GET", "/settlements/expense-categories");
+  const categoryId = categories.find((c) => c.name === name)!.id;
+  const settlement = await api<{ id: number }>(page.request, "POST", "/settlements/deliveries", {
+    client_request_id: crypto.randomUUID(),
+    business_date: yesterday(),
+    employee_id: driverId,
+    expected_amount: "1000.00",
+  });
+  await api(page.request, "POST", `/settlements/deliveries/${settlement.id}/expenses`, {
+    client_request_id: crypto.randomUUID(),
+    category_id: categoryId,
+    amount: "300.00",
+  });
+
+  // Deactivate and rename it: the expense keeps its category and amount; new expenses cannot use it.
+  await page.goto("/rendiciones/configuracion");
+  await page.getByRole("button", { name: `Desactivar ${name}` }).click();
+  await expect(page.getByRole("status")).toHaveText(`«${name}» quedó desactivada.`);
+  const renamed = `${name} camiones`;
+  await page
+    .getByRole("row", { name: new RegExp(name) })
+    .getByRole("button", { name: "Renombrar" })
+    .click();
+  await page.getByRole("dialog").getByLabel("Nombre").fill(renamed);
+  await page.getByRole("dialog").getByRole("button", { name: "Guardar" }).click();
+  await expect(page.getByRole("row", { name: new RegExp(renamed) })).toContainText("Desactivada");
+
+  await page.goto(`/rendiciones/repartos/${settlement.id}`);
+  const expenseRow = page.getByRole("row", { name: new RegExp(renamed) });
+  await expect(expenseRow).toContainText("$ 300,00");
+  await expect(expenseRow).toContainText("Vigente");
+  await page.getByRole("button", { name: "Registrar gasto" }).click();
+  await expect(page.getByRole("dialog").getByLabel("Categoría").locator("option", { hasText: renamed })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+
+  // Active again: offered for new expenses.
+  await page.goto("/rendiciones/configuracion");
+  await page.getByRole("button", { name: `Activar ${renamed}` }).click();
+  await expect(page.getByRole("row", { name: new RegExp(renamed) })).toContainText("Activa");
+  await page.goto(`/rendiciones/repartos/${settlement.id}`);
+  await page.getByRole("button", { name: "Registrar gasto" }).click();
+  await expect(page.getByRole("dialog").getByLabel("Categoría").locator("option", { hasText: renamed })).toHaveCount(1);
+});

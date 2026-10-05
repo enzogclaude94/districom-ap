@@ -558,6 +558,32 @@ def test_expense_categories_are_edited_by_an_admin(as_role, opened, category) ->
     assert response.json()["code"] == "invalid_expense_category"
 
 
+def test_deactivating_a_used_category_keeps_earlier_expenses(as_role, opened, category, db: Session) -> None:  # type: ignore[no-untyped-def]
+    """Enzo's final R2 adjustment: a category is never deleted; deactivating it leaves its expenses as they were,
+    and reactivating it makes it usable again. Every change is audited."""
+    tolls = category("Peajes")
+    operator, admin = as_role("operator"), as_role("admin")
+    post(operator, f"/deliveries/{opened}/expenses", category_id=tolls, amount="2500")
+    before = operator.get(f"{BASE}/deliveries/{opened}").json()
+    assert admin.patch(f"{BASE}/expense-categories/{tolls}", json={"active": False}).status_code == 200
+    after = operator.get(f"{BASE}/deliveries/{opened}").json()
+    assert after["expenses"] == before["expenses"]
+    assert after["summary"] == before["summary"]
+    assert admin.delete(f"{BASE}/expense-categories/{tolls}").status_code == 405
+    assert admin.patch(f"{BASE}/expense-categories/{tolls}", json={"active": True}).json()["active"] is True
+    assert post(operator, f"/deliveries/{opened}/expenses", category_id=tolls, amount="10").status_code == 201
+    events = (
+        db.execute(text("SELECT event_type FROM audit_events WHERE entity_type = 'expense_category' ORDER BY id"))
+        .scalars()
+        .all()
+    )
+    assert events == [
+        "settlements.expense_category.created",
+        "settlements.expense_category.updated",
+        "settlements.expense_category.updated",
+    ]
+
+
 # --- closed settlements and the board --------------------------------------------------------------
 
 

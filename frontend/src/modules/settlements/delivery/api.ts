@@ -319,6 +319,11 @@ export const deliveryApi = {
   employees: () => apiFetch<Person[]>(`${BASE}/employees`),
   denominations: () => apiFetch<Denomination[]>(`${BASE}/cash-denominations`),
   categories: () => apiFetch<ExpenseCategory[]>(`${BASE}/expense-categories`),
+  /** Every category, active or not (configuration screen). */
+  allCategories: () => apiFetch<ExpenseCategory[]>(`${BASE}/expense-categories?include_inactive=true`),
+  createCategory: (name: string) => send<ExpenseCategory>("POST", "/expense-categories", { name }),
+  updateCategory: (id: number, change: { name?: string; active?: boolean }) =>
+    send<ExpenseCategory>("PATCH", `/expense-categories/${id}`, change),
   preview: (id: number) => apiFetch<ClosingPreview>(`${BASE}${deliveryPath(id, "/closing-preview")}`),
   history: (id: number) => apiFetch<History>(`${BASE}${deliveryPath(id, "/history")}`),
   /** Every write answers with the whole settlement, already recomputed by the backend. */

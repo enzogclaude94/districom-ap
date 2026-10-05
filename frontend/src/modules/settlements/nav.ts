@@ -1,4 +1,4 @@
-import { ClipboardList, Fuel, Home, Landmark, Users } from "lucide-react";
+import { ClipboardList, Fuel, Home, Landmark, SlidersHorizontal, Users } from "lucide-react";
 
 import type { NavSection } from "@/lib/modules";
 
@@ -25,4 +25,5 @@ export const SETTLEMENTS_NAV: NavSection[] = [
   },
   { label: "Combustible", icon: Fuel, href: "/rendiciones/combustible", phase: 5 },
   { label: "Liquidación semanal", icon: Users, href: "/rendiciones/liquidaciones", phase: 8 },
+  { label: "Configuración del módulo", icon: SlidersHorizontal, href: "/rendiciones/configuracion" },
 ];
