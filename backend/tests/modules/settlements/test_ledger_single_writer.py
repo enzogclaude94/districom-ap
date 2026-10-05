@@ -50,8 +50,18 @@ def _writes_ledger(tree: ast.Module) -> bool:
 
 
 def _mentions_tables(tree: ast.Module) -> bool:
+    # A foreign key to an operation (a settlement's close, R2-2) names the table but is not raw SQL.
+    foreign_keys = {
+        id(arg)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "ForeignKey"
+        for arg in node.args
+    }
     return any(
-        isinstance(node, ast.Constant) and isinstance(node.value, str) and any(t in node.value for t in TABLE_NAMES)
+        isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and any(t in node.value for t in TABLE_NAMES)
+        and id(node) not in foreign_keys
         for node in ast.walk(tree)
     )
 

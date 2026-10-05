@@ -550,16 +550,22 @@ def test_expense_categories_are_edited_by_an_admin(as_role, opened, category) ->
 # --- closed settlements and the board --------------------------------------------------------------
 
 
-def test_a_closed_settlement_admits_no_load_changes(as_role, ids, opened, category, db: Session) -> None:  # type: ignore[no-untyped-def]
-    """[18] Closing arrives with R2-2; here the settlement is closed directly in the database."""
+def test_a_closed_settlement_admits_no_load_changes(as_role, ids, opened, pedro, category) -> None:  # type: ignore[no-untyped-def]
+    """[18] Once closed (R2-2), nothing of its load changes."""
     tolls = category("Peajes")
     operator = as_role("operator")
     addition = post(operator, f"/deliveries/{opened}/additions", amount="5", destination_account_id=ids["main_cash"])
     addition_id = addition.json()["additions"][0]["id"]
     transfer = _transfer(operator, opened, "7")
     expense = post(operator, f"/deliveries/{opened}/expenses", category_id=tolls, amount="3").json()["expenses"][0]
-    db.execute(text("UPDATE settlements.settlements SET status = 'CLOSED' WHERE id = :id"), {"id": opened})
-    db.commit()
+    assert _status(operator, opened, transfer, "VERIFIED").status_code == 200
+    allocation = {"target": "EMPLOYEE", "employee_id": pedro, "amount": "99985"}
+    token = operator.get(f"{BASE}/deliveries/{opened}/closing-preview").json()["preview_token"]
+    closed = operator.post(
+        f"{BASE}/deliveries/{opened}/close",
+        json={"version": 1, "preview_token": token, "allocations": [allocation], "confirm": True},
+    )
+    assert closed.status_code == 201, closed.text
 
     path = f"{BASE}/deliveries/{opened}"
     admin = as_role("admin")
@@ -578,7 +584,7 @@ def test_a_closed_settlement_admits_no_load_changes(as_role, ids, opened, catego
     assert [(r.status_code, r.json()["code"]) for r in attempts] == [(409, "settlement_closed")] * len(attempts)
     body = admin.get(path).json()
     assert body["status"] == "CLOSED"
-    assert body["summary"]["justified"] == "8.00"
+    assert body["summary"]["justified"] == "15.00"
 
 
 def test_the_board_is_computed_by_the_backend(as_role, ids, opened, category) -> None:  # type: ignore[no-untyped-def]

@@ -197,7 +197,10 @@ export function OperationDetail({ operationId }: { operationId: number }) {
   }
 
   const operation = query.data;
-  const canReverse = isAdmin && operation.type !== "REVERSAL" && operation.reversed_by_operation_id === null;
+  // A settlement close belongs to its settlement: it is corrected by reopening it, never reversed here.
+  const ownedByDocument = operation.type === "SETTLEMENT_CLOSE";
+  const canReverse =
+    isAdmin && operation.type !== "REVERSAL" && !ownedByDocument && operation.reversed_by_operation_id === null;
 
   return (
     <>
@@ -222,6 +225,12 @@ export function OperationDetail({ operationId }: { operationId: number }) {
           <Link href={operationHref(operation.reversed_by_operation_id)} className="text-primary hover:underline">
             Ver el reverso n.º {operation.reversed_by_operation_id}
           </Link>
+        </div>
+      )}
+      {ownedByDocument && operation.reversed_by_operation_id === null && (
+        <div className="rounded-md border border-border bg-muted px-4 py-3 text-sm">
+          Esta operación pertenece a la {sourceLabel(operation.source_type, operation.source_id)}: se corrige reabriendo
+          la rendición, y al confirmar el nuevo cierre se registra su reverso.
         </div>
       )}
       {operation.reverses_operation_id !== null && (

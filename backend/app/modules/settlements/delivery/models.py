@@ -2,7 +2,10 @@
 
 A settlement is OPEN while it is being loaded. Every load table hangs from it: the cash count by
 denomination, the additions (cash that appears after the count), the transfers with their verification
-and the expenses. Nothing here touches the ledger: closing a settlement into it is R2-2.
+and the expenses. Closing it (R2-2) publishes one SETTLEMENT_CLOSE in the ledger and freezes it; the
+difference and who absorbs it are materialized per version, and every close is kept in
+`settlement_closings`. `status` is the editing state; `current_close_operation_id` is the close that
+is in effect in the ledger, which a reopened settlement keeps until it is closed again.
 
 Nothing is deleted. The count is replaced while OPEN and audited; additions and expenses are voided
 with a reason; transfers keep every status decision in `transfer_status_events`.
@@ -27,6 +30,7 @@ from sqlalchemy import (
     UniqueConstraint,
     Uuid,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -38,6 +42,8 @@ SETTLEMENT_TYPES = ("DELIVERY",)  # OUTLET arrives with R7
 EXPECTED_SOURCES = ("MANUAL",)  # STORE_SYS arrives when the integration exists
 SETTLEMENT_STATUSES = ("OPEN", "CLOSED")
 TRANSFER_STATUSES = ("DECLARED", "VERIFIED", "REJECTED")
+DIFFERENCE_KINDS = ("SHORTAGE", "SURPLUS")
+ALLOCATION_TARGETS = ("EMPLOYEE", "COMPANY")
 
 _ACCOUNT_FK = f"{SCHEMA}.accounts.id"
 _SETTLEMENT_FK = f"{SCHEMA}.settlements.id"
@@ -69,6 +75,13 @@ class Settlement(IdMixin, TimestampMixin, Base):
         # Rendición 1, 2... of the same driver and day; the number is generated, never typed.
         UniqueConstraint("type", "employee_id", "business_date", "sequence_number", name="uq_settlements_sequence"),
         Index("ix_settlements_business_date", "business_date"),
+        # A closed settlement always has the close that is in effect in the ledger.
+        CheckConstraint("status <> 'CLOSED' OR current_close_operation_id IS NOT NULL", name="closed_has_close"),
+        CheckConstraint(
+            "(reopened_at IS NULL AND reopened_by IS NULL AND reopen_reason IS NULL) OR "
+            "(reopened_at IS NOT NULL AND reopened_by IS NOT NULL AND length(btrim(coalesce(reopen_reason, ''))) > 0)",
+            name="reopen_complete",
+        ),
         {"schema": SCHEMA},
     )
 
@@ -87,6 +100,16 @@ class Settlement(IdMixin, TimestampMixin, Base):
     client_request_id: Mapped[UUID] = mapped_column(Uuid, unique=True)
     request_fingerprint: Mapped[str] = mapped_column(String(64))
     created_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"))
+    # Financial state (R2-2): the SETTLEMENT_CLOSE in effect, kept while a reopened settlement is corrected.
+    current_close_operation_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("settlements.financial_operations.id", ondelete="RESTRICT")
+    )
+    closed_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"))
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # The reopening in progress; cleared by the next close (the history stays in audit and closings).
+    reopened_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reopened_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"))
+    reopen_reason: Mapped[str | None] = mapped_column(Text)
 
 
 class CashCountLine(IdMixin, Base):
@@ -230,3 +253,128 @@ class Expense(IdMixin, TimestampMixin, Base):
     voided_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"))
     voided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     void_reason: Mapped[str | None] = mapped_column(Text)
+
+
+class SettlementClosing(IdMixin, Base):
+    """One close of one version of a settlement: its ledger operation and, after a reopening, the reversal
+    of the previous close published with it. Append-only; rebuilds the history v1 -> close -> reopen ->
+    v2 -> reversal + new close."""
+
+    __tablename__ = "settlement_closings"
+    __table_args__ = (
+        CheckConstraint("request_fingerprint ~ '^[0-9a-f]{64}$'", name="fingerprint_format"),
+        UniqueConstraint("settlement_id", "settlement_version", name="uq_settlement_closings_version"),
+        {"schema": SCHEMA},
+    )
+
+    settlement_id: Mapped[int] = mapped_column(BigInteger, ForeignKey(_SETTLEMENT_FK, ondelete="RESTRICT"), index=True)
+    settlement_version: Mapped[int] = mapped_column(Integer)
+    operation_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("settlements.financial_operations.id", ondelete="RESTRICT"), unique=True
+    )
+    reversal_operation_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("settlements.financial_operations.id", ondelete="RESTRICT"), unique=True
+    )
+    # Everything the close meant (totals, difference, allocations, legs): same version + other content
+    # is an idempotency conflict, never the old close returned silently.
+    request_fingerprint: Mapped[str] = mapped_column(String(64))
+    closed_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"))
+    closed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SettlementReopening(IdMixin, Base):
+    """One reopening of a closed settlement: from which version to which, the close that stayed in effect,
+    why, who and when. Append-only; with `settlement_closings` it rebuilds the history without the audit log."""
+
+    __tablename__ = "settlement_reopenings"
+    __table_args__ = (
+        CheckConstraint("to_version = from_version + 1", name="next_version"),
+        CheckConstraint("length(btrim(reason)) > 0", name="reason_not_blank"),
+        UniqueConstraint("settlement_id", "from_version", name="uq_settlement_reopenings_version"),
+        {"schema": SCHEMA},
+    )
+
+    settlement_id: Mapped[int] = mapped_column(BigInteger, ForeignKey(_SETTLEMENT_FK, ondelete="RESTRICT"), index=True)
+    from_version: Mapped[int] = mapped_column(Integer)
+    to_version: Mapped[int] = mapped_column(Integer)
+    # The SETTLEMENT_CLOSE that stayed in effect in the ledger while the settlement was corrected.
+    close_operation_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("settlements.financial_operations.id", ondelete="RESTRICT")
+    )
+    reason: Mapped[str] = mapped_column(Text)
+    reopened_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"))
+    reopened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SettlementDifference(IdMixin, Base):
+    """Shortage or surplus of one version of a settlement, materialized when it closes with a difference.
+
+    A new close after a reopening supersedes it; it is never deleted nor changed otherwise.
+    """
+
+    __tablename__ = "settlement_differences"
+    __table_args__ = (
+        CheckConstraint(f"kind IN ({_in(DIFFERENCE_KINDS)})", name="kind"),
+        CheckConstraint("amount > 0", name="amount_positive"),
+        UniqueConstraint("settlement_id", "settlement_version", name="uq_settlement_differences_version"),
+        Index(
+            "uq_settlement_differences_current",
+            "settlement_id",
+            unique=True,
+            postgresql_where=text("superseded_at IS NULL"),
+        ),
+        {"schema": SCHEMA},
+    )
+
+    settlement_id: Mapped[int] = mapped_column(BigInteger, ForeignKey(_SETTLEMENT_FK, ondelete="RESTRICT"), index=True)
+    settlement_version: Mapped[int] = mapped_column(Integer)
+    kind: Mapped[str] = mapped_column(String(20))
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2))
+    close_operation_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("settlements.financial_operations.id", ondelete="RESTRICT")
+    )
+    created_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    superseded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    superseded_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"))
+
+
+class DifferenceAllocation(IdMixin, Base):
+    """Who absorbs part of a difference: an employee (operator decides) or the company (admin, with a reason).
+
+    The allocations of a difference add up exactly to it (deferred constraint trigger). Append-only.
+    """
+
+    __tablename__ = "difference_allocations"
+    __table_args__ = (
+        CheckConstraint(f"target IN ({_in(ALLOCATION_TARGETS)})", name="target"),
+        CheckConstraint("amount > 0", name="amount_positive"),
+        CheckConstraint("(target = 'EMPLOYEE') = (employee_id IS NOT NULL)", name="employee_target"),
+        CheckConstraint(
+            "target <> 'COMPANY' OR length(btrim(coalesce(reason, ''))) > 0", name="company_reason_required"
+        ),
+        Index(
+            "uq_difference_allocations_employee",
+            "difference_id",
+            "employee_id",
+            unique=True,
+            postgresql_where=text("employee_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_difference_allocations_company",
+            "difference_id",
+            unique=True,
+            postgresql_where=text("target = 'COMPANY'"),
+        ),
+        {"schema": SCHEMA},
+    )
+
+    difference_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey(f"{SCHEMA}.settlement_differences.id", ondelete="RESTRICT"), index=True
+    )
+    target: Mapped[str] = mapped_column(String(20))
+    employee_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("employees.id", ondelete="RESTRICT"))
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2))
+    reason: Mapped[str | None] = mapped_column(Text)
+    decided_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"))
+    decided_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

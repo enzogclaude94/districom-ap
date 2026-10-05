@@ -54,6 +54,24 @@ const ACCOUNTS: Account[] = [
     balance: "0.00",
   },
   {
+    id: 8,
+    code: "delivery_collections",
+    name: "Cobranzas de reparto",
+    kind: "DELIVERY_COLLECTIONS",
+    allow_negative: true,
+    active: true,
+    balance: "-100000.00",
+  },
+  {
+    id: 9,
+    code: null,
+    name: "Cuenta interna de Pedro Gómez (#4)",
+    kind: "EMPLOYEE",
+    allow_negative: true,
+    active: true,
+    balance: "1000.00",
+  },
+  {
     id: 6,
     code: null,
     name: "Juan Pérez",
@@ -194,6 +212,7 @@ describe("Cajas error messages", () => {
     );
     expect(cashErrorView(error(409, "idempotency_conflict"), names).conflict).toBe(true);
     expect(cashErrorView(error(409, "operation_already_reversed")).message).toBe("Esta operación ya fue revertida.");
+    expect(cashErrorView(error(409, "operation_owned_by_document")).message).toContain("reabriendo la rendición");
     expect(cashErrorView(error(409, "account_inactive")).message).toContain("dada de baja");
     expect(cashErrorView(error(409, "account_name_taken", { account_id: 7, active: false }), names).message).toBe(
       "Ya existe la cuenta «Socia vieja», dada de baja. No se crea otra con un nombre parecido.",
@@ -231,6 +250,8 @@ describe("CashBoard", () => {
     expect(screen.getByRole("button", { name: "Ver movimientos de Socia vieja" })).toHaveTextContent("Dada de baja");
     expect(screen.queryByText("Saldo inicial")).not.toBeInTheDocument();
     expect(screen.queryByText("Ajustes")).not.toBeInTheDocument();
+    expect(screen.queryByText("Cobranzas de reparto")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Cuenta interna de/)).not.toBeInTheDocument();
   });
 
   it("shows loading, then the error with a retry", async () => {
@@ -636,6 +657,47 @@ describe("OperationDetail", () => {
       .slice(1)
       .map((row) => row.textContent);
     expect(legs).toEqual(["Caja principalCaja+$ 150.000,00", "Saldo inicialCuenta técnica-$ 150.000,00"]);
+    expect(screen.queryByRole("button", { name: "Revertir operación" })).not.toBeInTheDocument();
+  });
+
+  it("shows a settlement close with its settlement and never offers to reverse it", async () => {
+    mockApi({
+      "GET /auth/me": () => jsonResponse(200, me("admin")),
+      "GET /settlements/operations/30": () =>
+        jsonResponse(200, {
+          ...OPERATION,
+          type: "SETTLEMENT_CLOSE",
+          source_type: "settlement",
+          source_id: 7,
+          entries: [
+            { account_id: 1, account_name: "Caja principal", account_kind: "CASH_BOX", amount: "99000.00" },
+            {
+              account_id: 9,
+              account_name: "Cuenta interna de Pedro Gómez (#4)",
+              account_kind: "EMPLOYEE",
+              amount: "1000.00",
+            },
+            {
+              account_id: 8,
+              account_name: "Cobranzas de reparto",
+              account_kind: "DELIVERY_COLLECTIONS",
+              amount: "-100000.00",
+            },
+          ],
+        }),
+    });
+    renderWithQuery(<OperationDetail operationId={30} />);
+    expect(await screen.findByRole("heading", { name: "Cierre de rendición n.º 30" })).toBeInTheDocument();
+    expect(screen.getByText(/pertenece a la Rendición #7: se corrige reabriendo la rendición/)).toBeInTheDocument();
+    const legs = screen
+      .getAllByRole("row")
+      .slice(1)
+      .map((row) => row.textContent);
+    expect(legs).toEqual([
+      "Caja principalCaja+$ 99.000,00",
+      "Cuenta interna de Pedro Gómez (#4)Cuenta interna de empleado+$ 1.000,00",
+      "Cobranzas de repartoCuenta técnica-$ 100.000,00",
+    ]);
     expect(screen.queryByRole("button", { name: "Revertir operación" })).not.toBeInTheDocument();
   });
 

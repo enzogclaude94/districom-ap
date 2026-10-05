@@ -10,7 +10,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 from app.core.clock import business_today
-from app.modules.settlements.delivery import additions, schemas, service, transfers
+from app.modules.settlements.delivery import additions, closing, schemas, service, transfers
 
 DAY = business_today() - timedelta(days=1)
 
@@ -113,9 +113,14 @@ def test_an_addition_is_only_voided(db: Session, loaded, actor) -> None:  # type
 def test_a_closed_settlement_is_frozen(db: Session, loaded, actor, accounts) -> None:  # type: ignore[no-untyped-def]
     """[18] at the database level."""
     sid = loaded["settlement"]
-    db.execute(text("UPDATE settlements.settlements SET status = 'CLOSED' WHERE id = :id"), {"id": sid})
-    db.commit()
-    user = actor("operator").id
+    operator = actor("operator")
+    transfers.change_status(db, operator, sid, loaded["transfer"], schemas.TransferStatusIn(status="VERIFIED"))
+    surplus = schemas.AllocationIn(target="EMPLOYEE", employee_id=service.get(db, sid).employee_id, amount=Decimal(15))
+    token = closing.preview(db, sid).token
+    closing.close(
+        db, operator, sid, schemas.CloseIn(version=1, preview_token=token, allocations=[surplus], confirm=True)
+    )
+    user = operator.id
     statements = [
         ("UPDATE settlements.settlements SET expected_amount = 1 WHERE id = :s", {}),
         ("UPDATE settlements.cash_count_lines SET quantity = 9 WHERE settlement_id = :s", {}),

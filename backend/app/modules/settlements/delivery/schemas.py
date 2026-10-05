@@ -1,4 +1,4 @@
-"""Requests and responses of the delivery settlements API (R2-1). Amounts travel as decimal strings."""
+"""Requests and responses of the delivery settlements API (R2-1, R2-2). Amounts travel as decimal strings."""
 
 from datetime import date, datetime
 from decimal import Decimal
@@ -10,6 +10,9 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.modules.settlements.cash.schemas import Amount, Money, Reason
 
 Text500 = Annotated[str, Field(max_length=500)]
+# NOT_CLOSED: never closed. CLOSED: closed, its close in effect in the ledger. BEING_CORRECTED: reopened;
+# its last close is still in effect in Cajas until the new close is confirmed.
+FinancialState = Literal["NOT_CLOSED", "CLOSED", "BEING_CORRECTED"]
 
 
 class StrictIn(BaseModel):
@@ -83,6 +86,7 @@ class SettlementItem(BaseModel):
     external_reference: str | None
     status: str
     version: int
+    financial_state: FinancialState
     created_at: datetime
     justified: Money
     difference: Money
@@ -221,6 +225,136 @@ class ExpenseOut(BaseModel):
     void_reason: str | None
 
 
+# --- close and reopen (R2-2) -----------------------------------------------------------------------
+
+
+class AllocationIn(StrictIn):
+    """Who absorbs part of the difference. COMPANY needs an admin and a reason (Enzo's R2-P2)."""
+
+    target: Literal["EMPLOYEE", "COMPANY"]
+    employee_id: int | None = None
+    amount: Amount
+    reason: Text500 | None = None
+
+
+class CloseIn(StrictIn):
+    """CERRAR RENDICIÓN. Totals are never sent: the backend recomputes them. `confirm` is the user's
+    explicit confirmation, required even when the difference is zero."""
+
+    version: int = Field(ge=1)
+    # The token of the preview the user reviewed: a close never confirms something else.
+    preview_token: str = Field(pattern=r"^[0-9a-f]{64}$")
+    allocations: list[AllocationIn] = Field(default_factory=list, max_length=20)
+    confirm: bool
+
+
+class ReopenIn(StrictIn):
+    version: int = Field(ge=1)
+    reason: Reason
+
+
+class CloseRef(BaseModel):
+    operation_id: int
+    settlement_version: int
+    closed_at: datetime
+
+
+class LegOut(BaseModel):
+    # Null for an employee's internal account that will be created by the close.
+    account_id: int | None
+    account_name: str
+    account_kind: str
+    employee_id: int | None = None
+    amount: Money
+
+
+class Blocker(BaseModel):
+    code: str
+    message: str
+
+
+class ClosingPreviewOut(BaseModel):
+    """What closing now would publish. Difference legs depend on the allocation the user chooses."""
+
+    settlement_id: int
+    version: int
+    status: str
+    financial_state: FinancialState
+    summary: Summary
+    difference: Money
+    difference_kind: Literal["SHORTAGE", "SURPLUS", "BALANCED"]
+    amount_to_allocate: Money
+    blockers: list[Blocker]
+    legs: list[LegOut]
+    # Send it back with the close: if the settlement changed since, the close is refused as stale.
+    preview_token: str
+    close_in_effect: CloseRef | None
+
+
+class AllocationOut(BaseModel):
+    target: str
+    employee_id: int | None
+    employee_name: str | None
+    amount: Money
+    reason: str | None
+    decided_by: int
+    decided_by_name: str
+    decided_at: datetime
+
+
+class DifferenceOut(BaseModel):
+    id: int
+    settlement_version: int
+    kind: str
+    amount: Money
+    close_operation_id: int
+    created_by: int
+    created_by_name: str
+    created_at: datetime
+    superseded_at: datetime | None
+    superseded_by: int | None
+    superseded_by_name: str | None
+    allocations: list[AllocationOut]
+
+
+class ClosingOut(BaseModel):
+    settlement_version: int
+    operation_id: int
+    # Reversal of the previous close, published together with this one (null for the first close).
+    reversal_operation_id: int | None
+    # Reversal that undid this close when a later version was closed.
+    reversed_by_operation_id: int | None
+    in_effect: bool
+    closed_by: int
+    closed_by_name: str
+    closed_at: datetime
+    business_date: date
+    legs: list[LegOut]
+
+
+class ReopeningOut(BaseModel):
+    from_version: int
+    to_version: int
+    reason: str
+    reopened_by: int
+    reopened_by_name: str
+    reopened_at: datetime
+    # The close that stayed in effect in Cajas while the settlement was corrected.
+    close_operation_id: int
+
+
+class HistoryOut(BaseModel):
+    """Every close, reopening and difference of the settlement, oldest first. Nothing is ever removed."""
+
+    settlement_id: int
+    version: int
+    status: str
+    financial_state: FinancialState
+    closings: list[ClosingOut]
+    reopenings: list[ReopeningOut]
+    differences: list[DifferenceOut]
+
+
 class SettlementOut(BaseModel):
     id: int
     type: str
@@ -245,6 +379,19 @@ class SettlementOut(BaseModel):
     transfers: list[TransferOut]
     expenses: list[ExpenseOut]
     summary: Summary
+    financial_state: FinancialState
+    # Plain words for the screen, e.g. that a settlement being corrected keeps its last close in Cajas.
+    financial_state_detail: str
+    close_in_effect: CloseRef | None
+    closed_by: int | None
+    closed_by_name: str | None
+    closed_at: datetime | None
+    reopened_by: int | None
+    reopened_by_name: str | None
+    reopened_at: datetime | None
+    reopen_reason: str | None
+    # Difference of the close in effect, with who absorbs it; null when it closed balanced or never closed.
+    current_difference: DifferenceOut | None
 
 
 # --- configuration ----------------------------------------------------------------------------------

@@ -1,8 +1,10 @@
-"""Delivery settlements API (R2-1), mounted at /api/v1/settlements. Nothing here writes the ledger.
+"""Delivery settlements API (R2-1, R2-2), mounted at /api/v1/settlements.
 
-Roles: viewer reads; operator creates settlements and loads them (count, additions, transfers and
-their verification, expenses); admin also corrects a transfer decision and edits expense categories
-and cash denominations. Creations are idempotent by `client_request_id`: 201 when created, 200 with
+Roles: viewer reads; operator creates settlements, loads them (count, additions, transfers and
+their verification, expenses) and closes them, allocating the difference to employees; admin also
+assigns a difference to the company, reopens a closed settlement, corrects a transfer decision and
+edits expense categories and cash denominations. Only the close writes the ledger, through
+`ledger.service`. Creations are idempotent by `client_request_id`: 201 when created, 200 with
 the same row when the request repeats an earlier one, 409 `idempotency_conflict` when the id was used
 for different content. Writes on a CLOSED settlement are 409 `settlement_closed`.
 """
@@ -13,7 +15,7 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Depends, Query, Response
 
 from app.core.clock import business_today
-from app.modules.settlements.delivery import additions, denominations, expenses, service, transfers, views
+from app.modules.settlements.delivery import additions, closing, denominations, expenses, service, transfers, views
 from app.modules.settlements.delivery import schemas as s
 from app.modules.settlements.delivery.denominations import Denomination
 from app.platform.auth.access import require_module_access
@@ -216,6 +218,53 @@ def void_expense(
 ) -> s.SettlementOut:
     expenses.void(db, user, settlement_id, expense_id, body.reason)
     return _detail(db, settlement_id, None, response)
+
+
+# --- close and reopen (R2-2) -----------------------------------------------------------------------
+
+
+@router.get(
+    "/deliveries/{settlement_id}/closing-preview",
+    response_model=s.ClosingPreviewOut,
+    summary="Qué publicaría el cierre ahora y qué lo impide",
+)
+def closing_preview(settlement_id: int, db: DbSession, _: Viewer) -> s.ClosingPreviewOut:
+    return views.closing_preview(db, settlement_id)
+
+
+@router.post(
+    "/deliveries/{settlement_id}/close",
+    response_model=s.SettlementOut,
+    status_code=201,
+    responses={
+        200: {"description": "Repetición del mismo cierre: devuelve la rendición ya cerrada."},
+        201: {"description": "Rendición cerrada y su cierre publicado en el ledger."},
+    },
+    summary="Cerrar la rendición (con la asignación de la diferencia)",
+)
+def close_delivery(
+    settlement_id: int, body: s.CloseIn, db: DbSession, user: Operator, response: Response
+) -> s.SettlementOut:
+    return _detail(db, settlement_id, closing.close(db, user, settlement_id, body), response)
+
+
+@router.post(
+    "/deliveries/{settlement_id}/reopen",
+    response_model=s.SettlementOut,
+    summary="Reabrir para corregir (no mueve Cajas hasta el nuevo cierre)",
+)
+def reopen_delivery(settlement_id: int, body: s.ReopenIn, db: DbSession, user: Admin) -> s.SettlementOut:
+    closing.reopen(db, user, settlement_id, body)
+    return views.settlement(db, settlement_id)
+
+
+@router.get(
+    "/deliveries/{settlement_id}/history",
+    response_model=s.HistoryOut,
+    summary="Cierres, reaperturas y diferencias de la rendición",
+)
+def delivery_history(settlement_id: int, db: DbSession, _: Viewer) -> s.HistoryOut:
+    return views.history(db, settlement_id)
 
 
 # --- configuration --------------------------------------------------------------------------------

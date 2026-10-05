@@ -81,4 +81,5 @@ def test_adjustments_and_partner_movements_need_admin() -> None:
         "CASH_TRANSFER",
         "BANK_DEPOSIT",
         "BANK_WITHDRAWAL",
+        "SETTLEMENT_CLOSE",
     }

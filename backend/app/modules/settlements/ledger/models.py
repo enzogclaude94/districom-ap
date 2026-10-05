@@ -30,10 +30,21 @@ from app.db.base import Base, IdMixin, TimestampMixin
 
 SCHEMA = "settlements"
 
-# Kinds grow phase by phase (cheque portfolio R4, pending receivables R3, employees R8...).
-ACCOUNT_KINDS = ("CASH_BOX", "BANK", "OWNER_EQUITY", "OPENING_BALANCE", "ADJUSTMENT")
+# Kinds grow phase by phase (cheque portfolio R4, pending receivables R3...).
+ACCOUNT_KINDS = (
+    "CASH_BOX",
+    "BANK",
+    "OWNER_EQUITY",
+    "OPENING_BALANCE",
+    "ADJUSTMENT",
+    # R2: counterparts of a delivery settlement close, and each employee's internal account.
+    "DELIVERY_COLLECTIONS",
+    "EXPENSE",
+    "SETTLEMENT_DIFFERENCE",
+    "EMPLOYEE",
+)
 # Technical counter-accounts: exactly one of each.
-TECHNICAL_KINDS = ("OPENING_BALANCE", "ADJUSTMENT")
+TECHNICAL_KINDS = ("OPENING_BALANCE", "ADJUSTMENT", "DELIVERY_COLLECTIONS", "EXPENSE", "SETTLEMENT_DIFFERENCE")
 
 OPERATION_TYPES = (
     "OPENING_BALANCE",
@@ -43,6 +54,7 @@ OPERATION_TYPES = (
     "OWNER_CONTRIBUTION",
     "OWNER_WITHDRAWAL",
     "ADJUSTMENT",
+    "SETTLEMENT_CLOSE",
     "REVERSAL",
 )
 # Operations whose description is the mandatory reason.
@@ -75,6 +87,9 @@ class Account(IdMixin, TimestampMixin, Base):
         CheckConstraint(f"kind IN ({_in(ACCOUNT_KINDS)})", name="kind"),
         # Physical cash can never be negative, whatever the configuration says (Enzo, D5).
         CheckConstraint("kind <> 'CASH_BOX' OR NOT allow_negative", name="cash_box_not_negative"),
+        # An internal account belongs to exactly one employee, and only internal accounts have one.
+        CheckConstraint("(kind = 'EMPLOYEE') = (employee_id IS NOT NULL)", name="employee_link"),
+        Index("uq_accounts_employee_id", "employee_id", unique=True, postgresql_where=text("employee_id IS NOT NULL")),
         Index("uq_accounts_code", "code", unique=True, postgresql_where=text("code IS NOT NULL")),
         Index(
             "uq_accounts_technical_kind",
@@ -93,6 +108,8 @@ class Account(IdMixin, TimestampMixin, Base):
     kind: Mapped[str] = mapped_column(String(30))
     allow_negative: Mapped[bool] = mapped_column(Boolean, server_default="false")
     active: Mapped[bool] = mapped_column(Boolean, server_default="true")
+    # EMPLOYEE accounts only (R2): positive balance = the employee owes the company, negative = the opposite.
+    employee_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("employees.id", ondelete="RESTRICT"))
 
     @validates("name")
     def _set_name_key(self, _: str, name: str) -> str:

@@ -8,6 +8,7 @@ export const OPERATION_LABELS: Record<OperationType, string> = {
   OWNER_CONTRIBUTION: "Aporte de socio",
   OWNER_WITHDRAWAL: "Devolución a socio",
   ADJUSTMENT: "Ajuste administrativo",
+  SETTLEMENT_CLOSE: "Cierre de rendición",
   REVERSAL: "Reverso",
 };
 
@@ -17,13 +18,21 @@ export const ACCOUNT_KIND_LABELS: Record<AccountKind, string> = {
   OWNER_EQUITY: "Aportes de socio",
   OPENING_BALANCE: "Cuenta técnica",
   ADJUSTMENT: "Cuenta técnica",
+  DELIVERY_COLLECTIONS: "Cuenta técnica",
+  EXPENSE: "Gastos",
+  SETTLEMENT_DIFFERENCE: "Cuenta técnica",
+  EMPLOYEE: "Cuenta interna de empleado",
 };
 
 /** Accounts that hold money or partner contributions. Technical counterparts never show as available money. */
 export const OPERATIONAL_KINDS: readonly AccountKind[] = ["CASH_BOX", "BANK", "OWNER_EQUITY"];
 
-/** Where an operation came from. Every R1 operation is entered by hand on this screen. */
+const SOURCE_LABELS: Record<string, string> = { settlement: "Rendición" };
+
+/** Where an operation came from: entered by hand on this screen, or a document such as a settlement. */
 export function sourceLabel(sourceType: string | null, sourceId: number | null) {
   if (!sourceType) return "Carga manual";
+  const label = SOURCE_LABELS[sourceType];
+  if (label) return sourceId === null ? label : `${label} #${sourceId}`;
   return sourceId === null ? sourceType : `${sourceType} #${sourceId}`;
 }

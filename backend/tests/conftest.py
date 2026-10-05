@@ -31,9 +31,11 @@ TRUNCATED_TABLES = (
     "user_sessions",
     "audit_events",
     "app_settings",
-    "employees",
-    "employee_functions",
     "user_module_roles",
+    "settlements.difference_allocations",
+    "settlements.settlement_differences",
+    "settlements.settlement_closings",
+    "settlements.settlement_reopenings",
     "settlements.ledger_entries",
     "settlements.financial_operations",
     "settlements.transfer_status_events",
@@ -44,8 +46,17 @@ TRUNCATED_TABLES = (
     "settlements.expense_categories",
     "settlements.settlements",
 )
-# Rendiciones accounts seeded by migration 0005; tests may add others, which are removed afterwards.
-SEEDED_ACCOUNTS = ("main_cash", "change_cash", "bank", "opening_balance", "adjustment")
+# Rendiciones accounts seeded by migrations 0005 and 0008; tests may add others, which are removed afterwards.
+SEEDED_ACCOUNTS = (
+    "main_cash",
+    "change_cash",
+    "bank",
+    "opening_balance",
+    "adjustment",
+    "delivery_collections",
+    "expense",
+    "settlement_difference",
+)
 
 
 def alembic_config() -> Config:
@@ -75,6 +86,11 @@ def db(migrated_db: None) -> Iterator[Session]:
             text("DELETE FROM settlements.accounts WHERE code IS NULL OR code <> ALL(:codes)"),
             {"codes": list(SEEDED_ACCOUNTS)},
         )
+        # Not truncated: an employee's internal account references it, and TRUNCATE ... CASCADE would
+        # empty the seeded accounts too.
+        for table in ("employee_functions", "employees"):
+            conn.execute(text(f"DELETE FROM {table}"))  # noqa: S608
+            conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN id RESTART"))
 
 
 @pytest.fixture

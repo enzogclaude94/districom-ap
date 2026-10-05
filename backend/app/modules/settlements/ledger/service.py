@@ -36,7 +36,7 @@ from app.modules.settlements.ledger.models import (
     FinancialOperation,
     LedgerEntry,
 )
-from app.modules.settlements.ledger.rules import REVERSAL_MIN_ROLE, RULES, leg_shape_error
+from app.modules.settlements.ledger.rules import DOCUMENT_TYPES, REVERSAL_MIN_ROLE, RULES, leg_shape_error
 from app.platform.audit.service import record_change
 from app.platform.auth.access import has_module_access
 from app.platform.auth.models import User
@@ -64,6 +64,16 @@ class SourceRef:
 class Posted:
     operation: FinancialOperation
     # False when the request was a retry and the existing operation was returned.
+    created: bool
+
+
+@dataclass(frozen=True)
+class Replaced:
+    """Result of `replace_operation`: the reversal of the original and its replacement."""
+
+    reversal: FinancialOperation
+    replacement: FinancialOperation
+    # False when the request was a retry and the existing pair was returned.
     created: bool
 
 
@@ -147,6 +157,13 @@ def reverse_operation(
             "cannot_reverse_reversal",
             "Un reverso no se revierte: registrá una operación nueva con el movimiento correcto.",
         )
+    if original.type in DOCUMENT_TYPES:
+        raise AppError(
+            409,
+            "operation_owned_by_document",
+            "Esta operación pertenece a un documento (por ejemplo, una rendición): se corrige reabriéndolo.",
+            {"source_type": original.source_type, "source_id": original.source_id},
+        )
     return _post(
         db,
         actor=actor,
@@ -160,6 +177,106 @@ def reverse_operation(
     )
 
 
+def replace_operation(
+    db: Session,
+    *,
+    actor: User,
+    original_id: int,
+    type: str,
+    legs: Sequence[Leg],
+    client_request_id: UUID,
+    reversal_request_id: UUID,
+    business_date: date,
+    description: str | None,
+    reason: str,
+    source: SourceRef,
+) -> Replaced:
+    """Replace a document's operation: publish its REVERSAL and the new operation as one economic change.
+
+    Used when a corrected document is closed again (a reopened settlement, R2-2). Both operations carry
+    `business_date` (the document's date, not the day of the correction; `created_at` records when it
+    happened) and are written in the caller's transaction. Funds are checked on the NET effect of both
+    per account, today and at every end of day since that date: correcting a close that brought
+    $1.000.000 to $1.000.500 only needs room for +$500, even if the cash was deposited long ago. The
+    database checks the same at commit, when both operations are in.
+
+    The replacement must be of the same type and source as the original, so this is never a way to
+    reverse something else. A retry with the same `client_request_id` and content returns the pair.
+    """
+    rule = RULES.get(type)
+    if rule is None or type not in DOCUMENT_TYPES:
+        raise AppError(422, "unknown_operation_type", "El tipo de operación no se puede reemplazar.")
+    _require_role(actor, rule.min_role)
+    description = (description or "").strip() or None
+    new_legs = [Leg(leg.account_id, _money(leg.amount)) for leg in legs]
+    fingerprint = command_fingerprint(
+        actor_id=actor.id,
+        type=type,
+        business_date=business_date,
+        description=description,
+        legs=new_legs,
+        source=source,
+        reverses_operation_id=None,
+    )
+    existing = _find_by_request_id(db, client_request_id)
+    if existing is not None:
+        replayed = _replay(existing, fingerprint).operation
+        undone = db.scalars(
+            select(FinancialOperation).where(FinancialOperation.reverses_operation_id == original_id)
+        ).one()
+        return Replaced(undone, replayed, created=False)
+
+    original = db.get(FinancialOperation, original_id)
+    if original is None:
+        raise AppError(404, "operation_not_found", "La operación no existe.")
+    if (original.type, original.source_type, original.source_id) != (type, source.type, source.id):
+        raise AppError(422, "invalid_replacement", "Solo se reemplaza una operación del mismo tipo y documento.")
+    if _reversed_by(db, original.id) is not None:
+        raise AppError(409, "operation_already_reversed", "La operación ya fue revertida.")
+    reason = reason.strip()
+    reversal_legs = [Leg(entry.account_id, -entry.amount) for entry in original.entries]
+    _validate_command("REVERSAL", business_date, reason or None, reversal_legs)
+    _validate_command(type, business_date, description, new_legs)
+    accounts = _load_accounts(db, new_legs + reversal_legs)
+    shape_error = leg_shape_error(
+        rule, [accounts[leg.account_id].kind for leg in new_legs], [1 if leg.amount > 0 else -1 for leg in new_legs]
+    )
+    if shape_error:
+        raise AppError(422, "invalid_legs", shape_error)
+
+    net: dict[int, Decimal] = {}
+    for leg in reversal_legs + new_legs:
+        net[leg.account_id] = net.get(leg.account_id, Decimal(0)) + leg.amount
+    net_legs = [Leg(account_id, amount) for account_id, amount in net.items() if amount != 0]
+    _check_funds(db, net_legs, accounts, business_date)
+
+    reversal = _post(
+        db,
+        actor=actor,
+        business_date=business_date,
+        check_funds=False,
+        type="REVERSAL",
+        legs=reversal_legs,
+        client_request_id=reversal_request_id,
+        description=reason,
+        source=None,
+        reverses=original,
+    )
+    replacement = _post(
+        db,
+        actor=actor,
+        business_date=business_date,
+        check_funds=False,
+        type=type,
+        legs=new_legs,
+        client_request_id=client_request_id,
+        description=description,
+        source=source,
+        reverses=None,
+    )
+    return Replaced(reversal.operation, replacement.operation, created=True)
+
+
 def _post(
     db: Session,
     *,
@@ -171,6 +288,7 @@ def _post(
     description: str | None,
     source: SourceRef | None,
     reverses: FinancialOperation | None,
+    check_funds: bool = True,
 ) -> Posted:
     business_date = business_date or business_today()
     description = (description or "").strip() or None
@@ -201,7 +319,8 @@ def _post(
             raise AppError(422, "invalid_legs", shape_error)
     elif _reversed_by(db, reverses.id) is not None:
         raise AppError(409, "operation_already_reversed", "La operación ya fue revertida.")
-    _check_funds(db, legs, accounts, business_date)
+    if check_funds:  # replace_operation checks the net effect of the pair instead
+        _check_funds(db, legs, accounts, business_date)
 
     operation = FinancialOperation(
         type=type,
