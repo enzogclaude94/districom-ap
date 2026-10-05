@@ -50,6 +50,13 @@ def list_drivers(
     return [s.Driver(id=e.id, full_name=e.full_name) for e in service.drivers(db, on or business_today())]
 
 
+@router.get(
+    "/employees", response_model=list[s.Driver], summary="Empleados activos, para asignar una diferencia al cerrar"
+)
+def list_employees(db: DbSession, _: Viewer) -> list[s.Driver]:
+    return [s.Driver(id=e.id, full_name=e.full_name) for e in service.employees(db)]
+
+
 @router.get("/deliveries", response_model=s.SettlementPage)
 def list_deliveries(
     db: DbSession,
@@ -58,6 +65,7 @@ def list_deliveries(
     date_to: date | None = None,
     employee_id: int | None = None,
     status: Literal["OPEN", "CLOSED"] | None = None,
+    financial_state: s.FinancialState | None = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> s.SettlementPage:
@@ -69,6 +77,7 @@ def list_deliveries(
         status=status,
         limit=limit,
         offset=offset,
+        financial_state=financial_state,
     )
     return s.SettlementPage(items=views.items(db, rows), total=total)
 

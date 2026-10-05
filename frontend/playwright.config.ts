@@ -11,6 +11,8 @@ const BACKEND_PORT = 8100;
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: false,
+  // The specs share one ledger (Cajas, settlements): balance checks need them to run one at a time.
+  workers: 1,
   forbidOnly: !!process.env.CI,
   retries: 0,
   reporter: process.env.CI ? [["github"], ["html", { open: "never" }]] : "list",

@@ -114,6 +114,11 @@ def drivers(db: Session, on: date) -> list[Employee]:
     )
 
 
+def employees(db: Session) -> list[Employee]:
+    """Active employees, whatever their function: who can absorb part of a difference at close."""
+    return list(db.scalars(select(Employee).where(Employee.active.is_(True)).order_by(Employee.full_name)))
+
+
 def _require_driver(db: Session, employee_id: int, on: date) -> Employee:
     employee = db.get(Employee, employee_id)
     if employee is None:
@@ -243,6 +248,7 @@ def list_settlements(
     status: str | None,
     limit: int,
     offset: int,
+    financial_state: str | None = None,
 ) -> tuple[Sequence[tuple[Settlement, str]], int]:
     if date_from and date_to and date_from > date_to:
         raise AppError(422, "invalid_date_range", "La fecha desde no puede ser posterior a la fecha hasta.")
@@ -255,6 +261,12 @@ def list_settlements(
         query = query.where(Settlement.employee_id == employee_id)
     if status is not None:
         query = query.where(Settlement.status == status)
+    if financial_state == "CLOSED":
+        query = query.where(Settlement.status == "CLOSED")
+    elif financial_state == "NOT_CLOSED":
+        query = query.where(Settlement.status == "OPEN", Settlement.current_close_operation_id.is_(None))
+    elif financial_state == "BEING_CORRECTED":
+        query = query.where(Settlement.status == "OPEN", Settlement.current_close_operation_id.is_not(None))
     total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
     rows = db.execute(
         query.order_by(Settlement.business_date.desc(), Employee.full_name, Settlement.sequence_number, Settlement.id)

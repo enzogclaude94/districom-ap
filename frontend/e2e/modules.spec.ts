@@ -17,7 +17,7 @@ test("platform admin picks Rendiciones and switches back to Comercial", async ({
   await expect(page.getByText("El módulo está habilitado")).toBeVisible();
 
   if (isMobile) await page.getByRole("button", { name: "Abrir menú" }).click();
-  await expect(page.getByTitle("Disponible en la fase R2")).toBeVisible();
+  await expect(page.getByTitle("Disponible en la fase R3")).toBeVisible();
   await page.getByRole("button", { name: /Cambiar de módulo/ }).click();
   await page.getByRole("navigation", { name: "Módulos" }).getByRole("link", { name: "Inteligencia Comercial" }).click();
   await expect(page).toHaveURL(/\/comercial$/);

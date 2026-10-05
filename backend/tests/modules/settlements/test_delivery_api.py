@@ -159,6 +159,17 @@ def test_only_drivers_of_that_day_can_be_chosen(as_role, driver, db: Session) ->
     assert create(operator, expired, business_date=(DAY - timedelta(days=1)).isoformat()).status_code == 201
 
 
+def test_any_active_employee_can_be_listed_for_a_difference(as_role, driver, db: Session) -> None:  # type: ignore[no-untyped-def]
+    """The close screen lists active employees of any function (an operator cannot read /employees)."""
+    pedro = driver("Pedro Gómez")
+    helper = driver("Ana Ayudante", function="settlements.other")
+    gone = driver("Iván Inactivo")
+    db.execute(text("UPDATE employees SET active = false WHERE id = :id"), {"id": gone})
+    db.commit()
+    listed = as_role("viewer").get(f"{BASE}/employees").json()
+    assert listed == [{"id": helper, "full_name": "Ana Ayudante"}, {"id": pedro, "full_name": "Pedro Gómez"}]
+
+
 def test_business_date_cannot_be_future(as_role, pedro) -> None:  # type: ignore[no-untyped-def]
     response = create(as_role("operator"), pedro, business_date=(TODAY + timedelta(days=1)).isoformat())
     assert (response.status_code, response.json()["code"]) == (422, "future_business_date")
@@ -545,6 +556,32 @@ def test_expense_categories_are_edited_by_an_admin(as_role, opened, category) ->
     assert [c["name"] for c in admin.get(f"{BASE}/expense-categories?include_inactive=true").json()] == ["Peajes"]
     response = post(as_role("operator"), f"/deliveries/{opened}/expenses", category_id=tolls, amount="10")
     assert response.json()["code"] == "invalid_expense_category"
+
+
+def test_deactivating_a_used_category_keeps_earlier_expenses(as_role, opened, category, db: Session) -> None:  # type: ignore[no-untyped-def]
+    """Enzo's final R2 adjustment: a category is never deleted; deactivating it leaves its expenses as they were,
+    and reactivating it makes it usable again. Every change is audited."""
+    tolls = category("Peajes")
+    operator, admin = as_role("operator"), as_role("admin")
+    post(operator, f"/deliveries/{opened}/expenses", category_id=tolls, amount="2500")
+    before = operator.get(f"{BASE}/deliveries/{opened}").json()
+    assert admin.patch(f"{BASE}/expense-categories/{tolls}", json={"active": False}).status_code == 200
+    after = operator.get(f"{BASE}/deliveries/{opened}").json()
+    assert after["expenses"] == before["expenses"]
+    assert after["summary"] == before["summary"]
+    assert admin.delete(f"{BASE}/expense-categories/{tolls}").status_code == 405
+    assert admin.patch(f"{BASE}/expense-categories/{tolls}", json={"active": True}).json()["active"] is True
+    assert post(operator, f"/deliveries/{opened}/expenses", category_id=tolls, amount="10").status_code == 201
+    events = (
+        db.execute(text("SELECT event_type FROM audit_events WHERE entity_type = 'expense_category' ORDER BY id"))
+        .scalars()
+        .all()
+    )
+    assert events == [
+        "settlements.expense_category.created",
+        "settlements.expense_category.updated",
+        "settlements.expense_category.updated",
+    ]
 
 
 # --- closed settlements and the board --------------------------------------------------------------
