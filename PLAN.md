@@ -318,7 +318,7 @@ Propuesta aprobada por Enzo el 2026-10-04 con sus decisiones R2‑D1 a R2‑D7 y
 | PR | Contenido | Estado |
 |---|---|---|
 | R2‑1 | Rendición y carga, sin ledger: migración `0007` (`settlements`, `cash_count_lines`, `cash_additions`, `settlement_transfers`, `transfer_status_events`, `expense_categories`, `expenses`, triggers), secuencia por repartidor y día, alta idempotente, denominaciones configurables, transferencias con verificación, gastos, tablero calculado, API, tests | Aprobado (PR #10) |
-| R2‑2 | Cierre y reapertura hacia el ledger: migración `0008` (cuentas técnicas y `EMPLOYEE`, `settlement_closings`, `settlement_differences`, `difference_allocations`, triggers), cierre atómico con asignación de la diferencia, reapertura sin tocar el ledger, `replace_operation` con efecto neto, estado financiero, vista previa e historial, tests | En revisión |
-| R2‑3 | Pantallas y E2E | Espera aprobación |
+| R2‑2 | Cierre y reapertura hacia el ledger: migración `0008` (cuentas técnicas y `EMPLOYEE`, `settlement_closings`, `settlement_differences`, `difference_allocations`, `settlement_reopenings`, triggers), cierre atómico con asignación de la diferencia y vista previa vinculante (`preview_token`), reapertura sin tocar el ledger, `replace_operation` con efecto neto, estado financiero, historial de dominio, tests | Aprobado (PR #11, `main` `af2d6bc`) |
+| R2‑3 | Pantallas `/rendiciones/repartos` (lista con filtros, alta, tablero, conteo, agregados, transferencias, gastos, cierre con vista previa y asignación, reapertura, historial), `GET /employees` y filtro por estado financiero, tests de frontend y E2E | En revisión |
 
 Cada PR espera la aprobación de Enzo antes del siguiente.
