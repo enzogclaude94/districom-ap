@@ -9,7 +9,7 @@ export const SETTLEMENTS_NAV: NavSection[] = [
     label: "Operación diaria",
     icon: ClipboardList,
     items: [
-      { label: "Rendiciones de reparto", href: "/rendiciones/repartos", phase: 2 },
+      { label: "Rendiciones de reparto", href: "/rendiciones/repartos" },
       { label: "Boca de expendio", href: "/rendiciones/boca", phase: 7 },
       { label: "Pendientes", href: "/rendiciones/pendientes", phase: 3 },
     ],
