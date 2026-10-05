@@ -37,13 +37,14 @@ RULES: dict[str, OperationRule] = {
     # Admin only, with a mandatory reason, audited and reversible (D4).
     "ADJUSTMENT": OperationRule("admin", CASH_AND_BANK | {"ADJUSTMENT"}, "ADJUSTMENT"),
     # Close of a delivery settlement (R2-2): what the driver had to bring leaves the collections account;
-    # cash, verified transfers and expenses justify it; the difference goes to employees or the company.
-    # Who may absorb a difference for the company is checked by the settlement, which owns that rule.
+    # cash, verified transfers, expenses and pending collections (R3) justify it; the difference goes to
+    # employees or the company. Who may absorb a difference for the company is checked by the settlement,
+    # which owns that rule.
     "SETTLEMENT_CLOSE": OperationRule(
         "operator",
-        CASH_AND_BANK | {"DELIVERY_COLLECTIONS", "EXPENSE", "EMPLOYEE", "SETTLEMENT_DIFFERENCE"},
+        CASH_AND_BANK | {"DELIVERY_COLLECTIONS", "EXPENSE", "EMPLOYEE", "SETTLEMENT_DIFFERENCE", "PENDING_COLLECTIONS"},
         "DELIVERY_COLLECTIONS",
-        (("DELIVERY_COLLECTIONS", -1), ("CASH_BOX", 1), ("BANK", 1), ("EXPENSE", 1)),
+        (("DELIVERY_COLLECTIONS", -1), ("CASH_BOX", 1), ("BANK", 1), ("EXPENSE", 1), ("PENDING_COLLECTIONS", 1)),
     ),
 }
 # Operations that belong to a source document: only that document's flow corrects them (replace_operation).

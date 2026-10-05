@@ -11,7 +11,8 @@ export type AccountKind =
   | "DELIVERY_COLLECTIONS"
   | "EXPENSE"
   | "SETTLEMENT_DIFFERENCE"
-  | "EMPLOYEE";
+  | "EMPLOYEE"
+  | "PENDING_COLLECTIONS";
 
 export type OperationType =
   | "OPENING_BALANCE"

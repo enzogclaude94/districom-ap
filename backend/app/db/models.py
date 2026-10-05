@@ -2,6 +2,7 @@
 
 from app.modules.settlements.delivery import models as settlements_delivery_models
 from app.modules.settlements.ledger import models as settlements_ledger_models
+from app.modules.settlements.pending import models as settlements_pending_models
 from app.platform.audit import models as audit_models
 from app.platform.auth import models as auth_models
 from app.platform.parties import models as parties_models
@@ -15,5 +16,6 @@ __all__ = [
     "settings_models",
     "settlements_delivery_models",
     "settlements_ledger_models",
+    "settlements_pending_models",
     "sources_models",
 ]

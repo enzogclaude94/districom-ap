@@ -42,9 +42,18 @@ ACCOUNT_KINDS = (
     "EXPENSE",
     "SETTLEMENT_DIFFERENCE",
     "EMPLOYEE",
+    # R3: what customers still owe from settlements ("Pendientes de cobro"); never negative.
+    "PENDING_COLLECTIONS",
 )
 # Technical counter-accounts: exactly one of each.
-TECHNICAL_KINDS = ("OPENING_BALANCE", "ADJUSTMENT", "DELIVERY_COLLECTIONS", "EXPENSE", "SETTLEMENT_DIFFERENCE")
+TECHNICAL_KINDS = (
+    "OPENING_BALANCE",
+    "ADJUSTMENT",
+    "DELIVERY_COLLECTIONS",
+    "EXPENSE",
+    "SETTLEMENT_DIFFERENCE",
+    "PENDING_COLLECTIONS",
+)
 
 OPERATION_TYPES = (
     "OPENING_BALANCE",
