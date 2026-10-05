@@ -89,8 +89,10 @@ export function timeline(settlement: Settlement, history: History): Event[] {
     });
   }
   for (const difference of history.differences) {
+    // Recorded in the same transaction as its close: shown right after it, whatever the clock said.
+    const closing = history.closings.find((c) => c.operation_id === difference.close_operation_id);
     events.push({
-      at: difference.created_at,
+      at: closing?.closed_at ?? difference.created_at,
       rank: 3,
       key: `difference-${difference.id}`,
       title: `${DIFFERENCE_LABELS[difference.kind]} de ${formatMoney(difference.amount)} (versión ${difference.settlement_version})`,

@@ -762,7 +762,7 @@ describe("reopen and history", () => {
           close_operation_id: 40,
           created_by: 9,
           created_by_name: "Oscar",
-          created_at: closedAt,
+          created_at: "2026-10-04T14:59:59.900Z", // written just before its close row
           superseded_at: "2026-10-04T17:00:00Z",
           superseded_by: 9,
           superseded_by_name: "Oscar",
