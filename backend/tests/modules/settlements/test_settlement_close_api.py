@@ -475,6 +475,24 @@ def test_reopen_keeps_the_ledger_and_is_being_corrected(as_role, short, pedro, d
     assert item["financial_state"] == "BEING_CORRECTED"
 
 
+def test_list_filters_by_financial_state(as_role, short, balanced, pedro) -> None:  # type: ignore[no-untyped-def]
+    """The list screen filters Sin cerrar / Cerrada / En corrección, not the editing status."""
+    viewer = as_role("viewer")
+    third = create(as_role("operator"), pedro, "1000")
+    close(as_role("operator"), short, employee(pedro, "1000"))
+    close(as_role("operator"), balanced)
+    reopen(as_role("admin"), short, 1)
+
+    def listed(state: str) -> list[int]:
+        items = viewer.get(f"{BASE}/deliveries", params={"financial_state": state}).json()["items"]
+        return [i["id"] for i in items]
+
+    assert listed("NOT_CLOSED") == [third]
+    assert listed("CLOSED") == [balanced]
+    assert listed("BEING_CORRECTED") == [short]
+    assert viewer.get(f"{BASE}/deliveries", params={"financial_state": "OTHER"}).status_code == 422
+
+
 @pytest.fixture
 def million(as_role, ids, pedro) -> int:  # type: ignore[no-untyped-def]
     """A settlement closed with $1.000.000 in Caja principal against $1.000.500 expected ($500 short)."""

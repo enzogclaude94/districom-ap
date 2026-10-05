@@ -159,6 +159,17 @@ def test_only_drivers_of_that_day_can_be_chosen(as_role, driver, db: Session) ->
     assert create(operator, expired, business_date=(DAY - timedelta(days=1)).isoformat()).status_code == 201
 
 
+def test_any_active_employee_can_be_listed_for_a_difference(as_role, driver, db: Session) -> None:  # type: ignore[no-untyped-def]
+    """The close screen lists active employees of any function (an operator cannot read /employees)."""
+    pedro = driver("Pedro Gómez")
+    helper = driver("Ana Ayudante", function="settlements.other")
+    gone = driver("Iván Inactivo")
+    db.execute(text("UPDATE employees SET active = false WHERE id = :id"), {"id": gone})
+    db.commit()
+    listed = as_role("viewer").get(f"{BASE}/employees").json()
+    assert listed == [{"id": helper, "full_name": "Ana Ayudante"}, {"id": pedro, "full_name": "Pedro Gómez"}]
+
+
 def test_business_date_cannot_be_future(as_role, pedro) -> None:  # type: ignore[no-untyped-def]
     response = create(as_role("operator"), pedro, business_date=(TODAY + timedelta(days=1)).isoformat())
     assert (response.status_code, response.json()["code"]) == (422, "future_business_date")
