@@ -3,8 +3,9 @@
 justified = cash (count + additions not voided) + VERIFIED transfers + cheques + pending + expenses
 difference = justified - expected (negative: shortage, positive: surplus)
 
-DECLARED and REJECTED transfers are shown but never justify money (Enzo's R2-P3). Cheques (R4) and
-pending collections (R3) are zero until their phase. Voided additions and expenses do not count.
+DECLARED and REJECTED transfers are shown but never justify money (Enzo's R2-P3). Cheques (R4) are zero
+until their phase. Pending collections (R3-1) count with their load, not voided: what the next close
+publishes. Voided additions, expenses and pendings do not count.
 """
 
 from collections import defaultdict
@@ -23,6 +24,7 @@ from app.modules.settlements.delivery.models import (
     Settlement,
     SettlementTransfer,
 )
+from app.modules.settlements.pending.models import PendingCollection
 
 ZERO = Decimal("0.00")
 DifferenceKind = Literal["SHORTAGE", "SURPLUS", "BALANCED"]
@@ -123,4 +125,11 @@ def totals(db: Session, settlement_ids: Sequence[int]) -> dict[int, Totals]:
     )
     for sid, amount in expenses:
         result[sid].expenses = amount
+    pending = db.execute(
+        select(PendingCollection.settlement_id, func.sum(PendingCollection.amount))
+        .where(PendingCollection.settlement_id.in_(ids), PendingCollection.voided_at.is_(None))
+        .group_by(PendingCollection.settlement_id)
+    )
+    for sid, amount in pending:
+        result[sid].pending = amount
     return result

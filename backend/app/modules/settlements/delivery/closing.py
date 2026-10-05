@@ -17,6 +17,7 @@ freeze the settlement and audit. Legs:
     each cash box              +cash counted and added for that box
     each bank                  +VERIFIED transfers to that bank
     Gastos operativos          +valid expenses
+    Pendientes de cobro        +pending collections not voided (R3-1)
     employee internal account  +its part of a shortage / -its part of a surplus
     Diferencias de rendición   the company's part, same sign
 
@@ -26,13 +27,15 @@ close of the same version with the same content returns it; with other content i
 
 Reopen (admin, with a reason) records a `settlement_reopenings` row, unfreezes the load and increments
 the version: the ledger is not touched and the previous close stays in effect until the new close
-replaces it.
+replaces it. The same holds for pending collections (R3-1): each close freezes what it published per
+pending in `settlement_closing_pendings`, and that row of the close in effect is the amount in effect,
+whatever the load of a correction says until it is closed.
 
 The close carries the `preview_token` of the preview the user confirmed: if anything that could alter
 the close changed since, it is refused (`settlement_preview_stale`) before any financial write.
 
-Lock order, always: the settlement row, then (inside the ledger) the accounts that lose value, in id
-order. Load changes lock the settlement row too, so they never interleave with a close.
+Lock order, always: the settlement row, then its pending collections by id, then (inside the ledger) the
+accounts that lose value, in id order. Load changes lock the settlement row too, so they never interleave with a close.
 """
 
 import hashlib
@@ -62,6 +65,8 @@ from app.modules.settlements.delivery.models import (
 )
 from app.modules.settlements.ledger import service as ledger
 from app.modules.settlements.ledger.accounts import employee_account_id
+from app.modules.settlements.pending import service as pending_collections
+from app.modules.settlements.pending.models import PendingCollection
 from app.platform.audit.service import record_change
 from app.platform.auth.access import has_module_access
 from app.platform.auth.models import User
@@ -208,6 +213,7 @@ def preview_token(db: Session, plan: Plan) -> str:
         "additions": sorted([aid, service.money(amount), box] for aid, amount, box in added),
         "transfers": sorted([tid, service.money(amount), bank, status] for tid, amount, bank, status in sent),
         "expenses": sorted([eid, category, service.money(amount)] for eid, category, amount in spent),
+        "pendings": pending_collections.preview_rows(db, sid),
         "cash_by_box": sorted([box, service.money(t.total)] for box, t in totals.by_box.items()),
         "verified_by_bank": sorted([bank, service.money(amount)] for bank, amount in plan.verified_by_bank.items()),
         "difference": service.money(plan.difference),
@@ -222,9 +228,10 @@ def preview_token(db: Session, plan: Plan) -> str:
 
 def close(db: Session, actor: User, settlement_id: int, body: s.CloseIn) -> service.Created:
     settlement = _lock(db, settlement_id)
+    pendings = pending_collections.lock_for_close(db, settlement)
     plan = _plan(db, settlement)
     allocations = _normalize(body.allocations)
-    fingerprint = _fingerprint(plan, body.version, allocations)
+    fingerprint = _fingerprint(plan, body.version, allocations, pendings)
 
     existing = db.scalars(
         select(SettlementClosing).where(
@@ -265,6 +272,7 @@ def close(db: Session, actor: User, settlement_id: int, body: s.CloseIn) -> serv
             "Hay transferencias declaradas sin verificar ni rechazar: resolvelas antes de cerrar.",
             {"declared_transfers_count": plan.totals.declared_transfers_count},
         )
+    pending_collections.check_against_applied(db, pendings)
     _check_allocations(db, actor, plan, allocations)
     if not body.confirm:
         raise AppError(422, "confirmation_required", "Confirmá el cierre de la rendición.")
@@ -300,6 +308,7 @@ def close(db: Session, actor: User, settlement_id: int, body: s.CloseIn) -> serv
         )
         operation, reversal_id = replaced.replacement, replaced.reversal.id
 
+    pending_collections.publish(db, actor, settlement, pendings, operation.id, settlement.current_close_operation_id)
     now = datetime.now(UTC)
     superseded = db.execute(
         update(SettlementDifference)
@@ -533,7 +542,7 @@ def _concurrent_change(settlement: Settlement) -> AppError:
 
 def _plan(db: Session, settlement: Settlement) -> Plan:
     totals = summary.totals(db, [settlement.id])[settlement.id]
-    # Cheques (R4) and pending collections (R3) are always zero in this phase; they get their legs then.
+    # Cheques (R4) are always zero in this phase; they get their leg then.
     verified = db.execute(
         select(SettlementTransfer.bank_account_id, func.sum(SettlementTransfer.amount))
         .where(SettlementTransfer.settlement_id == settlement.id, SettlementTransfer.status == "VERIFIED")
@@ -552,6 +561,8 @@ def _plan(db: Session, settlement: Settlement) -> Plan:
         add(("account", bank_id), amount)
     if totals.expenses:
         add(("account", ledger.system_account_id(db, "expense")), totals.expenses)
+    if totals.pending:
+        add(("account", ledger.system_account_id(db, "pending_collections")), totals.pending)
     plan.legs = {key: amount for key, amount in legs.items() if amount != 0}
     return plan
 
@@ -658,7 +669,7 @@ def _ledger_legs(db: Session, actor: User, plan: Plan, allocations: list[Allocat
     return legs
 
 
-def _fingerprint(plan: Plan, version: int, allocations: list[Allocation]) -> str:
+def _fingerprint(plan: Plan, version: int, allocations: list[Allocation], pendings: list[PendingCollection]) -> str:
     """SHA-256 of everything the close means; who sends it does not change what it is."""
     totals = plan.totals
     payload: dict[str, Any] = {
@@ -679,5 +690,8 @@ def _fingerprint(plan: Plan, version: int, allocations: list[Allocation]) -> str
             [kind, ref, service.money(amount)] for (kind, ref), amount in _difference_legs(plan, allocations, 0).items()
         ),
     }
+    published = sorted([p.id, service.money(p.amount), p.customer_name] for p in pendings if p.voided_at is None)
+    if published:  # absent when there are none, so a retry of a close made before R3 keeps its fingerprint
+        payload["pendings"] = published
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode()).hexdigest()

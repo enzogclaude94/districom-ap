@@ -24,6 +24,8 @@ from app.modules.settlements.delivery.models import (
 )
 from app.modules.settlements.ledger import service as ledger
 from app.modules.settlements.ledger.accounts import employees_of_accounts
+from app.modules.settlements.pending import service as pending_service
+from app.modules.settlements.pending import views as pending_views
 from app.platform.auth.models import User
 from app.platform.parties.models import Employee
 
@@ -151,6 +153,7 @@ def settlement(db: Session, settlement_id: int) -> s.SettlementOut:
             )
             for e in spent
         ],
+        pending_collections=pending_views.items(db, pending_service.of(db, row.id)),
         summary=_summary(totals, accounts),
         financial_state=closing.financial_state(row),
         financial_state_detail=closing.financial_state_detail(row),
@@ -192,6 +195,7 @@ def closing_preview(db: Session, settlement_id: int) -> s.ClosingPreviewOut:
             )
             for (_, ref), amount in sorted(plan.legs.items())
         ],
+        pending_collections=pending_views.items(db, pending_service.of(db, row.id)),
         close_in_effect=_close_ref(in_effect),
     )
 
