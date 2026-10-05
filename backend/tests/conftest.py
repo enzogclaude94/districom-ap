@@ -35,6 +35,7 @@ TRUNCATED_TABLES = (
     "settlements.difference_allocations",
     "settlements.settlement_differences",
     "settlements.settlement_closings",
+    "settlements.settlement_reopenings",
     "settlements.ledger_entries",
     "settlements.financial_operations",
     "settlements.transfer_status_events",

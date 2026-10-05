@@ -80,8 +80,21 @@ def _in_session(
     return _work
 
 
-def _close(sid: int, version: int, *allocations: schemas.AllocationIn) -> Callable[[Session, User], object]:
-    body = schemas.CloseIn(version=version, allocations=list(allocations), confirm=True)
+def _token(db: Session, sid: int) -> str:
+    db.rollback()  # see the latest committed state
+    return closing.preview(db, sid).token
+
+
+def close_now(db: Session, actor: User, sid: int, version: int, *allocations: schemas.AllocationIn) -> None:
+    body = schemas.CloseIn(version=version, preview_token=_token(db, sid), allocations=list(allocations), confirm=True)
+    closing.close(db, actor, sid, body)
+
+
+def _close(
+    db: Session, sid: int, version: int, *allocations: schemas.AllocationIn
+) -> Callable[[Session, User], object]:
+    """A close confirming the preview taken now, before the race starts."""
+    body = schemas.CloseIn(version=version, preview_token=_token(db, sid), allocations=list(allocations), confirm=True)
     return lambda session, user: closing.close(session, user, sid, body)
 
 
@@ -151,7 +164,7 @@ def test_two_simultaneous_closes_publish_one(db, new_session, operator, short, p
     """[15] Same close twice at once: one publishes, the other gets it back; one operation, one difference."""
     charge = schemas.AllocationIn(target="EMPLOYEE", employee_id=pedro, amount=Decimal(500))
     holder = _hold(new_session, short)
-    results = _race(holder, [_in_session(new_session, operator, _close(short, 1, charge)) for _ in range(2)])
+    results = _race(holder, [_in_session(new_session, operator, _close(db, short, 1, charge)) for _ in range(2)])
     assert sorted(r.created for r in results if isinstance(r, service.Created)) == [False, True], results
     assert _scalar(db, "SELECT count(*) FROM settlements.financial_operations") == 1
     assert _scalar(db, "SELECT count(*) FROM settlements.settlement_differences") == 1
@@ -161,8 +174,8 @@ def test_two_simultaneous_closes_publish_one(db, new_session, operator, short, p
 def test_close_against_a_load_change_never_closes_stale_totals(
     db, new_session, operator, short, pedro, accounts
 ) -> None:  # type: ignore[no-untyped-def]
-    """A count change and a close race: either the change lands first and the close (allocated on the old
-    difference) is refused, or the close lands first and the change is refused. Never both."""
+    """A count change and a close race: either the change lands first and the close (confirming the old
+    preview) is refused as stale, or the close lands first and the change is refused. Never both."""
     charge = schemas.AllocationIn(target="EMPLOYEE", employee_id=pedro, amount=Decimal(500))
 
     def _recount(session: Session, user: User) -> object:
@@ -172,7 +185,10 @@ def test_close_against_a_load_change_never_closes_stale_totals(
     holder = _hold(new_session, short)
     results = _race(
         holder,
-        [_in_session(new_session, operator, _close(short, 1, charge)), _in_session(new_session, operator, _recount)],
+        [
+            _in_session(new_session, operator, _close(db, short, 1, charge)),
+            _in_session(new_session, operator, _recount),
+        ],
     )
     status = _scalar(db, "SELECT status FROM settlements.settlements WHERE id = :id", id=short)
     if status == "CLOSED":
@@ -184,7 +200,7 @@ def test_close_against_a_load_change_never_closes_stale_totals(
         )
         assert main == Decimal("1000.00")
     else:
-        assert _errors(results) == ["difference_allocation_mismatch"], results
+        assert _errors(results) == ["settlement_preview_stale"], results
         assert _scalar(db, "SELECT count(*) FROM settlements.financial_operations") == 0
 
 
@@ -198,7 +214,7 @@ def test_close_against_a_cash_transfer_stays_consistent(
     results = _race(
         holder,
         [
-            _in_session(new_session, operator, _close(short, 1, charge)),
+            _in_session(new_session, operator, _close(db, short, 1, charge)),
             _in_session(new_session, operator, _cash_transfer(accounts["main_cash"], accounts["change_cash"], "2000")),
         ],
     )
@@ -210,7 +226,7 @@ def test_close_against_a_cash_transfer_stays_consistent(
 
 def test_concurrent_reopen_happens_once(db, new_session, operator, actor, short, pedro) -> None:  # type: ignore[no-untyped-def]
     charge = schemas.AllocationIn(target="EMPLOYEE", employee_id=pedro, amount=Decimal(500))
-    closing.close(db, operator, short, schemas.CloseIn(version=1, allocations=[charge], confirm=True))
+    close_now(db, operator, short, 1, charge)
     admin = actor("admin")
 
     def _reopen(reason: str) -> Callable[[Session, User], object]:
@@ -230,12 +246,12 @@ def test_two_simultaneous_new_closes_publish_one_replacement(
     db, new_session, operator, actor, short, pedro, accounts
 ) -> None:  # type: ignore[no-untyped-def]
     charge = schemas.AllocationIn(target="EMPLOYEE", employee_id=pedro, amount=Decimal(500))
-    closing.close(db, operator, short, schemas.CloseIn(version=1, allocations=[charge], confirm=True))
+    close_now(db, operator, short, 1, charge)
     closing.reopen(db, actor("admin"), short, schemas.ReopenIn(version=1, reason="Faltaban $500"))
     _count(db, operator, short, ("ARS_1000", 1, accounts["main_cash"]), ("ARS_500", 1, accounts["main_cash"]))
 
     holder = _hold(new_session, short)
-    results = _race(holder, [_in_session(new_session, operator, _close(short, 2)) for _ in range(2)])
+    results = _race(holder, [_in_session(new_session, operator, _close(db, short, 2)) for _ in range(2)])
     assert sorted(r.created for r in results if isinstance(r, service.Created)) == [False, True], results
     types = _scalar(db, "SELECT string_agg(type, ',' ORDER BY id) FROM settlements.financial_operations")
     assert types == "SETTLEMENT_CLOSE,REVERSAL,SETTLEMENT_CLOSE"
@@ -247,7 +263,7 @@ def test_replacement_against_another_movement_never_overdraws(
     """A correction that takes $500 out of Caja principal (net) and a transfer of $800 from it race.
     The box holds $1.000: both together would leave it at -$300, so exactly one of them is refused."""
     charge = schemas.AllocationIn(target="EMPLOYEE", employee_id=pedro, amount=Decimal(500))
-    closing.close(db, operator, short, schemas.CloseIn(version=1, allocations=[charge], confirm=True))
+    close_now(db, operator, short, 1, charge)
     closing.reopen(db, actor("admin"), short, schemas.ReopenIn(version=1, reason="Eran $500, no $1.000"))
     _count(db, operator, short, ("ARS_500", 1, accounts["main_cash"]))
     more = schemas.AllocationIn(target="EMPLOYEE", employee_id=pedro, amount=Decimal(1000))
@@ -256,7 +272,7 @@ def test_replacement_against_another_movement_never_overdraws(
     results = _race(
         holder,
         [
-            _in_session(new_session, operator, _close(short, 2, more)),
+            _in_session(new_session, operator, _close(db, short, 2, more)),
             _in_session(new_session, operator, _cash_transfer(accounts["main_cash"], accounts["change_cash"], "800")),
         ],
     )

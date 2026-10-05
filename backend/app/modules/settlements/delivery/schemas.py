@@ -242,6 +242,8 @@ class CloseIn(StrictIn):
     explicit confirmation, required even when the difference is zero."""
 
     version: int = Field(ge=1)
+    # The token of the preview the user reviewed: a close never confirms something else.
+    preview_token: str = Field(pattern=r"^[0-9a-f]{64}$")
     allocations: list[AllocationIn] = Field(default_factory=list, max_length=20)
     confirm: bool
 
@@ -284,6 +286,8 @@ class ClosingPreviewOut(BaseModel):
     amount_to_allocate: Money
     blockers: list[Blocker]
     legs: list[LegOut]
+    # Send it back with the close: if the settlement changed since, the close is refused as stale.
+    preview_token: str
     close_in_effect: CloseRef | None
 
 
@@ -332,10 +336,11 @@ class ReopeningOut(BaseModel):
     from_version: int
     to_version: int
     reason: str
-    reopened_by: int | None
-    reopened_by_name: str | None
+    reopened_by: int
+    reopened_by_name: str
     reopened_at: datetime
-    close_in_effect_operation_id: int | None
+    # The close that stayed in effect in Cajas while the settlement was corrected.
+    close_operation_id: int
 
 
 class HistoryOut(BaseModel):

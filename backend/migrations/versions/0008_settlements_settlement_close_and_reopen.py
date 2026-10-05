@@ -35,9 +35,11 @@ INSERT INTO settlements.accounts (code, name, name_key, kind, allow_negative) VA
     ('settlement_difference', 'Diferencias de rendición', 'diferencias de rendicion', 'SETTLEMENT_DIFFERENCE', true)
 """
 
-# Closings, differences and allocations are history: never deleted; a difference is only superseded.
+# Closings, reopenings, differences and allocations are history: never deleted; a difference is only superseded.
 HISTORY = """
 CREATE TRIGGER trg_settlement_closings_no_change BEFORE UPDATE OR DELETE ON settlements.settlement_closings
+    FOR EACH ROW EXECUTE FUNCTION settlements.forbid_delete();
+CREATE TRIGGER trg_settlement_reopenings_no_change BEFORE UPDATE OR DELETE ON settlements.settlement_reopenings
     FOR EACH ROW EXECUTE FUNCTION settlements.forbid_delete();
 CREATE TRIGGER trg_difference_allocations_no_change BEFORE UPDATE OR DELETE ON settlements.difference_allocations
     FOR EACH ROW EXECUTE FUNCTION settlements.forbid_delete();
@@ -168,6 +170,7 @@ DROP FUNCTION settlements.check_difference_update();
 DROP TRIGGER trg_settlement_differences_no_delete ON settlements.settlement_differences;
 DROP TRIGGER trg_difference_allocations_no_change ON settlements.difference_allocations;
 DROP TRIGGER trg_settlement_closings_no_change ON settlements.settlement_closings;
+DROP TRIGGER trg_settlement_reopenings_no_change ON settlements.settlement_reopenings;
 """
 
 
@@ -431,6 +434,44 @@ def upgrade() -> None:
     )
     _technical_index(NEW_TECHNICAL)
     _replace_check("financial_operations", "ck_financial_operations_type", f"type IN ({NEW_TYPES})")
+    op.create_table(
+        "settlement_reopenings",
+        sa.Column("settlement_id", sa.BigInteger(), nullable=False),
+        sa.Column("from_version", sa.Integer(), nullable=False),
+        sa.Column("to_version", sa.Integer(), nullable=False),
+        sa.Column("close_operation_id", sa.BigInteger(), nullable=False),
+        sa.Column("reason", sa.Text(), nullable=False),
+        sa.Column("reopened_by", sa.BigInteger(), nullable=False),
+        sa.Column("reopened_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column("id", sa.BigInteger(), sa.Identity(always=True), nullable=False),
+        sa.CheckConstraint("length(btrim(reason)) > 0", name=op.f("ck_settlement_reopenings_reason_not_blank")),
+        sa.CheckConstraint("to_version = from_version + 1", name=op.f("ck_settlement_reopenings_next_version")),
+        sa.ForeignKeyConstraint(
+            ["close_operation_id"],
+            ["settlements.financial_operations.id"],
+            name=op.f("fk_settlement_reopenings_close_operation_id_financial_operations"),
+            ondelete="RESTRICT",
+        ),
+        sa.ForeignKeyConstraint(
+            ["reopened_by"], ["users.id"], name=op.f("fk_settlement_reopenings_reopened_by_users"), ondelete="RESTRICT"
+        ),
+        sa.ForeignKeyConstraint(
+            ["settlement_id"],
+            ["settlements.settlements.id"],
+            name=op.f("fk_settlement_reopenings_settlement_id_settlements"),
+            ondelete="RESTRICT",
+        ),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_settlement_reopenings")),
+        sa.UniqueConstraint("settlement_id", "from_version", name="uq_settlement_reopenings_version"),
+        schema="settlements",
+    )
+    op.create_index(
+        op.f("ix_settlements_settlement_reopenings_settlement_id"),
+        "settlement_reopenings",
+        ["settlement_id"],
+        unique=False,
+        schema="settlements",
+    )
     op.execute(SEED_ACCOUNTS)
     op.execute(HISTORY)
     op.execute(ALLOCATED)
@@ -440,6 +481,12 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Downgrade schema."""
     op.execute(DROP_TRIGGERS)
+    op.drop_index(
+        op.f("ix_settlements_settlement_reopenings_settlement_id"),
+        table_name="settlement_reopenings",
+        schema="settlements",
+    )
+    op.drop_table("settlement_reopenings", schema="settlements")
     # Fails if any settlement close or employee account exists: their history would be lost.
     op.execute(
         "DELETE FROM settlements.accounts WHERE code IN ('delivery_collections', 'expense', 'settlement_difference')"

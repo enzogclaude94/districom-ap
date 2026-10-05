@@ -182,6 +182,7 @@ def closing_preview(db: Session, settlement_id: int) -> s.ClosingPreviewOut:
         difference_kind=plan.totals.difference_kind,
         amount_to_allocate=abs(plan.difference),
         blockers=preview.blockers,
+        preview_token=preview.token,
         legs=[
             s.LegOut(
                 account_id=ref,
@@ -204,9 +205,7 @@ def history(db: Session, settlement_id: int) -> s.HistoryOut:
     details = {c.operation_id: ledger.operation_detail(db, c.operation_id) for c in closings}
     users = _user_names(
         db,
-        [c.closed_by for c in closings]
-        + [e.user_id for e in reopened if e.user_id]
-        + _difference_users(diffs, allocated),
+        [c.closed_by for c in closings] + [r.reopened_by for r in reopened] + _difference_users(diffs, allocated),
     )
     employees = employees_of_accounts(
         db, sorted({entry.account_id for detail in details.values() for entry in detail.entries})
@@ -242,15 +241,15 @@ def history(db: Session, settlement_id: int) -> s.HistoryOut:
         ],
         reopenings=[
             s.ReopeningOut(
-                from_version=e.payload["before"]["version"],
-                to_version=e.payload["after"]["version"],
-                reason=e.payload["after"]["reason"],
-                reopened_by=e.user_id,
-                reopened_by_name=users[e.user_id] if e.user_id else None,
-                reopened_at=e.occurred_at,
-                close_in_effect_operation_id=e.payload["after"]["close_in_effect"],
+                from_version=r.from_version,
+                to_version=r.to_version,
+                reason=r.reason,
+                reopened_by=r.reopened_by,
+                reopened_by_name=users[r.reopened_by],
+                reopened_at=r.reopened_at,
+                close_operation_id=r.close_operation_id,
             )
-            for e in reopened
+            for r in reopened
         ],
         differences=[_difference(db, d, allocated, users) for d in diffs],
     )

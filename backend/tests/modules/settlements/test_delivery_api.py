@@ -560,8 +560,10 @@ def test_a_closed_settlement_admits_no_load_changes(as_role, ids, opened, pedro,
     expense = post(operator, f"/deliveries/{opened}/expenses", category_id=tolls, amount="3").json()["expenses"][0]
     assert _status(operator, opened, transfer, "VERIFIED").status_code == 200
     allocation = {"target": "EMPLOYEE", "employee_id": pedro, "amount": "99985"}
+    token = operator.get(f"{BASE}/deliveries/{opened}/closing-preview").json()["preview_token"]
     closed = operator.post(
-        f"{BASE}/deliveries/{opened}/close", json={"version": 1, "allocations": [allocation], "confirm": True}
+        f"{BASE}/deliveries/{opened}/close",
+        json={"version": 1, "preview_token": token, "allocations": [allocation], "confirm": True},
     )
     assert closed.status_code == 201, closed.text
 

@@ -282,6 +282,30 @@ class SettlementClosing(IdMixin, Base):
     closed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class SettlementReopening(IdMixin, Base):
+    """One reopening of a closed settlement: from which version to which, the close that stayed in effect,
+    why, who and when. Append-only; with `settlement_closings` it rebuilds the history without the audit log."""
+
+    __tablename__ = "settlement_reopenings"
+    __table_args__ = (
+        CheckConstraint("to_version = from_version + 1", name="next_version"),
+        CheckConstraint("length(btrim(reason)) > 0", name="reason_not_blank"),
+        UniqueConstraint("settlement_id", "from_version", name="uq_settlement_reopenings_version"),
+        {"schema": SCHEMA},
+    )
+
+    settlement_id: Mapped[int] = mapped_column(BigInteger, ForeignKey(_SETTLEMENT_FK, ondelete="RESTRICT"), index=True)
+    from_version: Mapped[int] = mapped_column(Integer)
+    to_version: Mapped[int] = mapped_column(Integer)
+    # The SETTLEMENT_CLOSE that stayed in effect in the ledger while the settlement was corrected.
+    close_operation_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("settlements.financial_operations.id", ondelete="RESTRICT")
+    )
+    reason: Mapped[str] = mapped_column(Text)
+    reopened_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"))
+    reopened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class SettlementDifference(IdMixin, Base):
     """Shortage or surplus of one version of a settlement, materialized when it closes with a difference.
 

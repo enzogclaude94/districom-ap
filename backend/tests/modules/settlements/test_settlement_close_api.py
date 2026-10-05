@@ -77,10 +77,29 @@ def company(amount: str, reason: str | None = "Diferencia menor absorbida por la
     return {"target": "COMPANY", "amount": amount, "reason": reason}
 
 
-def close(client: TestClient, sid: int, *allocations: dict[str, Any], version: int = 1, confirm: bool = True) -> Any:
+def preview_token(client: TestClient, sid: int) -> str:
+    response = client.get(f"{BASE}/deliveries/{sid}/closing-preview")
+    assert response.status_code == 200, response.text
+    return response.json()["preview_token"]  # type: ignore[no-any-return]
+
+
+def close(
+    client: TestClient,
+    sid: int,
+    *allocations: dict[str, Any],
+    version: int = 1,
+    confirm: bool = True,
+    token: str | None = None,
+) -> Any:
+    """Close as the screen does: preview first (unless a token is given), then confirm with its token."""
     return client.post(
         f"{BASE}/deliveries/{sid}/close",
-        json={"version": version, "allocations": list(allocations), "confirm": confirm},
+        json={
+            "version": version,
+            "preview_token": token or preview_token(client, sid),
+            "allocations": list(allocations),
+            "confirm": confirm,
+        },
     )
 
 
@@ -596,3 +615,201 @@ def test_viewer_reads_but_cannot_close(as_role, balanced) -> None:  # type: igno
     assert viewer.get(f"{BASE}/deliveries/{balanced}/history").status_code == 200
     assert close(viewer, balanced).status_code == 403
     assert error(as_role("viewer").get(f"{BASE}/deliveries/999999/history")) == (404, "settlement_not_found")
+
+
+# --- binding preview (Enzo's R2-2 adjustment 1) ---------------------------------------------------
+
+
+@pytest.fixture
+def loaded(as_role, ids, pedro, tolls) -> dict[str, int]:  # type: ignore[no-untyped-def]
+    """$100.000 expected: $41.000 counted, $1.000 added, $8.000 verified, $500 rejected and $2.000 spent."""
+    operator = as_role("operator")
+    sid = create(operator, pedro, "100000")
+    count(operator, sid, ("ARS_20000", 2, ids["main_cash"]), ("ARS_1000", 1, ids["change_cash"]))
+    added = operator.post(
+        f"{BASE}/deliveries/{sid}/additions",
+        json={"client_request_id": str(uuid4()), "amount": "1000", "destination_account_id": ids["main_cash"]},
+    )
+    verified = transfer(operator, sid, "8000", "VERIFIED")
+    transfer(operator, sid, "500", "REJECTED")
+    response = operator.post(
+        f"{BASE}/deliveries/{sid}/expenses",
+        json={"client_request_id": str(uuid4()), "category_id": tolls, "amount": "2000"},
+    )
+    return {
+        "settlement": sid,
+        "addition": added.json()["additions"][-1]["id"],
+        "transfer": verified,
+        "expense": response.json()["expenses"][-1]["id"],
+    }
+
+
+def _change_expected(client: TestClient, ids: dict[str, int], d: dict[str, int], tolls: int) -> None:
+    assert client.patch(f"{BASE}/deliveries/{d['settlement']}", json={"expected_amount": "99000"}).status_code == 200
+
+
+def _change_count(client: TestClient, ids: dict[str, int], d: dict[str, int], tolls: int) -> None:
+    # Same total, other notes: $41.000 as 2 x $20.000 + 2 x $500 instead of 2 x $20.000 + 1 x $1.000.
+    count(client, d["settlement"], ("ARS_20000", 2, ids["main_cash"]), ("ARS_500", 2, ids["change_cash"]))
+
+
+def _change_destination(client: TestClient, ids: dict[str, int], d: dict[str, int], tolls: int) -> None:
+    # The $1.000 note goes to Caja principal instead of Caja de cambio: same difference.
+    count(client, d["settlement"], ("ARS_20000", 2, ids["main_cash"]), ("ARS_1000", 1, ids["main_cash"]))
+
+
+def _add_cash(client: TestClient, ids: dict[str, int], d: dict[str, int], tolls: int) -> None:
+    response = client.post(
+        f"{BASE}/deliveries/{d['settlement']}/additions",
+        json={"client_request_id": str(uuid4()), "amount": "100", "destination_account_id": ids["change_cash"]},
+    )
+    assert response.status_code == 201, response.text
+
+
+def _reject_transfer(client: TestClient, ids: dict[str, int], d: dict[str, int], tolls: int) -> None:
+    response = client.post(
+        f"{BASE}/deliveries/{d['settlement']}/transfers/{d['transfer']}/status",
+        json={"status": "REJECTED", "reason": "No figura en el extracto"},
+    )
+    assert response.status_code == 200, response.text
+
+
+def _void_expense(client: TestClient, ids: dict[str, int], d: dict[str, int], tolls: int) -> None:
+    response = client.post(
+        f"{BASE}/deliveries/{d['settlement']}/expenses/{d['expense']}/void", json={"reason": "Cargado dos veces"}
+    )
+    assert response.status_code == 200, response.text
+
+
+def _recategorize_expense(client: TestClient, ids: dict[str, int], d: dict[str, int], tolls: int) -> None:
+    other = client.post(f"{BASE}/expense-categories", json={"name": "Combustible"}).json()["id"]
+    response = client.patch(f"{BASE}/deliveries/{d['settlement']}/expenses/{d['expense']}", json={"category_id": other})
+    assert response.status_code == 200, response.text
+
+
+def test_preview_then_close_without_changes(as_role, loaded, pedro) -> None:  # type: ignore[no-untyped-def]
+    """Token 1: the preview the user reviewed is exactly what closes."""
+    operator = as_role("operator")
+    sid = loaded["settlement"]
+    first = preview_token(operator, sid)
+    assert preview_token(as_role("viewer"), sid) == first  # stable: same state, same token, whoever reads
+    response = close(as_role("operator"), sid, employee(pedro, "48000"), token=first)
+    assert response.status_code == 201, response.text
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        _change_expected,
+        _change_count,
+        _change_destination,
+        _add_cash,
+        _reject_transfer,
+        _void_expense,
+        _recategorize_expense,
+    ],
+)
+def test_a_change_after_the_preview_makes_it_stale(as_role, ids, loaded, tolls, pedro, change, db: Session) -> None:  # type: ignore[no-untyped-def]
+    """Tokens 2-9: expected, count, destination with the same difference, addition, transfer decision and
+    expense. The close is refused before any financial write; a new preview closes."""
+    sid = loaded["settlement"]
+    old = preview_token(as_role("operator"), sid)
+    change(as_role("admin"), ids, loaded, tolls)
+    operator = as_role("operator")
+    owed = operator.get(f"{BASE}/deliveries/{sid}/closing-preview").json()["amount_to_allocate"]
+
+    stale = close(operator, sid, employee(pedro, owed), token=old)
+    assert error(stale) == (409, "settlement_preview_stale")
+    assert "cambió desde la última vista previa" in stale.json()["message"]
+    assert count_rows(db, "financial_operations") == 0
+    assert count_rows(db, "settlement_closings") == 0
+    assert count_rows(db, "accounts WHERE kind = 'EMPLOYEE'") == 0
+    assert operator.get(f"{BASE}/deliveries/{sid}").json()["status"] == "OPEN"
+
+    fresh = preview_token(operator, sid)
+    assert fresh != old
+    assert close(operator, sid, employee(pedro, owed), token=fresh).status_code == 201
+
+
+def test_the_preview_token_binds_the_new_close_after_a_reopening(as_role, ids, million, pedro, db: Session) -> None:  # type: ignore[no-untyped-def]
+    """Token 10: the same rule for the close that replaces a previous one."""
+    assert reopen(as_role("admin"), million, 1).status_code == 200
+    operator = as_role("operator")
+    old = preview_token(operator, million)
+    count(operator, million, ("ARS_20000", 50, ids["main_cash"]), ("ARS_500", 1, ids["main_cash"]))
+    assert error(close(operator, million, version=2, token=old)) == (409, "settlement_preview_stale")
+    assert count_rows(db, "financial_operations") == 1  # only the original close, still in effect
+    assert operator.get(f"{BASE}/deliveries/{million}").json()["financial_state"] == "BEING_CORRECTED"
+    assert close(operator, million, version=2).status_code == 201
+
+
+def test_preview_token_is_required(as_role, balanced) -> None:  # type: ignore[no-untyped-def]
+    operator = as_role("operator")
+    response = operator.post(
+        f"{BASE}/deliveries/{balanced}/close", json={"version": 1, "allocations": [], "confirm": True}
+    )
+    assert response.status_code == 422
+    bad = close(operator, balanced, token="0" * 64)
+    assert error(bad) == (409, "settlement_preview_stale")
+
+
+# --- reopenings as domain history (Enzo's R2-2 adjustment 2) ---------------------------------------
+
+
+def _reopenings(db: Session) -> list[tuple[Any, ...]]:
+    rows = db.execute(
+        text(
+            "SELECT from_version, to_version, close_operation_id, reason, reopened_by, reopened_at "
+            "FROM settlements.settlement_reopenings ORDER BY id"
+        )
+    )
+    return [tuple(row) for row in rows.all()]
+
+
+def test_each_reopening_is_a_row_that_never_changes(as_role, million, pedro, db: Session) -> None:  # type: ignore[no-untyped-def]
+    """History 1, 2, 3, 8: one row per reopening, with the close in effect, reason, user and time."""
+    admin = as_role("admin")
+    first_close = admin.get(f"{BASE}/deliveries/{million}").json()["close_in_effect"]["operation_id"]
+    before = datetime.now(UTC)
+    assert reopen(admin, million, 1).status_code == 200
+    assert reopen(admin, million, 1).status_code == 200  # a retry is not a second reopening
+    (first,) = _reopenings(db)
+    admin_id = db.execute(text("SELECT id FROM users WHERE email = 'admin@districom.test'")).scalar_one()
+    assert first[:5] == (1, 2, first_close, REASON, admin_id)
+    assert before <= first[5] <= datetime.now(UTC)
+
+    operator = as_role("operator")
+    assert close(operator, million, employee(pedro, "500"), version=2).status_code == 201
+    second_close = operator.get(f"{BASE}/deliveries/{million}").json()["close_in_effect"]["operation_id"]
+    assert reopen(as_role("admin"), million, 2, "Revisión de la gerencia").status_code == 200
+    rows = _reopenings(db)
+    assert rows[0] == first
+    assert rows[1][:5] == (2, 3, second_close, "Revisión de la gerencia", admin_id)
+
+
+def test_history_does_not_need_the_audit_log(as_role, ids, million, pedro, db: Session) -> None:  # type: ignore[no-untyped-def]
+    """History 6, 7: with the audit log emptied, /history still rebuilds every version in order."""
+    assert reopen(as_role("admin"), million, 1).status_code == 200
+    operator = as_role("operator")
+    count(operator, million, ("ARS_20000", 50, ids["main_cash"]), ("ARS_200", 1, ids["main_cash"]))
+    assert close(operator, million, employee(pedro, "300"), version=2).status_code == 201
+    assert reopen(as_role("admin"), million, 2, "Segunda revisión").status_code == 200
+    db.execute(text("TRUNCATE audit_events"))
+    db.commit()
+
+    history = as_role("viewer").get(f"{BASE}/deliveries/{million}/history").json()
+    closings, reopenings = history["closings"], history["reopenings"]
+    assert [(c["settlement_version"], c["in_effect"]) for c in closings] == [(1, False), (2, True)]
+    assert [(r["from_version"], r["to_version"], r["reason"]) for r in reopenings] == [
+        (1, 2, REASON),
+        (2, 3, "Segunda revisión"),
+    ]
+    assert reopenings[0]["close_operation_id"] == closings[0]["operation_id"]
+    assert reopenings[1]["close_operation_id"] == closings[1]["operation_id"]
+    assert closings[1]["reversal_operation_id"] == closings[0]["reversed_by_operation_id"]
+    assert all(r["reopened_by_name"] == "Usuario Test" for r in reopenings)
+    assert reopenings[0]["reopened_at"] < closings[1]["closed_at"] < reopenings[1]["reopened_at"]
+    assert [(d["settlement_version"], d["amount"], d["superseded_at"] is None) for d in history["differences"]] == [
+        (1, "500.00", False),
+        (2, "300.00", True),
+    ]

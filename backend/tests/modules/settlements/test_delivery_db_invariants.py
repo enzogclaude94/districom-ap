@@ -116,7 +116,10 @@ def test_a_closed_settlement_is_frozen(db: Session, loaded, actor, accounts) -> 
     operator = actor("operator")
     transfers.change_status(db, operator, sid, loaded["transfer"], schemas.TransferStatusIn(status="VERIFIED"))
     surplus = schemas.AllocationIn(target="EMPLOYEE", employee_id=service.get(db, sid).employee_id, amount=Decimal(15))
-    closing.close(db, operator, sid, schemas.CloseIn(version=1, allocations=[surplus], confirm=True))
+    token = closing.preview(db, sid).token
+    closing.close(
+        db, operator, sid, schemas.CloseIn(version=1, preview_token=token, allocations=[surplus], confirm=True)
+    )
     user = operator.id
     statements = [
         ("UPDATE settlements.settlements SET expected_amount = 1 WHERE id = :s", {}),

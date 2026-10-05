@@ -24,8 +24,12 @@ Idempotency: the ledger request ids derive from (settlement, version), and the c
 fingerprint of everything it means (totals per account, difference, allocations, legs). Repeating a
 close of the same version with the same content returns it; with other content is a conflict.
 
-Reopen (admin, with a reason) only unfreezes the load and increments the version: the ledger is not
-touched and the previous close stays in effect until the new close replaces it.
+Reopen (admin, with a reason) records a `settlement_reopenings` row, unfreezes the load and increments
+the version: the ledger is not touched and the previous close stays in effect until the new close
+replaces it.
+
+The close carries the `preview_token` of the preview the user confirmed: if anything that could alter
+the close changed since, it is refused (`settlement_preview_stale`) before any financial write.
 
 Lock order, always: the settlement row, then (inside the ledger) the accounts that lose value, in id
 order. Load changes lock the settlement row too, so they never interleave with a close.
@@ -46,15 +50,18 @@ from app.core.errors import AppError
 from app.modules.settlements.delivery import schemas as s
 from app.modules.settlements.delivery import service, summary
 from app.modules.settlements.delivery.models import (
+    CashAddition,
+    CashCountLine,
     DifferenceAllocation,
+    Expense,
     Settlement,
     SettlementClosing,
     SettlementDifference,
+    SettlementReopening,
     SettlementTransfer,
 )
 from app.modules.settlements.ledger import service as ledger
 from app.modules.settlements.ledger.accounts import employee_account_id
-from app.platform.audit.models import AuditEvent
 from app.platform.audit.service import record_change
 from app.platform.auth.access import has_module_access
 from app.platform.auth.models import User
@@ -134,6 +141,7 @@ def reversal_request_id(settlement_id: int, version: int) -> UUID:
 class Preview:
     plan: Plan
     blockers: list[s.Blocker]
+    token: str
 
 
 def preview(db: Session, settlement_id: int) -> Preview:
@@ -149,7 +157,64 @@ def preview(db: Session, settlement_id: int) -> Preview:
                 message=f"Hay {plan.totals.declared_transfers_count} transferencias sin verificar ni rechazar.",
             )
         )
-    return Preview(plan, blockers)
+    return Preview(plan, blockers, preview_token(db, plan))
+
+
+def preview_token(db: Session, plan: Plan) -> str:
+    """SHA-256 of the settlement state a preview shows: what the user confirms when closing (Enzo's R2-2
+    adjustment 1). Any change that could alter the close changes it, even one that keeps the difference
+    (moving cash from one box to another, recounting with other notes, a decision on a transfer).
+
+    Built from the rows themselves, sorted by stable keys, never from the order the database returns.
+    """
+    settlement = plan.settlement
+    sid = settlement.id
+    lines = db.execute(
+        select(
+            CashCountLine.denomination_code,
+            CashCountLine.denomination_value,
+            CashCountLine.quantity,
+            CashCountLine.destination_account_id,
+        ).where(CashCountLine.settlement_id == sid)
+    )
+    added = db.execute(
+        select(CashAddition.id, CashAddition.amount, CashAddition.destination_account_id).where(
+            CashAddition.settlement_id == sid, CashAddition.voided_at.is_(None)
+        )
+    )
+    sent = db.execute(
+        select(
+            SettlementTransfer.id,
+            SettlementTransfer.amount,
+            SettlementTransfer.bank_account_id,
+            SettlementTransfer.status,
+        ).where(SettlementTransfer.settlement_id == sid)
+    )
+    spent = db.execute(
+        select(Expense.id, Expense.category_id, Expense.amount).where(
+            Expense.settlement_id == sid, Expense.voided_at.is_(None)
+        )
+    )
+    totals = plan.totals
+    payload: dict[str, Any] = {
+        "settlement": sid,
+        "version": settlement.version,
+        "status": settlement.status,
+        "close_in_effect": settlement.current_close_operation_id,
+        "business_date": settlement.business_date.isoformat(),
+        "employee": settlement.employee_id,
+        "expected": service.money(totals.expected),
+        "count": sorted([code, service.money(value), qty, box] for code, value, qty, box in lines),
+        "additions": sorted([aid, service.money(amount), box] for aid, amount, box in added),
+        "transfers": sorted([tid, service.money(amount), bank, status] for tid, amount, bank, status in sent),
+        "expenses": sorted([eid, category, service.money(amount)] for eid, category, amount in spent),
+        "cash_by_box": sorted([box, service.money(t.total)] for box, t in totals.by_box.items()),
+        "verified_by_bank": sorted([bank, service.money(amount)] for bank, amount in plan.verified_by_bank.items()),
+        "difference": service.money(plan.difference),
+        "legs": sorted([kind, ref, service.money(amount)] for (kind, ref), amount in plan.legs.items()),
+    }
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode()).hexdigest()
 
 
 # --- close ----------------------------------------------------------------------------------------
@@ -185,6 +250,14 @@ def close(db: Session, actor: User, settlement_id: int, body: s.CloseIn) -> serv
         )
     if body.version != settlement.version:
         raise _concurrent_change(settlement)
+    if body.preview_token != preview_token(db, plan):
+        raise AppError(
+            409,
+            "settlement_preview_stale",
+            "La rendición cambió desde la última vista previa. Actualizá los importes y revisala nuevamente "
+            "antes de cerrar.",
+            {"settlement_id": settlement.id, "version": settlement.version},
+        )
     if plan.totals.declared_transfers_count:
         raise AppError(
             409,
@@ -335,9 +408,23 @@ def reopen(db: Session, actor: User, settlement_id: int, body: s.ReopenIn) -> se
     if body.version != settlement.version:
         raise _concurrent_change(settlement)
     previous = settlement.version
+    now = datetime.now(UTC)
+    if settlement.current_close_operation_id is None:  # guaranteed by closed_has_close; keeps mypy honest
+        raise AppError(409, "settlement_not_closed", "La rendición no está cerrada.")
+    db.add(
+        SettlementReopening(
+            settlement_id=settlement.id,
+            from_version=previous,
+            to_version=previous + 1,
+            close_operation_id=settlement.current_close_operation_id,
+            reason=reason,
+            reopened_by=actor.id,
+            reopened_at=now,
+        )
+    )
     settlement.status = "OPEN"
     settlement.version = previous + 1
-    settlement.reopened_at = datetime.now(UTC)
+    settlement.reopened_at = now
     settlement.reopened_by = actor.id
     settlement.reopen_reason = reason
     record_change(
@@ -410,17 +497,12 @@ def close_of(db: Session, operation_id: int) -> SettlementClosing | None:
     return db.scalars(select(SettlementClosing).where(SettlementClosing.operation_id == operation_id)).one_or_none()
 
 
-def reopenings(db: Session, settlement_id: int) -> list[AuditEvent]:
-    """Reopenings come from the audit trail, which is append-only and records who, when and why."""
+def reopenings(db: Session, settlement_id: int) -> list[SettlementReopening]:
     return list(
         db.scalars(
-            select(AuditEvent)
-            .where(
-                AuditEvent.event_type == REOPENED_EVENT,
-                AuditEvent.entity_type == "settlement",
-                AuditEvent.entity_id == str(settlement_id),
-            )
-            .order_by(AuditEvent.id)
+            select(SettlementReopening)
+            .where(SettlementReopening.settlement_id == settlement_id)
+            .order_by(SettlementReopening.from_version)
         )
     )
 

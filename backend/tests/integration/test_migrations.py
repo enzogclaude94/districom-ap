@@ -36,6 +36,7 @@ SETTLEMENTS_TABLES = {
     "expense_categories",
     "expenses",
     "settlement_closings",
+    "settlement_reopenings",
     "settlement_differences",
     "difference_allocations",
 }

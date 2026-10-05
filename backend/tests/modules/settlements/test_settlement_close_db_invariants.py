@@ -32,7 +32,10 @@ def closed(db: Session, actor, driver, accounts) -> dict[str, int]:  # type: ign
     line = schemas.CountLineIn(denomination_code="ARS_1000", quantity=1, destination_account_id=accounts["main_cash"])
     service.replace_count(db, operator, sid, schemas.CountIn(lines=[line]))
     charge = schemas.AllocationIn(target="EMPLOYEE", employee_id=pedro, amount=Decimal(500))
-    closing.close(db, operator, sid, schemas.CloseIn(version=1, allocations=[charge], confirm=True))
+    token = closing.preview(db, sid).token
+    closing.close(
+        db, operator, sid, schemas.CloseIn(version=1, preview_token=token, allocations=[charge], confirm=True)
+    )
     row = db.execute(
         text(
             "SELECT s.current_close_operation_id, d.id FROM settlements.settlements s "
@@ -230,3 +233,27 @@ def test_one_internal_account_per_employee(db: Session, closed) -> None:  # type
         "VALUES ('Otra cobranza', 'otra cobranza', 'DELIVERY_COLLECTIONS', true)",
     )
     assert "uq_accounts_technical_kind" in technical
+
+
+def test_reopenings_are_append_only(db: Session, closed) -> None:  # type: ignore[no-untyped-def]
+    """History 4, 5: a reopening row is never updated nor deleted."""
+    closing.reopen(db, _admin(db), closed["settlement"], schemas.ReopenIn(version=1, reason="Faltaba un billete"))
+    for sql in (
+        "UPDATE settlements.settlement_reopenings SET reason = 'otro'",
+        "DELETE FROM settlements.settlement_reopenings",
+    ):
+        assert "never deleted" in _refused(db, sql), sql
+    assert "next_version" in _refused(
+        db,
+        "INSERT INTO settlements.settlement_reopenings (settlement_id, from_version, to_version, close_operation_id, "
+        "reason, reopened_by) VALUES (:s, 5, 7, :o, 'x', :u)",
+        s=closed["settlement"],
+        o=closed["close"],
+        u=closed["user"],
+    )
+
+
+def _admin(db: Session):  # type: ignore[no-untyped-def]
+    from app.platform.auth.service import create_user
+
+    return create_user(db, "jefe@districom.test", "Jefe", "correct-horse-battery", "admin")
