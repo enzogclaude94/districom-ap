@@ -40,7 +40,7 @@ DistriCom es una plataforma modular (ADR 006). Este roadmap tiene tres carriles:
 | R0 | Habilitación del módulo | **DONE** (aprobada por Enzo el 2026-10-04) | PL‑1 |
 | R1 | Ledger y cajas | **DONE** (aprobada por Enzo el 2026-10-04; PRs #7–#9 mergeados) | R0 |
 | R2 | Rendición de reparto básica | **DONE** (aprobada por Enzo el 2026-10-05; PRs #10–#12 mergeados) | R1 |
-| R3 | Pendientes de cobro | **IN_PROGRESS** (propuesta aprobada por Enzo el 2026-10-05; R3‑1 en curso) | R2 |
+| R3 | Pendientes de cobro | **IN_PROGRESS** (propuesta aprobada por Enzo el 2026-10-05; R3‑1 aprobado y mergeado; R3‑2 en curso) | R2 |
 | R4 | Cartera de cheques | PLANNED | R2 |
 | R5 | Combustible y vehículos | PLANNED | R2 |
 | R6 | Pagos a proveedores y terceros | PLANNED | R1 · R4 |
@@ -156,6 +156,14 @@ Modelo conceptual en `DATA_MODEL.md §13`; decisiones en ADR 007. Cada fase crea
 - cuenta técnica «Pendientes de cobro» sin negativo; «Incobrables» separada de «Diferencias de rendición»;
 - acreditaciones y resoluciones son operaciones propias, de documento: Cajas no las revierte; reverso solo admin con motivo;
 - reabrir nunca se bloquea: se rechaza la corrección que deje un pendiente por debajo de lo aplicado (`pending_below_applied`), lo anule o le cambie el cliente con actividad.
+
+**Decisiones de R3‑2 (Enzo, 2026-10-06):**
+- D1: la fecha de un cobro o una resolución no es anterior a la rendición ni futura;
+- D2: la lista global muestra por defecto `OPEN` y `PARTIAL`; los demás estados, por filtro;
+- D3: revertir una resolución también revierte la parte de cada empleado, aunque su cuenta quede negativa (la empresa le debe); no se bloquea por movimientos posteriores;
+- D4: un pendiente anulado no se reactiva;
+- un reverso dice «la operación estaba mal», nunca es un hecho económico nuevo: lleva la fecha de negocio de la operación original y `created_at` registra cuándo se corrigió; los controles históricos de Caja, Banco y Pendientes se validan en esa fecha (puede dar `insufficient_funds`). Las devoluciones a clientes no se modelan por ahora;
+- un admin puede cambiar el responsable de un pendiente después del cierre, sin ledger ni reapertura; es lo único de la carga que cambia con la rendición cerrada.
 
 **PRs:** R3‑1 pendientes en la rendición y en el cierre (migración `0009`) · R3‑2 acreditaciones, resoluciones y alertas (`0010`) · R3‑3 pantallas y E2E. Cada uno espera la aprobación de Enzo antes del siguiente.
 
