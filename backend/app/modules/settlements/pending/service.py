@@ -5,9 +5,9 @@ Load (operator, settlement OPEN, including a correction):
 - the responsible employee is the driver unless the operator chooses another active employee (R3-D3);
 - every changed field and the void write a `pending_collection_events` row and an audit event.
 
-What was already applied to a pending (collected or resolved, R3-2) is a fact the load cannot contradict
-(Enzo's R3 decision 8): its amount never goes below it, it is not voided and its customer does not change
-while it has activity. R3-1 has no collections yet, so `applied` is zero, but every check already uses it.
+What was already applied to a pending (collected or resolved, R3-2, `applications`) is a fact the load
+cannot contradict (Enzo's R3 decision 8): its amount never goes below it, it is not voided and its customer
+does not change while it has activity.
 
 The close of the settlement (`delivery.closing`) calls `publish`: with the settlement and the pendings
 locked, it freezes in `settlement_closing_pendings` what the new close publishes and records PUBLISHED /
@@ -33,6 +33,8 @@ from app.modules.settlements.pending import schemas as s
 from app.modules.settlements.pending.models import (
     PendingCollection,
     PendingCollectionEvent,
+    PendingCollectionReceipt,
+    PendingCollectionResolution,
     SettlementClosingPending,
 )
 from app.platform.audit.service import record_change
@@ -76,7 +78,7 @@ def create(db: Session, actor: User, settlement_id: int, body: s.PendingIn) -> s
     settlement = service.lock_open(db, settlement_id)
     responsible = settlement.employee_id
     if body.responsible_employee_id is not None and body.responsible_employee_id != settlement.employee_id:
-        responsible = _active_employee(db, body.responsible_employee_id).id
+        responsible = active_employee(db, body.responsible_employee_id).id
     _check_expected_date(settlement, body.expected_date)
     pending = PendingCollection(
         settlement_id=settlement.id,
@@ -101,7 +103,7 @@ def create(db: Session, actor: User, settlement_id: int, body: s.PendingIn) -> s
         idempotency.check_replay(winner.request_fingerprint, fingerprint, "pending_id", winner.id)
         return service.Created(winner.id, created=False)
     snapshot = _snapshot(pending)
-    _event(db, actor, settlement, pending.id, "CREATED", None, snapshot)
+    record_event(db, actor, settlement, pending.id, "CREATED", None, snapshot)
     record_change(
         db,
         "settlements.pending_collection.created",
@@ -144,7 +146,7 @@ def update(db: Session, actor: User, settlement_id: int, pending_id: int, body: 
         pending.reason = _clean_reason(body.reason)
     if body.responsible_employee_id is not None and body.responsible_employee_id != pending.responsible_employee_id:
         if body.responsible_employee_id != settlement.employee_id:
-            _active_employee(db, body.responsible_employee_id)
+            active_employee(db, body.responsible_employee_id)
         pending.responsible_employee_id = body.responsible_employee_id
     if "expected_date" in fields:
         _check_expected_date(settlement, body.expected_date)
@@ -167,7 +169,7 @@ def update(db: Session, actor: User, settlement_id: int, pending_id: int, body: 
     pending.updated_by = actor.id
     for name, event_type in _FIELD_EVENTS:
         if before[name] != after[name]:
-            _event(db, actor, settlement, pending.id, event_type, {name: before[name]}, {name: after[name]})
+            record_event(db, actor, settlement, pending.id, event_type, {name: before[name]}, {name: after[name]})
     record_change(
         db,
         "settlements.pending_collection.updated",
@@ -201,7 +203,7 @@ def void(db: Session, actor: User, settlement_id: int, pending_id: int, reason: 
     pending.voided_by = actor.id
     pending.voided_at = datetime.now(UTC)
     pending.void_reason = reason
-    _event(db, actor, settlement, pending.id, "VOIDED", {"voided": False}, {"voided": True}, reason=reason)
+    record_event(db, actor, settlement, pending.id, "VOIDED", {"voided": False}, {"voided": True}, reason=reason)
     record_change(
         db,
         "settlements.pending_collection.voided",
@@ -273,7 +275,7 @@ def publish(
     )
     for p in live:
         before = previous.get(p.id)
-        _event(
+        record_event(
             db,
             actor,
             settlement,
@@ -286,7 +288,7 @@ def publish(
     published = {p.id for p in live}
     for pending_id, before in sorted(previous.items()):
         if pending_id not in published:
-            _event(
+            record_event(
                 db,
                 actor,
                 settlement,
@@ -325,8 +327,21 @@ def preview_rows(db: Session, settlement_id: int) -> list[list[Any]]:
 
 
 def collected_and_resolved(db: Session, pending_ids: Sequence[int]) -> dict[int, tuple[Decimal, Decimal]]:
-    """(collected, resolved), not reversed, per pending. R3-2 adds receipts and resolutions: zero until then."""
-    return dict.fromkeys(pending_ids, (ZERO, ZERO))
+    """(collected, resolved) per pending: its receipts and resolutions not reversed. Never stored."""
+    result = dict.fromkeys(pending_ids, (ZERO, ZERO))
+    if not pending_ids:
+        return result
+    for model, position in ((PendingCollectionReceipt, 0), (PendingCollectionResolution, 1)):
+        sums = db.execute(
+            select(model.pending_id, func.sum(model.amount))
+            .where(model.pending_id.in_(pending_ids), model.reversal_operation_id.is_(None))
+            .group_by(model.pending_id)
+        )
+        for pid, amount in sums:
+            pair = list(result[pid])
+            pair[position] = amount
+            result[pid] = (pair[0], pair[1])
+    return result
 
 
 def applied_amounts(db: Session, pending_ids: Sequence[int]) -> dict[int, Decimal]:
@@ -365,22 +380,6 @@ def get(db: Session, pending_id: int) -> PendingCollection:
     return pending
 
 
-def in_effect_page(db: Session, *, limit: int, offset: int) -> tuple[list[PendingCollection], int]:
-    """Pendings in effect in Cajas (their settlement's close in effect published them), oldest first."""
-    query = (
-        select(PendingCollection)
-        .join(Settlement, Settlement.id == PendingCollection.settlement_id)
-        .join(
-            SettlementClosingPending,
-            (SettlementClosingPending.pending_id == PendingCollection.id)
-            & (SettlementClosingPending.close_operation_id == Settlement.current_close_operation_id),
-        )
-    )
-    total = db.scalar(select(func.count()).select_from(query.subquery()))
-    rows = db.scalars(query.order_by(PendingCollection.created_at, PendingCollection.id).limit(limit).offset(offset))
-    return list(rows), int(total or 0)
-
-
 def published_of(db: Session, pending_id: int) -> list[SettlementClosingPending]:
     return list(
         db.scalars(
@@ -404,7 +403,7 @@ def events_of(db: Session, pending_id: int) -> list[PendingCollectionEvent]:
 # --- internals ------------------------------------------------------------------------------------
 
 
-def _event(
+def record_event(
     db: Session,
     actor: User,
     settlement: Settlement,
@@ -415,6 +414,8 @@ def _event(
     *,
     reason: str | None = None,
     close_operation_id: int | None = None,
+    receipt_id: int | None = None,
+    resolution_id: int | None = None,
 ) -> None:
     db.add(
         PendingCollectionEvent(
@@ -426,6 +427,8 @@ def _event(
             after=after,
             reason=reason,
             close_operation_id=close_operation_id,
+            receipt_id=receipt_id,
+            resolution_id=resolution_id,
             created_by=actor.id,
         )
     )
@@ -443,7 +446,7 @@ def _lock_pending(db: Session, settlement_id: int, pending_id: int) -> PendingCo
     return pending
 
 
-def _active_employee(db: Session, employee_id: int) -> Employee:
+def active_employee(db: Session, employee_id: int) -> Employee:
     employee = db.get(Employee, employee_id)
     if employee is None or not employee.active:
         raise AppError(

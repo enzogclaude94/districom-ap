@@ -5,11 +5,19 @@ from collections.abc import Sequence
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.clock import business_today
 from app.modules.settlements.delivery import closing
 from app.modules.settlements.delivery.models import Settlement
+from app.modules.settlements.ledger import service as ledger
+from app.modules.settlements.pending import listing, service, state
 from app.modules.settlements.pending import schemas as s
-from app.modules.settlements.pending import service, state
-from app.modules.settlements.pending.models import PendingCollection, SettlementClosingPending
+from app.modules.settlements.pending.models import (
+    PendingCollection,
+    PendingCollectionReceipt,
+    PendingCollectionResolution,
+    PendingResolutionAllocation,
+    SettlementClosingPending,
+)
 from app.platform.auth.models import User
 from app.platform.parties.models import Employee
 
@@ -31,6 +39,9 @@ def items(db: Session, rows: Sequence[PendingCollection]) -> list[s.PendingOut]:
         [p.created_by for p in rows] + [u for p in rows for u in (p.updated_by, p.voided_by) if u],
     )
     employees = _names(db, Employee, [p.responsible_employee_id for p in rows])
+    hours = listing.alert_hours(db)
+    now = listing.utc_now()
+    today = business_today()
     result = []
     for p in rows:
         settlement = settlements[p.settlement_id]
@@ -78,6 +89,38 @@ def items(db: Session, rows: Sequence[PendingCollection]) -> list[s.PendingOut]:
                 balance=financial.balance,
                 load_change=change,
                 load_change_detail=state.LOAD_CHANGE_DETAIL[change] if change else None,
+                age_hours=listing.age_hours(p.created_at, now),
+                alert=listing.is_alert(
+                    in_effect=in_effect is not None,
+                    balance=financial.balance,
+                    created_at=p.created_at,
+                    hours=hours,
+                    now=now,
+                ),
+                expected_date_overdue=p.expected_date is not None
+                and p.expected_date < today
+                and financial.state in ("DRAFT", "OPEN", "PARTIAL"),
+            )
+        )
+    return result
+
+
+def list_items(db: Session, rows: Sequence[PendingCollection]) -> list[s.PendingListItem]:
+    """Rows of the global list: each pending with its settlement and driver."""
+    settlements = {
+        row.id: row for row in db.scalars(select(Settlement).where(Settlement.id.in_({p.settlement_id for p in rows})))
+    }
+    drivers = _names(db, Employee, [st.employee_id for st in settlements.values()])
+    result = []
+    for item in items(db, rows):
+        settlement = settlements[item.settlement_id]
+        result.append(
+            s.PendingListItem(
+                **item.model_dump(),
+                settlement_business_date=settlement.business_date,
+                settlement_sequence_number=settlement.sequence_number,
+                driver_id=settlement.employee_id,
+                driver_name=drivers.get(settlement.employee_id, ""),
             )
         )
     return result
@@ -90,7 +133,38 @@ def detail(db: Session, pending_id: int) -> s.PendingDetailOut:
     assert settlement is not None  # foreign key
     published = service.published_of(db, pending.id)
     events = service.events_of(db, pending.id)
-    users = _names(db, User, [e.created_by for e in events])
+    receipts = list(
+        db.scalars(
+            select(PendingCollectionReceipt)
+            .where(PendingCollectionReceipt.pending_id == pending.id)
+            .order_by(PendingCollectionReceipt.id)
+        )
+    )
+    resolutions = list(
+        db.scalars(
+            select(PendingCollectionResolution)
+            .where(PendingCollectionResolution.pending_id == pending.id)
+            .order_by(PendingCollectionResolution.id)
+        )
+    )
+    parts: dict[int, list[PendingResolutionAllocation]] = {r.id: [] for r in resolutions}
+    for part in db.scalars(
+        select(PendingResolutionAllocation)
+        .where(PendingResolutionAllocation.resolution_id.in_(list(parts)))
+        .order_by(PendingResolutionAllocation.id)
+    ):
+        parts[part.resolution_id].append(part)
+    users = _names(
+        db,
+        User,
+        [e.created_by for e in events]
+        + [r.created_by for r in receipts]
+        + [r.created_by for r in resolutions]
+        + [r.reversed_by for r in receipts if r.reversed_by]
+        + [r.reversed_by for r in resolutions if r.reversed_by],
+    )
+    employees = _names(db, Employee, [p.employee_id for ps in parts.values() for p in ps if p.employee_id])
+    accounts = {a.account_id: a.name for a in ledger.account_balances(db, include_inactive=True)}
     driver = db.get(Employee, settlement.employee_id)
     return s.PendingDetailOut(
         **base.model_dump(),
@@ -100,6 +174,45 @@ def detail(db: Session, pending_id: int) -> s.PendingDetailOut:
         driver_name=driver.full_name if driver else "",
         settlement_financial_state=closing.financial_state(settlement),
         published=[_published(row, settlement) for row in published],
+        receipts=[
+            s.ReceiptOut(
+                id=r.id,
+                amount=r.amount,
+                business_date=r.business_date,
+                method=r.method,
+                destination_account_id=r.destination_account_id,
+                destination_name=accounts.get(r.destination_account_id, ""),
+                operation_id=r.operation_id,
+                created_by=r.created_by,
+                created_by_name=users.get(r.created_by, ""),
+                created_at=r.created_at,
+                reversal=_reversal(r, users),
+            )
+            for r in receipts
+        ],
+        resolutions=[
+            s.ResolutionOut(
+                id=r.id,
+                amount=r.amount,
+                business_date=r.business_date,
+                reason=r.reason,
+                allocations=[
+                    s.ResolutionPartOut(
+                        target=p.target,
+                        employee_id=p.employee_id,
+                        employee_name=employees.get(p.employee_id) if p.employee_id else None,
+                        amount=p.amount,
+                    )
+                    for p in parts[r.id]
+                ],
+                operation_id=r.operation_id,
+                created_by=r.created_by,
+                created_by_name=users.get(r.created_by, ""),
+                created_at=r.created_at,
+                reversal=_reversal(r, users),
+            )
+            for r in resolutions
+        ],
         events=[
             s.PendingEventOut(
                 id=e.id,
@@ -109,12 +222,28 @@ def detail(db: Session, pending_id: int) -> s.PendingDetailOut:
                 after=e.after,
                 reason=e.reason,
                 close_operation_id=e.close_operation_id,
+                receipt_id=e.receipt_id,
+                resolution_id=e.resolution_id,
                 created_by=e.created_by,
                 created_by_name=users.get(e.created_by, ""),
                 created_at=e.created_at,
             )
             for e in events
         ],
+    )
+
+
+def _reversal(
+    row: PendingCollectionReceipt | PendingCollectionResolution, users: dict[int, str]
+) -> s.ReversalOut | None:
+    if row.reversal_operation_id is None or row.reversed_by is None or row.reversed_at is None:
+        return None
+    return s.ReversalOut(
+        operation_id=row.reversal_operation_id,
+        reversed_by=row.reversed_by,
+        reversed_by_name=users.get(row.reversed_by, ""),
+        reversed_at=row.reversed_at,
+        reason=row.reversal_reason or "",
     )
 
 
