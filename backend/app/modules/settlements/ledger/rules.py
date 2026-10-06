@@ -46,9 +46,27 @@ RULES: dict[str, OperationRule] = {
         "DELIVERY_COLLECTIONS",
         (("DELIVERY_COLLECTIONS", -1), ("CASH_BOX", 1), ("BANK", 1), ("EXPENSE", 1), ("PENDING_COLLECTIONS", 1)),
     ),
+    # A customer pays a pending collection (R3-2): it leaves "Pendientes de cobro" and enters the cash box
+    # (CASH) or the bank (TRANSFER). The pending decides which one; exactly two legs.
+    "PENDING_COLLECTION": OperationRule(
+        "operator",
+        CASH_AND_BANK | {"PENDING_COLLECTIONS"},
+        "PENDING_COLLECTIONS",
+        (("PENDING_COLLECTIONS", -1), ("CASH_BOX", 1), ("BANK", 1)),
+    ),
+    # Administrative resolution of a pending (R3-2): admin only, with a reason. The company's part goes to
+    # "Incobrables", each employee's part to their internal account (the employee owes it).
+    "PENDING_WRITE_OFF": OperationRule(
+        "admin",
+        frozenset({"PENDING_COLLECTIONS", "UNCOLLECTIBLE", "EMPLOYEE"}),
+        "PENDING_COLLECTIONS",
+        (("PENDING_COLLECTIONS", -1), ("UNCOLLECTIBLE", 1), ("EMPLOYEE", 1)),
+    ),
 }
-# Operations that belong to a source document: only that document's flow corrects them (replace_operation).
-DOCUMENT_TYPES = frozenset({"SETTLEMENT_CLOSE"})
+# Operations that belong to a source document: only that document's flow corrects them, never Cajas.
+DOCUMENT_TYPES = frozenset({"SETTLEMENT_CLOSE", "PENDING_COLLECTION", "PENDING_WRITE_OFF"})
+# Document operations undone with `reverse_document_operation` (a settlement close is replaced instead).
+REVERSIBLE_DOCUMENT_TYPES = frozenset({"PENDING_COLLECTION", "PENDING_WRITE_OFF"})
 # REVERSAL has no rule here: it is only built by `reverse_operation` from the original's legs.
 REVERSAL_MIN_ROLE = "admin"
 

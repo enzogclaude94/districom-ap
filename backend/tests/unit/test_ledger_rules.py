@@ -64,6 +64,14 @@ def test_fingerprint_changes_with_the_command(change: dict[str, object]) -> None
         ("ADJUSTMENT", ["CASH_BOX", "ADJUSTMENT"], [1, -1], True),
         ("ADJUSTMENT", ["CASH_BOX", "ADJUSTMENT"], [-1, 1], True),
         ("ADJUSTMENT", ["CASH_BOX", "CASH_BOX"], [-1, 1], False),
+        ("PENDING_COLLECTION", ["PENDING_COLLECTIONS", "CASH_BOX"], [-1, 1], True),
+        ("PENDING_COLLECTION", ["PENDING_COLLECTIONS", "BANK"], [-1, 1], True),
+        ("PENDING_COLLECTION", ["PENDING_COLLECTIONS", "CASH_BOX"], [1, -1], False),
+        ("PENDING_COLLECTION", ["PENDING_COLLECTIONS", "EXPENSE"], [-1, 1], False),
+        ("PENDING_WRITE_OFF", ["PENDING_COLLECTIONS", "UNCOLLECTIBLE", "EMPLOYEE"], [-1, 1, 1], True),
+        ("PENDING_WRITE_OFF", ["PENDING_COLLECTIONS", "EMPLOYEE"], [-1, 1], True),
+        ("PENDING_WRITE_OFF", ["PENDING_COLLECTIONS", "UNCOLLECTIBLE"], [1, -1], False),
+        ("PENDING_WRITE_OFF", ["PENDING_COLLECTIONS", "CASH_BOX"], [-1, 1], False),
     ],
 )
 def test_leg_shapes(type: str, kinds: list[str], signs: list[int], ok: bool) -> None:
@@ -76,10 +84,12 @@ def test_adjustments_and_partner_movements_need_admin() -> None:
         "OWNER_CONTRIBUTION",
         "OWNER_WITHDRAWAL",
         "ADJUSTMENT",
+        "PENDING_WRITE_OFF",
     }
     assert {t for t, rule in RULES.items() if rule.min_role == "operator"} == {
         "CASH_TRANSFER",
         "BANK_DEPOSIT",
         "BANK_WITHDRAWAL",
         "SETTLEMENT_CLOSE",
+        "PENDING_COLLECTION",
     }
