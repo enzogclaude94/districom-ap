@@ -20,6 +20,8 @@ from app.core.clock import business_today
 from app.core.errors import AppError
 from app.modules.settlements.delivery import closing, schemas, service
 from app.modules.settlements.ledger import service as ledger
+from app.modules.settlements.pending import schemas as ps
+from app.modules.settlements.pending import service as pending_service
 from app.platform.auth.models import User
 
 DAY = business_today() - timedelta(days=1)
@@ -280,3 +282,46 @@ def test_replacement_against_another_movement_never_overdraws(
     balances = {b.code: b.balance for b in ledger.account_balances(db)}
     assert balances["main_cash"] >= 0
     assert balances["main_cash"] in (Decimal("500.00"), Decimal("200.00"))
+
+
+def test_close_against_a_pending_change_never_publishes_a_stale_pending(
+    db, new_session, operator, pedro, accounts
+) -> None:  # type: ignore[no-untyped-def]
+    """R3-1: a pending's amount changes while the settlement is being closed. Either the change lands first
+    and the close (confirming the old preview) is stale, or the close publishes the old amount and the
+    change is refused. The snapshot always equals the ledger leg."""
+    sid = _settlement(db, operator, pedro, "1500")
+    _count(db, operator, sid, ("ARS_1000", 1, accounts["main_cash"]))
+    pid = pending_service.create(
+        db,
+        operator,
+        sid,
+        ps.PendingIn(client_request_id=uuid4(), customer_name="Kiosco", amount=Decimal(500), reason="Paga mañana"),
+    ).id
+
+    def _lower(session: Session, user: User) -> object:
+        pending_service.update(session, user, sid, pid, ps.PendingPatch(amount=Decimal(400)))
+        return "lowered"
+
+    holder = _hold(new_session, sid)
+    results = _race(
+        holder,
+        [_in_session(new_session, operator, _close(db, sid, 1)), _in_session(new_session, operator, _lower)],
+    )
+    status = _scalar(db, "SELECT status FROM settlements.settlements WHERE id = :id", id=sid)
+    if status == "CLOSED":
+        assert _errors(results) == ["settlement_closed"], results
+        published = _scalar(
+            db, "SELECT amount FROM settlements.settlement_closing_pendings WHERE pending_id = :p", p=pid
+        )
+        assert published == Decimal("500.00")
+    else:
+        assert _errors(results) == ["settlement_preview_stale"], results
+        assert _scalar(db, "SELECT count(*) FROM settlements.settlement_closing_pendings") == 0
+    leg = _scalar(
+        db,
+        "SELECT coalesce(sum(e.amount), 0) FROM settlements.ledger_entries e "
+        "JOIN settlements.accounts a ON a.id = e.account_id WHERE a.code = 'pending_collections'",
+    )
+    snapshot = _scalar(db, "SELECT coalesce(sum(amount), 0) FROM settlements.settlement_closing_pendings")
+    assert leg == snapshot

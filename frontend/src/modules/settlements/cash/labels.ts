@@ -22,6 +22,7 @@ export const ACCOUNT_KIND_LABELS: Record<AccountKind, string> = {
   EXPENSE: "Gastos",
   SETTLEMENT_DIFFERENCE: "Cuenta técnica",
   EMPLOYEE: "Cuenta interna de empleado",
+  PENDING_COLLECTIONS: "Pendientes de cobro",
 };
 
 /** Accounts that hold money or partner contributions. Technical counterparts never show as available money. */

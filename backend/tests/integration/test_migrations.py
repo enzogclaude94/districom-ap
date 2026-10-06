@@ -39,6 +39,9 @@ SETTLEMENTS_TABLES = {
     "settlement_reopenings",
     "settlement_differences",
     "difference_allocations",
+    "pending_collections",
+    "settlement_closing_pendings",
+    "pending_collection_events",
 }
 
 
@@ -114,6 +117,7 @@ def test_settlements_system_accounts_seeded(migrated_db: None) -> None:
         ("delivery_collections", "DELIVERY_COLLECTIONS", True),
         ("expense", "EXPENSE", True),
         ("settlement_difference", "SETTLEMENT_DIFFERENCE", True),
+        ("pending_collections", "PENDING_COLLECTIONS", False),
     ]
 
 
@@ -172,6 +176,7 @@ def test_account_name_key_backfill() -> None:
             "cobranzas de reparto",
             "gastos operativos",
             "diferencias de rendicion",
+            "pendientes de cobro",
         ]
     finally:
         with engine.begin() as conn:

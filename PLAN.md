@@ -323,4 +323,16 @@ Propuesta aprobada por Enzo el 2026-10-04 con sus decisiones R2‑D1 a R2‑D7 y
 
 Cada PR espera la aprobación de Enzo antes del siguiente.
 
-**R2 DONE** (aprobada por Enzo el 2026-10-05). Informe: `INFORME_FINAL_R2_RENDICION_DE_REPARTO.md`. Siguiente: propuesta detallada de R3 (pendientes de cobro) con las decisiones R3‑D1 a R3‑D7; R3 no se implementa hasta su aprobación.
+**R2 DONE** (aprobada por Enzo el 2026-10-05). Informe: `INFORME_FINAL_R2_RENDICION_DE_REPARTO.md`.
+
+## 16. Rendiciones — R3 (pendientes de cobro)
+
+Propuesta `PROPUESTA_R3_PENDIENTES_DE_COBRO.md` aprobada por Enzo el 2026-10-05, con sus ocho decisiones y dos precisiones: el importe financiero vigente es el del cierre vigente aunque la rendición esté en corrección, y `pending_collection_events` es obligatoria. Alcance en `ROADMAP.md`.
+
+| PR | Contenido | Estado |
+|---|---|---|
+| R3‑1 | Pendientes en la rendición y en el cierre: migración `0009` (`pending_collections`, `settlement_closing_pendings`, `pending_collection_events`, cuenta «Pendientes de cobro»), alta idempotente, corrección y anulación, pata del cierre, snapshot por cierre, vista previa y token, reemplazo con efecto neto, estado financiero vigente durante una corrección, tests | En curso |
+| R3‑2 | Acreditaciones, resoluciones, «Incobrables», reversos, tope por pendiente, lista global con estado y alertas, concurrencia | Pendiente de aprobación |
+| R3‑3 | Pantallas y E2E | Pendiente de aprobación |
+
+**R3 IN_PROGRESS.**

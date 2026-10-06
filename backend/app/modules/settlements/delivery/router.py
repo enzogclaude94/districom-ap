@@ -1,7 +1,7 @@
 """Delivery settlements API (R2-1, R2-2), mounted at /api/v1/settlements.
 
 Roles: viewer reads; operator creates settlements, loads them (count, additions, transfers and
-their verification, expenses) and closes them, allocating the difference to employees; admin also
+their verification, expenses, pending collections) and closes them, allocating the difference to employees; admin also
 assigns a difference to the company, reopens a closed settlement, corrects a transfer decision and
 edits expense categories and cash denominations. Only the close writes the ledger, through
 `ledger.service`. Creations are idempotent by `client_request_id`: 201 when created, 200 with
@@ -18,6 +18,8 @@ from app.core.clock import business_today
 from app.modules.settlements.delivery import additions, closing, denominations, expenses, service, transfers, views
 from app.modules.settlements.delivery import schemas as s
 from app.modules.settlements.delivery.denominations import Denomination
+from app.modules.settlements.pending import schemas as ps
+from app.modules.settlements.pending import service as pending_collections
 from app.platform.auth.access import require_module_access
 from app.platform.auth.deps import DbSession
 from app.platform.auth.models import User
@@ -226,6 +228,47 @@ def void_expense(
     settlement_id: int, expense_id: int, body: s.VoidIn, db: DbSession, user: Operator, response: Response
 ) -> s.SettlementOut:
     expenses.void(db, user, settlement_id, expense_id, body.reason)
+    return _detail(db, settlement_id, None, response)
+
+
+# --- pending collections (R3-1) -------------------------------------------------------------------
+
+
+@router.post(
+    "/deliveries/{settlement_id}/pending-collections",
+    response_model=s.SettlementOut,
+    status_code=201,
+    responses=CREATED_RESPONSES,
+    summary="Pendiente de cobro (responsable: el repartidor, salvo que se elija otro empleado)",
+)
+def create_pending_collection(
+    settlement_id: int, body: ps.PendingIn, db: DbSession, user: Operator, response: Response
+) -> s.SettlementOut:
+    created = pending_collections.create(db, user, settlement_id, body)
+    return _detail(db, settlement_id, created, response)
+
+
+@router.patch(
+    "/deliveries/{settlement_id}/pending-collections/{pending_id}",
+    response_model=s.SettlementOut,
+    summary="Corregir un pendiente (en una corrección, cambia la próxima versión, no lo vigente)",
+)
+def update_pending_collection(
+    settlement_id: int, pending_id: int, body: ps.PendingPatch, db: DbSession, user: Operator, response: Response
+) -> s.SettlementOut:
+    pending_collections.update(db, user, settlement_id, pending_id, body)
+    return _detail(db, settlement_id, None, response)
+
+
+@router.post(
+    "/deliveries/{settlement_id}/pending-collections/{pending_id}/void",
+    response_model=s.SettlementOut,
+    summary="Anular un pendiente, con motivo (en una corrección, sigue vigente hasta el nuevo cierre)",
+)
+def void_pending_collection(
+    settlement_id: int, pending_id: int, body: s.VoidIn, db: DbSession, user: Operator, response: Response
+) -> s.SettlementOut:
+    pending_collections.void(db, user, settlement_id, pending_id, body.reason)
     return _detail(db, settlement_id, None, response)
 
 

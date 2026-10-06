@@ -40,7 +40,7 @@ DistriCom es una plataforma modular (ADR 006). Este roadmap tiene tres carriles:
 | R0 | Habilitación del módulo | **DONE** (aprobada por Enzo el 2026-10-04) | PL‑1 |
 | R1 | Ledger y cajas | **DONE** (aprobada por Enzo el 2026-10-04; PRs #7–#9 mergeados) | R0 |
 | R2 | Rendición de reparto básica | **DONE** (aprobada por Enzo el 2026-10-05; PRs #10–#12 mergeados) | R1 |
-| R3 | Pendientes de cobro | PLANNED (dirección aprobada el 2026-10-05 con R3‑D1 a R3‑D7; propuesta detallada en revisión, sin implementar) | R2 |
+| R3 | Pendientes de cobro | **IN_PROGRESS** (propuesta aprobada por Enzo el 2026-10-05; R3‑1 en curso) | R2 |
 | R4 | Cartera de cheques | PLANNED | R2 |
 | R5 | Combustible y vehículos | PLANNED | R2 |
 | R6 | Pagos a proveedores y terceros | PLANNED | R1 · R4 |
@@ -146,6 +146,18 @@ Modelo conceptual en `DATA_MODEL.md §13`; decisiones en ADR 007. Cada fase crea
 
 ### R3 — Pendientes de cobro
 **Alcance:** pendiente desde la rendición, pantalla global, alertas internas calculadas al leer (`settlements.pending_alert_hours`), acreditación por cualquier medio con su operación.
+
+**Decisiones (Enzo, 2026-10-05):** R3‑D1 a R3‑D7 y las ocho decisiones de la propuesta `PROPUESTA_R3_PENDIENTES_DE_COBRO.md`:
+- el pendiente tiene identidad estable entre versiones de la rendición; cada cierre congela el importe que publicó (`settlement_closing_pendings`), que es la autoridad del importe financiero vigente;
+- durante una corrección la carga es solo la próxima versión propuesta: el pendiente sigue vigente con el importe del cierre anterior hasta el nuevo cierre;
+- cliente en texto (`customer_name`) hasta que exista `public.customers`; sin `customer_id` suelto;
+- estados derivados `DRAFT`, `VOIDED`, `OPEN`, `PARTIAL`, `COLLECTED`, `RESOLVED`, sin columna de estado;
+- `pending_collection_events` append-only como historia de dominio, independiente de `audit_events`;
+- cuenta técnica «Pendientes de cobro» sin negativo; «Incobrables» separada de «Diferencias de rendición»;
+- acreditaciones y resoluciones son operaciones propias, de documento: Cajas no las revierte; reverso solo admin con motivo;
+- reabrir nunca se bloquea: se rechaza la corrección que deje un pendiente por debajo de lo aplicado (`pending_below_applied`), lo anule o le cambie el cliente con actividad.
+
+**PRs:** R3‑1 pendientes en la rendición y en el cierre (migración `0009`) · R3‑2 acreditaciones, resoluciones y alertas (`0010`) · R3‑3 pantallas y E2E. Cada uno espera la aprobación de Enzo antes del siguiente.
 
 ### R4 — Cartera de cheques
 **Alcance:** cheque único (físico / ECHEQ) con titular y entregador, historial de estados (en cartera, depositado, rechazado, entregado con destinatario), alta desde rendición, pendiente u operación extraordinaria.

@@ -8,6 +8,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.modules.settlements.cash.schemas import Amount, Money, Reason
+from app.modules.settlements.pending.schemas import PendingOut
 
 Text500 = Annotated[str, Field(max_length=500)]
 # NOT_CLOSED: never closed. CLOSED: closed, its close in effect in the ledger. BEING_CORRECTED: reopened;
@@ -286,6 +287,8 @@ class ClosingPreviewOut(BaseModel):
     amount_to_allocate: Money
     blockers: list[Blocker]
     legs: list[LegOut]
+    # What the close would publish per pending (the load) next to what is in effect now.
+    pending_collections: list[PendingOut]
     # Send it back with the close: if the settlement changed since, the close is refused as stale.
     preview_token: str
     close_in_effect: CloseRef | None
@@ -378,6 +381,8 @@ class SettlementOut(BaseModel):
     additions: list[AdditionOut]
     transfers: list[TransferOut]
     expenses: list[ExpenseOut]
+    # Load and financial state of each pending collection (R3-1), voided ones included.
+    pending_collections: list[PendingOut]
     summary: Summary
     financial_state: FinancialState
     # Plain words for the screen, e.g. that a settlement being corrected keeps its last close in Cajas.
