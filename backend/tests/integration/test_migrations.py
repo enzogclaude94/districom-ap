@@ -42,6 +42,9 @@ SETTLEMENTS_TABLES = {
     "pending_collections",
     "settlement_closing_pendings",
     "pending_collection_events",
+    "pending_collection_receipts",
+    "pending_collection_resolutions",
+    "pending_resolution_allocations",
 }
 
 
@@ -118,6 +121,7 @@ def test_settlements_system_accounts_seeded(migrated_db: None) -> None:
         ("expense", "EXPENSE", True),
         ("settlement_difference", "SETTLEMENT_DIFFERENCE", True),
         ("pending_collections", "PENDING_COLLECTIONS", False),
+        ("uncollectible", "UNCOLLECTIBLE", False),
     ]
 
 
@@ -177,6 +181,7 @@ def test_account_name_key_backfill() -> None:
             "gastos operativos",
             "diferencias de rendicion",
             "pendientes de cobro",
+            "incobrables",
         ]
     finally:
         with engine.begin() as conn:

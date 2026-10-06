@@ -33,6 +33,9 @@ TRUNCATED_TABLES = (
     "app_settings",
     "user_module_roles",
     "settlements.pending_collection_events",
+    "settlements.pending_resolution_allocations",
+    "settlements.pending_collection_resolutions",
+    "settlements.pending_collection_receipts",
     "settlements.settlement_closing_pendings",
     "settlements.pending_collections",
     "settlements.difference_allocations",
@@ -49,7 +52,7 @@ TRUNCATED_TABLES = (
     "settlements.expense_categories",
     "settlements.settlements",
 )
-# Rendiciones accounts seeded by migrations 0005, 0008 and 0009; tests may add others, which are removed afterwards.
+# Rendiciones accounts seeded by migrations 0005 and 0008-0010; tests may add others, removed afterwards.
 SEEDED_ACCOUNTS = (
     "main_cash",
     "change_cash",
@@ -60,6 +63,7 @@ SEEDED_ACCOUNTS = (
     "expense",
     "settlement_difference",
     "pending_collections",
+    "uncollectible",
 )
 
 

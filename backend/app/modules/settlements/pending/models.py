@@ -30,6 +30,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -37,6 +38,7 @@ from sqlalchemy import (
     UniqueConstraint,
     Uuid,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -56,11 +58,28 @@ EVENT_TYPES = (
     # A close of the settlement published it (with its amount), or a correction close left it out.
     "PUBLISHED",
     "WITHDRAWN",
+    # R3-2: a receipt or a resolution, and their reversals. They point at the row; the money is there.
+    "RECEIPT_RECORDED",
+    "RECEIPT_REVERSED",
+    "RESOLVED",
+    "RESOLUTION_REVERSED",
 )
 CLOSE_EVENT_TYPES = ("PUBLISHED", "WITHDRAWN")
+RECEIPT_EVENT_TYPES = ("RECEIPT_RECORDED", "RECEIPT_REVERSED")
+RESOLUTION_EVENT_TYPES = ("RESOLVED", "RESOLUTION_REVERSED")
+RECEIPT_METHODS = ("CASH", "TRANSFER")
+RESOLUTION_TARGETS = ("COMPANY", "EMPLOYEE")
 
 _SETTLEMENT_FK = f"{SCHEMA}.settlements.id"
 _PENDING_FK = f"{SCHEMA}.pending_collections.id"
+_RECEIPT_FK = f"{SCHEMA}.pending_collection_receipts.id"
+_RESOLUTION_FK = f"{SCHEMA}.pending_collection_resolutions.id"
+# Reversal of a receipt or a resolution: all of it or none, once (migration 0010 freezes it after that).
+_REVERSAL_COMPLETE = (
+    "(reversal_operation_id IS NULL AND reversed_by IS NULL AND reversed_at IS NULL AND reversal_reason IS NULL) OR "
+    "(reversal_operation_id IS NOT NULL AND reversed_by IS NOT NULL AND reversed_at IS NOT NULL AND "
+    "length(btrim(coalesce(reversal_reason, ''))) > 0)"
+)
 
 
 def _in(values: tuple[str, ...]) -> str:
@@ -146,6 +165,12 @@ class PendingCollectionEvent(IdMixin, Base):
         CheckConstraint(
             f"(event_type IN ({_in(CLOSE_EVENT_TYPES)})) = (close_operation_id IS NOT NULL)", name="close_events"
         ),
+        CheckConstraint(
+            f"(event_type IN ({_in(RECEIPT_EVENT_TYPES)})) = (receipt_id IS NOT NULL)", name="receipt_events"
+        ),
+        CheckConstraint(
+            f"(event_type IN ({_in(RESOLUTION_EVENT_TYPES)})) = (resolution_id IS NOT NULL)", name="resolution_events"
+        ),
         CheckConstraint("event_type <> 'VOIDED' OR length(btrim(coalesce(reason, ''))) > 0", name="void_reason"),
         CheckConstraint("settlement_version >= 1", name="settlement_version_positive"),
         {"schema": SCHEMA},
@@ -162,5 +187,112 @@ class PendingCollectionEvent(IdMixin, Base):
     close_operation_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("settlements.financial_operations.id", ondelete="RESTRICT")
     )
+    receipt_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey(_RECEIPT_FK, ondelete="RESTRICT"))
+    resolution_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey(_RESOLUTION_FK, ondelete="RESTRICT"))
     created_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PendingCollectionReceipt(IdMixin, Base):
+    """A customer paid (part of) a pending: its PENDING_COLLECTION operation moved it to a cash box or a bank.
+
+    Append-only: never deleted, and the only change ever allowed is its reversal (the four reversal
+    fields at once, once), in the same transaction as the REVERSAL in the ledger (migration 0010).
+    """
+
+    __tablename__ = "pending_collection_receipts"
+    __table_args__ = (
+        CheckConstraint("amount > 0", name="amount_positive"),
+        CheckConstraint(f"method IN ({_in(RECEIPT_METHODS)})", name="method"),
+        CheckConstraint("request_fingerprint ~ '^[0-9a-f]{64}$'", name="fingerprint_format"),
+        CheckConstraint(_REVERSAL_COMPLETE, name="reversal_complete"),
+        {"schema": SCHEMA},
+    )
+
+    pending_id: Mapped[int] = mapped_column(BigInteger, ForeignKey(_PENDING_FK, ondelete="RESTRICT"), index=True)
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2))
+    # When the customer paid: not before the settlement, not in the future (Enzo's R3-2 D1).
+    business_date: Mapped[date] = mapped_column(Date)
+    method: Mapped[str] = mapped_column(String(20))
+    destination_account_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey(f"{SCHEMA}.accounts.id", ondelete="RESTRICT")
+    )
+    operation_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("settlements.financial_operations.id", ondelete="RESTRICT"), unique=True
+    )
+    client_request_id: Mapped[UUID] = mapped_column(Uuid, unique=True)
+    request_fingerprint: Mapped[str] = mapped_column(String(64))
+    created_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    reversal_operation_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("settlements.financial_operations.id", ondelete="RESTRICT"), unique=True
+    )
+    reversed_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"))
+    reversed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reversal_reason: Mapped[str | None] = mapped_column(Text)
+
+
+class PendingCollectionResolution(IdMixin, Base):
+    """An admin resolved (part of) a pending without collecting it: its PENDING_WRITE_OFF operation moved it
+    to "Incobrables" (the company's part) and to employees' internal accounts (their parts).
+
+    Append-only like a receipt; its parts are `pending_resolution_allocations` and add up exactly to it.
+    """
+
+    __tablename__ = "pending_collection_resolutions"
+    __table_args__ = (
+        CheckConstraint("amount > 0", name="amount_positive"),
+        CheckConstraint("length(btrim(reason)) > 0", name="reason_not_blank"),
+        CheckConstraint("request_fingerprint ~ '^[0-9a-f]{64}$'", name="fingerprint_format"),
+        CheckConstraint(_REVERSAL_COMPLETE, name="reversal_complete"),
+        {"schema": SCHEMA},
+    )
+
+    pending_id: Mapped[int] = mapped_column(BigInteger, ForeignKey(_PENDING_FK, ondelete="RESTRICT"), index=True)
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2))
+    business_date: Mapped[date] = mapped_column(Date)
+    reason: Mapped[str] = mapped_column(Text)
+    operation_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("settlements.financial_operations.id", ondelete="RESTRICT"), unique=True
+    )
+    client_request_id: Mapped[UUID] = mapped_column(Uuid, unique=True)
+    request_fingerprint: Mapped[str] = mapped_column(String(64))
+    created_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    reversal_operation_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("settlements.financial_operations.id", ondelete="RESTRICT"), unique=True
+    )
+    reversed_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"))
+    reversed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reversal_reason: Mapped[str | None] = mapped_column(Text)
+
+
+class PendingResolutionAllocation(IdMixin, Base):
+    """Who absorbs part of a resolution: the company (at most one part) or an employee (one part each).
+    Append-only: a resolution is corrected by reversing it whole."""
+
+    __tablename__ = "pending_resolution_allocations"
+    __table_args__ = (
+        CheckConstraint("amount > 0", name="amount_positive"),
+        CheckConstraint(f"target IN ({_in(RESOLUTION_TARGETS)})", name="target"),
+        CheckConstraint("(target = 'EMPLOYEE') = (employee_id IS NOT NULL)", name="employee_target"),
+        Index(
+            "uq_pending_resolution_allocations_employee",
+            "resolution_id",
+            "employee_id",
+            unique=True,
+            postgresql_where=text("employee_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_pending_resolution_allocations_company",
+            "resolution_id",
+            unique=True,
+            postgresql_where=text("target = 'COMPANY'"),
+        ),
+        {"schema": SCHEMA},
+    )
+
+    resolution_id: Mapped[int] = mapped_column(BigInteger, ForeignKey(_RESOLUTION_FK, ondelete="RESTRICT"), index=True)
+    target: Mapped[str] = mapped_column(String(20))
+    employee_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("employees.id", ondelete="RESTRICT"))
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2))
