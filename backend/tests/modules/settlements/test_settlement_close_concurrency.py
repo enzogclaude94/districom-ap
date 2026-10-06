@@ -20,6 +20,7 @@ from app.core.clock import business_today
 from app.core.errors import AppError
 from app.modules.settlements.delivery import closing, schemas, service
 from app.modules.settlements.ledger import service as ledger
+from app.modules.settlements.pending import applications
 from app.modules.settlements.pending import schemas as ps
 from app.modules.settlements.pending import service as pending_service
 from app.platform.auth.models import User
@@ -325,3 +326,81 @@ def test_close_against_a_pending_change_never_publishes_a_stale_pending(
     )
     snapshot = _scalar(db, "SELECT coalesce(sum(amount), 0) FROM settlements.settlement_closing_pendings")
     assert leg == snapshot
+
+
+@pytest.fixture
+def in_effect(db: Session, operator: User, pedro: int, accounts) -> int:  # type: ignore[no-untyped-def]
+    """A $100.000 pending in effect: $150.000 expected, $50.000 counted, closed."""
+    sid = _settlement(db, operator, pedro, "150000")
+    _count(db, operator, sid, ("ARS_10000", 5, accounts["main_cash"]))
+    pid = pending_service.create(
+        db,
+        operator,
+        sid,
+        ps.PendingIn(client_request_id=uuid4(), customer_name="Kiosco", amount=Decimal(100000), reason="Paga mañana"),
+    ).id
+    close_now(db, operator, sid, 1)
+    return pid
+
+
+def _hold_pending(new_session: Callable[[], Session], pending_id: int) -> Session:
+    holder = new_session()
+    holder.execute(text("SELECT 1 FROM settlements.pending_collections WHERE id = :id FOR UPDATE"), {"id": pending_id})
+    return holder
+
+
+def _receipt(pending_id: int, amount: int, box: int) -> Callable[[Session, User], object]:
+    body = ps.ReceiptIn(client_request_id=uuid4(), amount=Decimal(amount), method="CASH", destination_account_id=box)
+    return lambda session, user: applications.record_receipt(session, user, pending_id, body)
+
+
+def _applied_and_account(db: Session, pending_id: int) -> tuple[object, object]:
+    applied = _scalar(
+        db,
+        "SELECT (SELECT coalesce(sum(amount), 0) FROM settlements.pending_collection_receipts WHERE pending_id = :p) "
+        "+ (SELECT coalesce(sum(amount), 0) FROM settlements.pending_collection_resolutions WHERE pending_id = :p)",
+        p=pending_id,
+    )
+    account = _scalar(
+        db,
+        "SELECT coalesce(sum(e.amount), 0) FROM settlements.ledger_entries e "
+        "JOIN settlements.accounts a ON a.id = e.account_id WHERE a.code = 'pending_collections'",
+    )
+    return applied, account
+
+
+def test_two_receipts_cannot_collect_more_than_the_balance(db, new_session, operator, in_effect, accounts) -> None:  # type: ignore[no-untyped-def]
+    """[35] Two $70.000 receipts at once on $100.000: one is recorded, the other sees the $30.000 left."""
+    holder = _hold_pending(new_session, in_effect)
+    results = _race(
+        holder,
+        [_in_session(new_session, operator, _receipt(in_effect, 70000, accounts["main_cash"])) for _ in range(2)],
+    )
+    assert _errors(results) == ["pending_amount_exceeds_balance"], results
+    assert _applied_and_account(db, in_effect) == (Decimal("70000.00"), Decimal("30000.00"))
+
+
+def test_receipt_against_a_resolution_never_applies_more_than_the_balance(  # type: ignore[no-untyped-def]
+    db, new_session, operator, actor, in_effect, accounts
+) -> None:
+    """[36] A $70.000 receipt and a $70.000 resolution at once: whichever comes second is refused."""
+    resolution = ps.ResolutionIn(
+        client_request_id=uuid4(),
+        amount=Decimal(70000),
+        reason="Incobrable",
+        allocations=[ps.ResolutionPartIn(target="COMPANY", amount=Decimal(70000))],
+    )
+
+    def _resolve(session: Session, user: User) -> object:
+        return applications.resolve(session, user, in_effect, resolution)
+
+    holder = _hold_pending(new_session, in_effect)
+    results = _race(
+        holder,
+        [
+            _in_session(new_session, operator, _receipt(in_effect, 70000, accounts["main_cash"])),
+            _in_session(new_session, actor("admin"), _resolve),
+        ],
+    )
+    assert _errors(results) == ["pending_amount_exceeds_balance"], results
+    assert _applied_and_account(db, in_effect) == (Decimal("70000.00"), Decimal("30000.00"))
