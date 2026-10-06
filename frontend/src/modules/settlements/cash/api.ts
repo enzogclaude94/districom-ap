@@ -12,7 +12,8 @@ export type AccountKind =
   | "EXPENSE"
   | "SETTLEMENT_DIFFERENCE"
   | "EMPLOYEE"
-  | "PENDING_COLLECTIONS";
+  | "PENDING_COLLECTIONS"
+  | "UNCOLLECTIBLE";
 
 export type OperationType =
   | "OPENING_BALANCE"
@@ -23,6 +24,8 @@ export type OperationType =
   | "OWNER_WITHDRAWAL"
   | "ADJUSTMENT"
   | "SETTLEMENT_CLOSE"
+  | "PENDING_COLLECTION"
+  | "PENDING_WRITE_OFF"
   | "REVERSAL";
 
 export interface Account {
