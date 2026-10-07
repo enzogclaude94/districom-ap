@@ -1,6 +1,6 @@
 import type { BadgeProps } from "@/components/ui/badge";
 
-import type { LoadChange, PendingState, ReceiptMethod } from "./api";
+import type { LoadChange, PendingOrigin, PendingState, RecordedMethod } from "./api";
 
 type Tone = NonNullable<BadgeProps["tone"]>;
 
@@ -29,9 +29,16 @@ export const LOAD_CHANGE_LABELS: Record<LoadChange, string> = {
   MARKED_FOR_REMOVAL: "Marcado para quitar en esta corrección",
 };
 
-export const METHOD_LABELS: Record<ReceiptMethod, string> = {
+export const METHOD_LABELS: Record<RecordedMethod, string> = {
   CASH: "Efectivo",
   TRANSFER: "Transferencia",
+  CHEQUE: "Cheque",
+};
+
+export const ORIGIN_LABELS: Record<PendingOrigin, string> = {
+  SETTLEMENT: "Rendición",
+  CHEQUE_REJECTION: "Cheque rechazado",
+  CHEQUE_RETURN: "Cheque devuelto",
 };
 
 /** "5 h", "1 día", "3 días": how long ago the pending was registered. */
@@ -61,4 +68,12 @@ export const EVENT_LABELS: Record<string, string> = {
   RECEIPT_REVERSED: "Cobro revertido",
   RESOLVED: "Saldo resuelto",
   RESOLUTION_REVERSED: "Resolución revertida",
+  ECHEQ_DECLARED: "ECHEQ declarado para cobrarlo",
+  ECHEQ_DECLINED: "Verificación del ECHEQ rechazada",
 };
+
+/** A pending born from a cheque is voided only together with the reversal of its rejection or return. */
+export function eventLabel(eventType: string, origin: PendingOrigin) {
+  if (eventType === "VOIDED" && origin !== "SETTLEMENT") return "Anulado al revertirse su origen";
+  return EVENT_LABELS[eventType] ?? eventType;
+}

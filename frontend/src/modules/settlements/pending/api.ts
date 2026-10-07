@@ -10,11 +10,21 @@ import { apiFetch } from "@/lib/api/client";
 
 export type PendingState = "DRAFT" | "VOIDED" | "OPEN" | "PARTIAL" | "COLLECTED" | "RESOLVED";
 export type LoadChange = "ADDED" | "MODIFIED" | "MARKED_FOR_REMOVAL";
+/** What a receipt can be registered with from the pending's dialog; a cheque has its own flow. */
 export type ReceiptMethod = "CASH" | "TRANSFER";
+export type RecordedMethod = ReceiptMethod | "CHEQUE";
+/** Where a pending was born (R4-2): a settlement, a cheque the bank rejected, or a cheque given back. */
+export type PendingOrigin = "SETTLEMENT" | "CHEQUE_REJECTION" | "CHEQUE_RETURN";
 
 export interface Pending {
   id: number;
-  settlement_id: number;
+  origin_type: PendingOrigin;
+  settlement_id: number | null;
+  origin_cheque_rejection_id: number | null;
+  origin_cheque_return_id: number | null;
+  origin_cheque_id: number | null;
+  /** Receipts and resolutions are dated on or after it. */
+  origin_business_date: string;
   customer_name: string;
   amount: string;
   reason: string;
@@ -45,11 +55,12 @@ export interface Pending {
   expected_date_overdue: boolean;
 }
 
+/** The settlement fields are null for a pending born from a cheque. */
 export interface PendingItem extends Pending {
-  settlement_business_date: string;
-  settlement_sequence_number: number;
-  driver_id: number;
-  driver_name: string;
+  settlement_business_date: string | null;
+  settlement_sequence_number: number | null;
+  driver_id: number | null;
+  driver_name: string | null;
 }
 
 export interface Reversal {
@@ -64,9 +75,10 @@ export interface Receipt {
   id: number;
   amount: string;
   business_date: string;
-  method: ReceiptMethod;
+  method: RecordedMethod;
   destination_account_id: number;
   destination_name: string;
+  cheque_id: number | null;
   operation_id: number;
   created_by: number;
   created_by_name: string;
@@ -106,20 +118,30 @@ export interface Published {
 export interface PendingEvent {
   id: number;
   event_type: string;
-  settlement_version: number;
+  settlement_version: number | null;
   before: Record<string, unknown> | null;
   after: Record<string, unknown> | null;
   reason: string | null;
   close_operation_id: number | null;
   receipt_id: number | null;
   resolution_id: number | null;
+  cheque_id: number | null;
   created_by: number;
   created_by_name: string;
   created_at: string;
 }
 
+export interface DeclaredEcheq {
+  cheque_id: number;
+  amount: string;
+  cheque_number: string;
+  verification_status: string;
+  voided: boolean;
+}
+
 export interface PendingDetail extends PendingItem {
-  settlement_financial_state: string;
+  settlement_financial_state: string | null;
+  echeqs: DeclaredEcheq[];
   published: Published[];
   receipts: Receipt[];
   resolutions: Resolution[];

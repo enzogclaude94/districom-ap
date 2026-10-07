@@ -25,7 +25,7 @@ import { settlementTitle } from "@/modules/settlements/delivery/labels";
 
 import { ReceiptDialog } from "./actions";
 import { pendingApi, pendingQueryKey, type PendingFilters, type PendingState } from "./api";
-import { STATE_LABELS, STATE_TONES, ageText, pendingHref, pendingTitle } from "./labels";
+import { ORIGIN_LABELS, STATE_LABELS, STATE_TONES, ageText, pendingHref, pendingTitle } from "./labels";
 import { AlertMarks } from "./pending-detail";
 import { AppliedBreakdown } from "./settlement-pendings";
 
@@ -250,12 +250,18 @@ export function PendingList() {
                         <span className="block text-xs text-muted-foreground">{pendingTitle(item.id)}</span>
                       </TableCell>
                       <TableCell className="whitespace-nowrap">
-                        <Link href={`/rendiciones/repartos/${item.settlement_id}`} className="hover:underline">
-                          {settlementTitle(item.settlement_sequence_number)} ·{" "}
-                          {formatDate(item.settlement_business_date)}
-                        </Link>
+                        {item.settlement_id !== null && item.settlement_sequence_number !== null ? (
+                          <Link href={`/rendiciones/repartos/${item.settlement_id}`} className="hover:underline">
+                            {settlementTitle(item.settlement_sequence_number)} ·{" "}
+                            {formatDate(item.settlement_business_date)}
+                          </Link>
+                        ) : (
+                          <span>
+                            {ORIGIN_LABELS[item.origin_type]} · {formatDate(item.origin_business_date)}
+                          </span>
+                        )}
                       </TableCell>
-                      <TableCell className="whitespace-nowrap">{item.driver_name}</TableCell>
+                      <TableCell className="whitespace-nowrap">{item.driver_name ?? "—"}</TableCell>
                       <TableCell className="whitespace-nowrap">{item.responsible_name}</TableCell>
                       <TableCell className="text-right whitespace-nowrap tabular-nums">
                         {item.amount_in_effect ? formatMoney(item.amount_in_effect) : "—"}

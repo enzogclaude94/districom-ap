@@ -42,6 +42,8 @@ const account = (id: number, name: string, kind: Account["kind"], active = true)
   allow_negative: false,
   active,
   balance: "0.00",
+  overdrawn: false,
+  overdrawn_label: null,
 });
 
 const ACCOUNTS: Account[] = [
@@ -60,7 +62,12 @@ const EMPLOYEES = [
 function pending(changes: Partial<Pending> = {}): Pending {
   return {
     id: 12,
+    origin_type: "SETTLEMENT",
     settlement_id: 7,
+    origin_cheque_rejection_id: null,
+    origin_cheque_return_id: null,
+    origin_cheque_id: null,
+    origin_business_date: "2026-10-04",
     customer_name: "Almacén Don José",
     amount: "100000.00",
     reason: "No tenía cambio",
@@ -109,6 +116,7 @@ const RECEIPT: Receipt = {
   method: "CASH",
   destination_account_id: 1,
   destination_name: "Caja principal",
+  cheque_id: null,
   operation_id: 501,
   created_by: 9,
   created_by_name: "Oscar Operador",
@@ -132,6 +140,7 @@ const RESOLUTION: Resolution = {
 const detail = (changes: Partial<PendingDetail> = {}): PendingDetail => ({
   ...item(),
   settlement_financial_state: "CLOSED",
+  echeqs: [],
   published: [],
   receipts: [],
   resolutions: [],
@@ -146,6 +155,7 @@ const detail = (changes: Partial<PendingDetail> = {}): PendingDetail => ({
       close_operation_id: null,
       receipt_id: null,
       resolution_id: null,
+      cheque_id: null,
       created_by: 9,
       created_by_name: "Oscar Operador",
       created_at: "2026-10-04T10:00:00Z",
@@ -160,6 +170,7 @@ const detail = (changes: Partial<PendingDetail> = {}): PendingDetail => ({
       close_operation_id: 400,
       receipt_id: null,
       resolution_id: null,
+      cheque_id: null,
       created_by: 9,
       created_by_name: "Oscar Operador",
       created_at: "2026-10-04T12:00:00Z",
@@ -469,6 +480,29 @@ describe("pending detail", () => {
     for (const name of ["Registrar cobro", "Resolver saldo", "Cambiar responsable", "Revertir"]) {
       expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
     }
+  });
+
+  it("shows a pending born from a rejected cheque without a settlement, dated from its origin", async () => {
+    const fromCheque = detail({
+      origin_type: "CHEQUE_REJECTION",
+      settlement_id: null,
+      origin_cheque_rejection_id: 3,
+      origin_cheque_id: 55,
+      origin_business_date: "2026-10-06",
+      settlement_business_date: null,
+      settlement_sequence_number: null,
+      driver_id: null,
+      driver_name: null,
+      settlement_financial_state: null,
+      receipts: [{ ...RECEIPT, method: "CHEQUE", cheque_id: 70, destination_name: "Cartera de cheques" }],
+      events: [],
+    });
+    mockApi(base("viewer", fromCheque));
+    renderWithQuery(<PendingDetailView pendingId={12} />);
+    expect(await screen.findByTestId("pending-origin")).toHaveTextContent("Cheque rechazado");
+    expect(screen.getByText("Cheque rechazado #55 del 06/10/2026")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Rendición n\.º/ })).not.toBeInTheDocument();
+    expect(screen.getByTestId("receipt-31")).toHaveTextContent("Cartera de cheques");
   });
 
   it("an operator collects but never resolves, reverses or changes the responsible", async () => {

@@ -45,6 +45,8 @@ const ACCOUNTS: Account[] = [
     allow_negative: false,
     active: true,
     balance: "0.00",
+    overdrawn: false,
+    overdrawn_label: null,
   },
   {
     id: 2,
@@ -54,8 +56,20 @@ const ACCOUNTS: Account[] = [
     allow_negative: false,
     active: true,
     balance: "0.00",
+    overdrawn: false,
+    overdrawn_label: null,
   },
-  { id: 3, code: "bank", name: "Banco", kind: "BANK", allow_negative: false, active: true, balance: "0.00" },
+  {
+    id: 3,
+    code: "bank",
+    name: "Banco",
+    kind: "BANK",
+    allow_negative: false,
+    active: true,
+    balance: "0.00",
+    overdrawn: false,
+    overdrawn_label: null,
+  },
 ];
 
 const DENOMINATIONS: Denomination[] = [

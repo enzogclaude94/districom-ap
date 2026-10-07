@@ -30,6 +30,10 @@ export type OperationType =
   | "PENDING_WRITE_OFF"
   | "CHEQUE_OPENING_BALANCE"
   | "CHEQUE_OWNER_CONTRIBUTION"
+  | "CHEQUE_DEPOSIT"
+  | "CHEQUE_CREDIT"
+  | "CHEQUE_REJECTION"
+  | "CHEQUE_RETURN"
   | "REVERSAL";
 
 export interface Account {
@@ -40,6 +44,9 @@ export interface Account {
   allow_negative: boolean;
   active: boolean;
   balance: string;
+  /** «Banco en descubierto» (R4-2): a bank below zero, only ever by a cheque rejected after its crediting. */
+  overdrawn: boolean;
+  overdrawn_label: string | null;
 }
 
 export interface Movement {

@@ -55,6 +55,11 @@ function AccountCard({ account, selected, onSelect }: { account: Account; select
           <p className="text-xs text-muted-foreground">{ACCOUNT_KIND_LABELS[account.kind]}</p>
         </div>
         {!account.active && <Badge>Dada de baja</Badge>}
+        {account.overdrawn && (
+          <Badge tone="danger" data-testid={`overdrawn-${account.id}`}>
+            {account.overdrawn_label ?? "Banco en descubierto"}
+          </Badge>
+        )}
       </div>
       <p className="mt-3 text-xs text-muted-foreground">{owner ? "Aportado neto" : "Saldo actual"}</p>
       <p

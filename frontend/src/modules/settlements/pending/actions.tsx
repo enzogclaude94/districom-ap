@@ -66,7 +66,7 @@ function DateField({
 function dateProblem(value: string, min: string) {
   if (!value) return "Indicá la fecha de negocio.";
   if (value > todayIso()) return "La fecha de negocio no puede ser posterior a hoy.";
-  if (value < min) return `La fecha no puede ser anterior a la rendición (${formatDate(min)}).`;
+  if (value < min) return `La fecha no puede ser anterior al origen del pendiente (${formatDate(min)}).`;
   return null;
 }
 
@@ -136,7 +136,7 @@ function ReceiptForm({
         ? `El importe supera el saldo pendiente (${formatMoney(balance)}).`
         : chosen === null
           ? "Elegí la cuenta de destino."
-          : dateProblem(businessDate, pending.settlement_business_date);
+          : dateProblem(businessDate, pending.origin_business_date);
     setProblem(local);
     if (!local) {
       action.mutation.reset();
@@ -243,7 +243,7 @@ function ReceiptForm({
         <div className="space-y-1.5" role="radiogroup" aria-label="Medio">
           <p className="text-sm font-medium">Medio</p>
           <div className="flex flex-wrap gap-4">
-            {(Object.keys(METHOD_LABELS) as ReceiptMethod[]).map((value) => (
+            {(Object.keys(DESTINATION_KIND) as ReceiptMethod[]).map((value) => (
               <label key={value} className="flex items-center gap-2 text-sm">
                 <input
                   type="radio"
@@ -270,7 +270,7 @@ function ReceiptForm({
           label="Fecha de negocio"
           value={businessDate}
           onChange={setBusinessDate}
-          min={pending.settlement_business_date}
+          min={pending.origin_business_date}
         />
       </fieldset>
       <FormError message={problem ?? error?.message} />
@@ -337,7 +337,7 @@ export function ResolveDialog({ pending, onClose }: { pending: PendingDetail; on
                 ? "Elegí el empleado de cada parte."
                 : !exact
                   ? "Las partes tienen que sumar exactamente el importe a resolver."
-                  : dateProblem(businessDate, pending.settlement_business_date)
+                  : dateProblem(businessDate, pending.origin_business_date)
       }
       build={(requestId) => ({
         method: "POST",
@@ -480,7 +480,7 @@ export function ResolveDialog({ pending, onClose }: { pending: PendingDetail; on
         label="Fecha de negocio"
         value={businessDate}
         onChange={setBusinessDate}
-        min={pending.settlement_business_date}
+        min={pending.origin_business_date}
       />
     </ActionDialog>
   );

@@ -13,6 +13,10 @@ export const OPERATION_LABELS: Record<OperationType, string> = {
   PENDING_WRITE_OFF: "Resolución de pendiente",
   CHEQUE_OPENING_BALANCE: "Saldo inicial de cheque",
   CHEQUE_OWNER_CONTRIBUTION: "Aporte de socio con cheque",
+  CHEQUE_DEPOSIT: "Depósito de cheques",
+  CHEQUE_CREDIT: "Acreditación de cheques",
+  CHEQUE_REJECTION: "Cheque rechazado",
+  CHEQUE_RETURN: "Devolución de cheque",
   REVERSAL: "Reverso",
 };
 
@@ -23,6 +27,10 @@ export const DOCUMENT_OPERATION_TYPES: readonly OperationType[] = [
   "PENDING_WRITE_OFF",
   "CHEQUE_OPENING_BALANCE",
   "CHEQUE_OWNER_CONTRIBUTION",
+  "CHEQUE_DEPOSIT",
+  "CHEQUE_CREDIT",
+  "CHEQUE_REJECTION",
+  "CHEQUE_RETURN",
 ];
 
 export const ACCOUNT_KIND_LABELS: Record<AccountKind, string> = {
@@ -48,6 +56,10 @@ const SOURCE_LABELS: Record<string, string> = {
   settlement: "Rendición",
   pending_collection: "Pendiente de cobro",
   cheque: "Cheque",
+  cheque_deposit: "Depósito de cheques",
+  cheque_credit: "Acreditación de cheques",
+  cheque_rejection: "Rechazo de cheque",
+  cheque_return: "Devolución de cheque",
 };
 
 /** Where an operation came from: entered by hand on this screen, or a document such as a settlement. */
