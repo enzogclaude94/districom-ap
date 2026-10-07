@@ -19,6 +19,10 @@ export default defineConfig({
   use: {
     baseURL: `http://localhost:${FRONTEND_PORT}`,
     trace: "retain-on-failure",
+    // The browser lives where the business does: form defaults ("today") are computed in the browser and
+    // the backend validates business dates in BUSINESS_TIMEZONE. A CI runner in UTC would otherwise send
+    // tomorrow's date between 21:00 and 24:00 in Buenos Aires, and the backend rightly refuses it.
+    timezoneId: "America/Argentina/Buenos_Aires",
     // Optional: reuse a preinstalled Chromium instead of `playwright install`.
     launchOptions: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE
       ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE }
