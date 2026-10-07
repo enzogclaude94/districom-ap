@@ -41,7 +41,7 @@ DistriCom es una plataforma modular (ADR 006). Este roadmap tiene tres carriles:
 | R1 | Ledger y cajas | **DONE** (aprobada por Enzo el 2026-10-04; PRs #7–#9 mergeados) | R0 |
 | R2 | Rendición de reparto básica | **DONE** (aprobada por Enzo el 2026-10-05; PRs #10–#12 mergeados) | R1 |
 | R3 | Pendientes de cobro | **DONE** (2026-10-07; R3‑1, R3‑2 y R3‑3 aprobados y mergeados, PRs #13, #14 y #16) | R2 |
-| R4 | Cartera de cheques | PLANNED (propuesta actualizada pendiente de aprobación) | R2 · R3 |
+| R4 | Cartera de cheques | IN_PROGRESS (R4‑1 en revisión) | R2 · R3 |
 | R5 | Combustible y vehículos | PLANNED | R2 |
 | R6 | Pagos a proveedores y terceros | PLANNED | R1 · R4 |
 | R7 | Boca de expendio | PLANNED | R2–R5 |
@@ -182,6 +182,14 @@ Modelo conceptual en `DATA_MODEL.md §13`; decisiones en ADR 007. Cada fase crea
 - R4‑D3: un cheque físico recibido justifica la rendición (con quién lo recibió y cuándo); un ECHEQ necesita verificación, como una transferencia.
 - R4‑D4: la entrega a terceros es de R6 (Pagos); R4 deja el cheque en cartera listo para usarse como medio de pago, sin operación de entrega genérica.
 - Identidad robusta por tipo (físico vs. ECHEQ), importe e identidad inmutables una vez publicado, fechas de negocio separadas, cartera y en tránsito como «Valores», separados del efectivo.
+
+**Arquitectura aprobada con ajustes (Enzo, 2026-10-07, decisiones D‑A…D‑K):** rechazo después de acreditar Banco −X / Pendientes +X aunque Banco quede en descubierto, como excepción estricta de `CHEQUE_REJECTION` y su reverso (R4‑2) · altas extraordinarias solo saldo inicial y aporte de socio, admin · `CHEQUE_RETURN` en R4‑2 · re-presentación y comisión fuera de R4 · un cheque mayor que el saldo del pendiente se rechaza · rechazo: operator o admin; revertirlo: admin con motivo · identidad de ECHEQ en dos niveles · catálogo de bancos por FK · responsable del pendiente de un rechazo: el repartidor por defecto · un ECHEQ declarado bloquea el cierre. Más: `payment_type` COMMON/DEFERRED aparte de `kind`, `VERIFICATION_REJECTED` como estado propio, `drawer_*` («Titular / librador») separado de quien lo entregó, snapshot `settlement_closing_cheques`, cuentas «Cartera de cheques» y «Cheques depositados».
+
+| PR | Contenido | Estado |
+|---|---|---|
+| R4‑1 | Catálogo de bancos (`0011`), cheques físicos y ECHEQ, identidad y duplicados, fechas por tipo, eventos, estados derivados, verificación, Cartera y Cheques depositados, `ledger_entries.cheque_id`, cheques en la rendición y en su cierre (`0012`), snapshot y token, saldo inicial y aporte de socio, API y tests | En revisión |
+| R4‑2 | Depósito, acreditación, rechazo (con la excepción de Banco en descubierto), devolución, nuevo pendiente por rechazo, cobrar un pendiente con cheque | Espera aprobación |
+| R4‑3 | Pantallas: cheques en la rendición, cartera, detalle e historia | Espera aprobación |
 
 ### R5 — Combustible y vehículos
 **Alcance:** vehículos; carga de combustible como detalle de un gasto (camión, empleado, litros, precio por litro), desde rendición o desde caja; historial de combustible.
