@@ -17,7 +17,8 @@ SOURCES = ("BCRA", "MANUAL")
 class FinancialInstitution(IdMixin, TimestampMixin, Base):
     __tablename__ = "financial_institutions"
     __table_args__ = (
-        # BCRA entity codes go up to five digits; shown zero-padded to three (007), never stored as text.
+        # The official code is an integer (`codigoEntidad` of the BCRA API: 7, not "007"): it is the identity.
+        # How a screen prints it is presentation, never part of the value; codes go up to five digits.
         CheckConstraint("bcra_code BETWEEN 1 AND 99999", name="bcra_code_range"),
         CheckConstraint("length(btrim(name)) > 0", name="name_not_blank"),
         CheckConstraint("source IN ('BCRA', 'MANUAL')", name="source"),
@@ -34,8 +35,3 @@ class FinancialInstitution(IdMixin, TimestampMixin, Base):
     # Who added a missing entity, and why (only MANUAL entries).
     created_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"))
     manual_reason: Mapped[str | None] = mapped_column(Text)
-
-
-def display_code(code: int) -> str:
-    """The code as cheques and statements print it: at least three digits, zero-padded."""
-    return f"{code:03d}"

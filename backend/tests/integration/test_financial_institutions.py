@@ -12,7 +12,12 @@ URL = "/api/v1/financial-institutions"
 def test_every_signed_in_user_reads_the_catalog(login) -> None:  # type: ignore[no-untyped-def]
     rows = login("viewer").get(URL).json()
     galicia = next(r for r in rows if r["bcra_code"] == 7)
-    assert (galicia["code"], galicia["source"], galicia["active"]) == ("007", "BCRA", True)
+    assert (galicia["name"], galicia["source"], galicia["active"]) == (
+        "BANCO DE GALICIA Y BUENOS AIRES S.A.",
+        "BCRA",
+        True,
+    )
+    assert "code" not in galicia  # the official integer is the code; "007" is only a way to print it
     assert [r["bcra_code"] for r in rows] == sorted(r["bcra_code"] for r in rows)
 
 
@@ -27,10 +32,10 @@ def test_a_missing_entity_is_added_with_its_reason(login, db: Session) -> None: 
     admin = login("admin")
     created = admin.post(URL, json={"bcra_code": 900, "name": "  Banco   Nuevo ", "reason": "Aparece en un cheque"})
     assert created.status_code == 201, created.text
-    assert (created.json()["name"], created.json()["source"], created.json()["code"]) == (
+    assert (created.json()["name"], created.json()["source"], created.json()["bcra_code"]) == (
         "Banco Nuevo",
         "MANUAL",
-        "900",
+        900,
     )
     audit = db.execute(
         text("SELECT payload FROM audit_events WHERE event_type = 'platform.financial_institution.added'")
@@ -66,3 +71,24 @@ def test_deactivated_entities_are_hidden_but_kept(login) -> None:  # type: ignor
     assert 7 not in [r["bcra_code"] for r in admin.get(URL).json()]
     assert 7 in [r["bcra_code"] for r in admin.get(URL, params={"include_inactive": True}).json()]
     assert admin.patch(f"{URL}/{galicia['id']}", json={"active": True}).json()["active"] is True
+
+
+def test_the_seed_is_the_official_bcra_snapshot(db: Session) -> None:
+    """Enzo's R4-1 adjustment 1: the 59 entities of the BCRA API de Cheques (/entidades, 2026-10-07), with
+    their official integer code and their name verbatim, none MANUAL, none invented from memory."""
+    rows = db.execute(
+        text("SELECT bcra_code, name FROM financial_institutions WHERE source = 'BCRA' ORDER BY bcra_code")
+    ).all()
+    assert len(rows) == 59
+    official = dict(rows)
+    assert official[7] == "BANCO DE GALICIA Y BUENOS AIRES S.A."
+    assert official[11] == "BANCO DE LA NACION ARGENTINA"
+    assert official[34] == "BANCO PATAGONIA  S.A."  # two spaces, as the source writes it
+    assert official[150] == "Banco GGAL SA"
+    assert official[386] == "NUEVO BANCO DE ENTRE RÍOS S.A."
+    assert (min(official), max(official)) == (5, 448)
+    # Entities of the old memory-built seed that the official list does not carry are not there.
+    assert 143 not in official
+    assert 300 not in official
+    manual = db.execute(text("SELECT count(*) FROM financial_institutions WHERE source = 'MANUAL'")).scalar_one()
+    assert manual == 0

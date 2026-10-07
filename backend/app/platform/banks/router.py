@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends
 from app.platform.auth.deps import CurrentUser, DbSession, require_role
 from app.platform.auth.models import User
 from app.platform.banks import service
-from app.platform.banks.models import FinancialInstitution, display_code
+from app.platform.banks.models import FinancialInstitution
 from app.platform.banks.schemas import ActiveIn, FinancialInstitutionIn, FinancialInstitutionOut
 
 router = APIRouter(prefix="/financial-institutions", tags=["financial institutions"])
@@ -20,7 +20,6 @@ def _out(row: FinancialInstitution) -> FinancialInstitutionOut:
     return FinancialInstitutionOut(
         id=row.id,
         bcra_code=row.bcra_code,
-        code=display_code(row.bcra_code),
         name=row.name,
         source=row.source,
         active=row.active,

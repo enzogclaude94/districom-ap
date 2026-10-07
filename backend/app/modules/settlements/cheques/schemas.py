@@ -113,7 +113,7 @@ class ChequeOut(BaseModel):
     payment_type: str
     amount: Money
     issuer_bank_id: int
-    bank_code: str
+    bank_bcra_code: int
     bank_name: str
     branch_code: str | None
     account_ref: str | None

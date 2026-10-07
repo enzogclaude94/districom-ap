@@ -324,6 +324,23 @@ def test_common_and_deferred_are_different_and_deferred_needs_its_date(  # [8] [
     )
     assert expired.json()["code"] == "cheque_presentation_expired"
 
+    # A deferred cheque is payable at most 360 days after its issue (a rule of the instrument, no setting).
+    at_limit = physical(
+        bank_id, cheque_number="4", payment_type="DEFERRED", payment_date=(ISSUED + timedelta(days=360)).isoformat()
+    )
+    assert (
+        cheque(operator, new(operator, sid, at_limit))["presentation_deadline"]
+        == (ISSUED + timedelta(days=390)).isoformat()
+    )
+    too_far = add(
+        operator,
+        sid,
+        physical(
+            bank_id, cheque_number="5", payment_type="DEFERRED", payment_date=(ISSUED + timedelta(days=361)).isoformat()
+        ),
+    )
+    assert too_far.json()["code"] == "deferred_term_exceeded"
+
 
 # --- identity -------------------------------------------------------------------------------------------
 
@@ -417,8 +434,8 @@ def test_declared_echeq_without_identity_exists_but_is_not_verified(  # [16]
 def test_cheque_names_its_bank_by_catalog_fk(operator: TestClient, as_role, pedro: int, db: Session) -> None:  # type: ignore[no-untyped-def]  # [17]
     sid = create(operator, pedro, "50000")
     detail = cheque(operator, new(operator, sid, physical(bank(operator, 7))))
-    assert detail["bank_code"] == "007"
-    assert detail["bank_name"].startswith("Banco de Galicia")
+    assert detail["bank_bcra_code"] == 7
+    assert detail["bank_name"] == "BANCO DE GALICIA Y BUENOS AIRES S.A."
     assert add(operator, sid, physical(999999)).json()["code"] == "invalid_bank"
     admin = as_role("admin")
     galicia = bank(admin, 7)
@@ -426,7 +443,7 @@ def test_cheque_names_its_bank_by_catalog_fk(operator: TestClient, as_role, pedr
     inactive = add(admin, sid, physical(galicia, cheque_number="77"))
     assert inactive.json()["code"] == "invalid_bank"
     # The cheque already loaded keeps naming its bank.
-    assert cheque(admin, detail["id"])["bank_code"] == "007"
+    assert cheque(admin, detail["id"])["bank_bcra_code"] == 7
 
 
 # --- corrections before publication, immutability after -----------------------------------------------

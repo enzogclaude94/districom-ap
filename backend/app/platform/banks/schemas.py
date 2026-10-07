@@ -3,8 +3,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class FinancialInstitutionOut(BaseModel):
     id: int
-    bcra_code: int
-    code: str  # zero-padded, as printed on a cheque
+    bcra_code: int  # the official integer code; no padding is part of it
     name: str
     source: str
     active: bool

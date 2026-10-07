@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.core.errors import AppError
 from app.platform.audit.service import record_change
 from app.platform.auth.models import User
-from app.platform.banks.models import FinancialInstitution, display_code
+from app.platform.banks.models import FinancialInstitution
 
 
 def list_all(db: Session, *, include_inactive: bool = False) -> list[FinancialInstitution]:
@@ -91,6 +91,6 @@ def _code_taken(existing: FinancialInstitution) -> AppError:
     return AppError(
         409,
         "bank_code_taken",
-        f"El código {display_code(existing.bcra_code)} ya es de {existing.name}: no se reemplaza una entidad.",
+        f"El código BCRA {existing.bcra_code} ya es de {existing.name}: no se reemplaza una entidad.",
         {"bank_id": existing.id},
     )

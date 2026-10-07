@@ -13,7 +13,7 @@ from app.modules.settlements.delivery import closing
 from app.modules.settlements.delivery.models import Settlement
 from app.modules.settlements.ledger import service as ledger
 from app.platform.auth.models import User
-from app.platform.banks.models import FinancialInstitution, display_code
+from app.platform.banks.models import FinancialInstitution
 from app.platform.parties.models import Employee
 
 
@@ -49,7 +49,6 @@ def items(db: Session, rows: Sequence[Cheque]) -> list[s.ChequeOut]:
         ],
     )
     employees = _names(db, Employee, [c.received_by_employee_id for c in rows if c.received_by_employee_id])
-    days = terms.presentation_days(db)
     result = []
     for c in rows:
         voided = c.voided_at is not None
@@ -81,7 +80,7 @@ def items(db: Session, rows: Sequence[Cheque]) -> list[s.ChequeOut]:
                 payment_type=c.payment_type,
                 amount=c.amount,
                 issuer_bank_id=c.issuer_bank_id,
-                bank_code=display_code(bank.bcra_code),
+                bank_bcra_code=bank.bcra_code,
                 bank_name=bank.name,
                 branch_code=c.branch_code,
                 account_ref=c.account_ref,
@@ -92,7 +91,7 @@ def items(db: Session, rows: Sequence[Cheque]) -> list[s.ChequeOut]:
                 issue_date=c.issue_date,
                 payment_date=c.payment_date,
                 payable_from=payable_from,
-                presentation_deadline=terms.presentation_deadline(c.payment_type, c.issue_date, c.payment_date, days),
+                presentation_deadline=terms.presentation_deadline(c.payment_type, c.issue_date, c.payment_date),
                 drawer_name=c.drawer_name,
                 drawer_tax_id=c.drawer_tax_id,
                 delivered_by_name=c.delivered_by_name,
