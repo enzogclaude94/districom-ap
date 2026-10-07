@@ -106,9 +106,8 @@ def test_settings_show_each_module_to_its_admins(login, grant) -> None:  # type:
     grant("viewer", "commercial", "operator")
     scopes = client.get("/api/v1/settings").json()
     assert [s["scope"] for s in scopes] == ["settlements"]
-    alert, presentation, denominations = scopes[0]["settings"]
+    alert, denominations = scopes[0]["settings"]
     assert (alert["key"], alert["value"]) == ("settlements.pending_alert_hours", 24)
-    assert (presentation["key"], presentation["value"]) == ("settlements.cheque_presentation_days", 30)
     assert denominations["key"] == "settlements.cash_denominations"
     assert denominations["is_default"] is True
 

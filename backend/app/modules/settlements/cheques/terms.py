@@ -1,27 +1,23 @@
-"""When a cheque can be presented to the bank, by its payment type (Enzo's R4 decision on COMMON/DEFERRED).
+"""When a cheque can be presented to the bank, by its payment type (Enzo's R4 decision on COMMON/DEFERRED and
+R4-1 adjustment 2). These are rules of the instrument (Ley de Cheques 24.452), not preferences of the
+business: fixed here, never a setting anyone can change to let an expired cheque through.
 
-Never one reading of "the cheque's date" for both types:
+- COMMON: payable from its issue date (`issue_date`); it has no payment date. Presented at the latest
+  `issue_date + 30 days`.
+- DEFERRED: payable from its payment date (`payment_date`, required), with
+  `issue_date < payment_date <= issue_date + 360 days`; it can never be deposited before it. Presented at
+  the latest `payment_date + 30 days`.
 
-- COMMON: payable from its issue date (`issue_date`); it has no payment date.
-- DEFERRED: payable from its payment date (`payment_date`, required, later than the issue date); it can
-  never be deposited for collection before it.
-
-Either way it must be presented within `settlements.cheque_presentation_days` (30 by default, Ley de
-Cheques 24.452) from the date it becomes payable: after that it is expired and cannot be collected.
+After its deadline the cheque is expired (`cheque_presentation_expired`). The database repeats the
+360-day bound (ck_cheques_payment_date_by_type).
 """
 
 from datetime import date, timedelta
 
-from sqlalchemy.orm import Session
-
 from app.core.errors import AppError
-from app.platform.settings.service import get_setting
 
-PRESENTATION_DAYS_KEY = "settlements.cheque_presentation_days"
-
-
-def presentation_days(db: Session) -> int:
-    return int(get_setting(db, PRESENTATION_DAYS_KEY))
+PRESENTATION_DAYS = 30
+MAX_DEFERRED_DAYS = 360
 
 
 def payable_from(payment_type: str, issue_date: date, payment_date: date | None) -> date:
@@ -32,13 +28,23 @@ def payable_from(payment_type: str, issue_date: date, payment_date: date | None)
     return issue_date
 
 
-def presentation_deadline(payment_type: str, issue_date: date, payment_date: date | None, days: int) -> date:
-    return payable_from(payment_type, issue_date, payment_date) + timedelta(days=days)
+def presentation_deadline(payment_type: str, issue_date: date, payment_date: date | None) -> date:
+    return payable_from(payment_type, issue_date, payment_date) + timedelta(days=PRESENTATION_DAYS)
 
 
-def check_dates(
-    *, payment_type: str, issue_date: date, payment_date: date | None, received_on: date, days: int
-) -> None:
+def check_presentable(payment_type: str, issue_date: date, payment_date: date | None, on: date) -> None:
+    """The cheque has not expired for presentation on `on`."""
+    deadline = presentation_deadline(payment_type, issue_date, payment_date)
+    if on > deadline:
+        raise AppError(
+            422,
+            "cheque_presentation_expired",
+            f"El cheque venció para su presentación el {deadline:%d/%m/%Y}: ya no se puede cobrar.",
+            {"deadline": deadline.isoformat()},
+        )
+
+
+def check_dates(*, payment_type: str, issue_date: date, payment_date: date | None, received_on: date) -> None:
     """The dates of an instrument make sense for its type and it was not expired when we received it."""
     if payment_type == "COMMON":
         if payment_date is not None:
@@ -58,6 +64,15 @@ def check_dates(
                 "La fecha de pago de un cheque diferido es posterior a su fecha de emisión.",
                 {"field": "payment_date"},
             )
+        latest = issue_date + timedelta(days=MAX_DEFERRED_DAYS)
+        if payment_date > latest:
+            raise AppError(
+                422,
+                "deferred_term_exceeded",
+                f"Un cheque de pago diferido vence como máximo {MAX_DEFERRED_DAYS} días después de su emisión "
+                f"(el {latest:%d/%m/%Y}).",
+                {"field": "payment_date", "max_payment_date": latest.isoformat()},
+            )
     if issue_date > received_on:
         raise AppError(
             422,
@@ -65,11 +80,4 @@ def check_dates(
             "La fecha de emisión no puede ser posterior a la de recepción.",
             {"field": "issue_date", "received_on": received_on.isoformat()},
         )
-    deadline = presentation_deadline(payment_type, issue_date, payment_date, days)
-    if received_on > deadline:
-        raise AppError(
-            422,
-            "cheque_presentation_expired",
-            f"El cheque venció para su presentación el {deadline:%d/%m/%Y}: ya no se puede cobrar.",
-            {"deadline": deadline.isoformat()},
-        )
+    check_presentable(payment_type, issue_date, payment_date, received_on)

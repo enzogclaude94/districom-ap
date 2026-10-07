@@ -94,7 +94,7 @@ class Cheque(IdMixin, TimestampMixin, Base):
         # A deferred cheque is payable from its payment date, later than its issue; a common one has none.
         CheckConstraint(
             "(payment_type = 'DEFERRED') = (payment_date IS NOT NULL) AND "
-            "(payment_date IS NULL OR payment_date > issue_date)",
+            "(payment_date IS NULL OR (payment_date > issue_date AND payment_date <= issue_date + 360))",
             name="payment_date_by_type",
         ),
         CheckConstraint("issue_date <= received_business_date", name="issued_before_received"),

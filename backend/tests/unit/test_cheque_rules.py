@@ -26,6 +26,12 @@ ISSUED = date(2026, 10, 1)
         ("DEFERRED", date(2026, 10, 10), date(2026, 11, 9), None),
         ("DEFERRED", date(2026, 10, 10), date(2026, 11, 10), "cheque_presentation_expired"),
         ("COMMON", None, date(2026, 9, 30), "invalid_cheque_date"),  # received before issued
+        # A deferred cheque is payable at most 360 days after its issue: 2026-10-01 + 360 = 2027-09-26.
+        ("DEFERRED", date(2027, 9, 26), date(2026, 10, 5), None),
+        ("DEFERRED", date(2027, 9, 27), date(2026, 10, 5), "deferred_term_exceeded"),
+        # At its 360-day limit, it still has its 30 days of presentation from the payment date.
+        ("DEFERRED", date(2027, 9, 26), date(2027, 10, 26), None),
+        ("DEFERRED", date(2027, 9, 26), date(2027, 10, 27), "cheque_presentation_expired"),
     ],
 )
 def test_dates_by_payment_type(
@@ -33,7 +39,7 @@ def test_dates_by_payment_type(
 ) -> None:
     def check() -> None:
         terms.check_dates(
-            payment_type=payment_type, issue_date=ISSUED, payment_date=payment_date, received_on=received_on, days=30
+            payment_type=payment_type, issue_date=ISSUED, payment_date=payment_date, received_on=received_on
         )
 
     if error is None:
@@ -47,7 +53,36 @@ def test_dates_by_payment_type(
 def test_payable_from_and_deadline_depend_on_the_type() -> None:
     assert terms.payable_from("COMMON", ISSUED, None) == ISSUED
     assert terms.payable_from("DEFERRED", ISSUED, date(2026, 12, 1)) == date(2026, 12, 1)
-    assert terms.presentation_deadline("DEFERRED", ISSUED, date(2026, 12, 1), 30) == date(2026, 12, 31)
+    assert terms.presentation_deadline("COMMON", ISSUED, None) == date(2026, 10, 31)
+    assert terms.presentation_deadline("DEFERRED", ISSUED, date(2026, 12, 1)) == date(2026, 12, 31)
+
+
+def test_terms_are_rules_of_the_instrument_not_settings() -> None:
+    """Enzo's R4-1 adjustment 2: 30 days of presentation and 360 of deferral, fixed; no setting moves them."""
+    from app.modules.settlements.settings import SETTINGS
+
+    assert (terms.PRESENTATION_DAYS, terms.MAX_DEFERRED_DAYS) == (30, 360)
+    assert not any("cheque" in spec.key for spec in SETTINGS.specs)
+
+
+@pytest.mark.parametrize(
+    ("payment_type", "payment_date", "on", "expired"),
+    [
+        ("COMMON", None, date(2026, 10, 31), False),
+        ("COMMON", None, date(2026, 11, 1), True),
+        ("DEFERRED", date(2027, 1, 15), date(2027, 2, 14), False),
+        ("DEFERRED", date(2027, 1, 15), date(2027, 2, 15), True),
+    ],
+)
+def test_common_and_deferred_expire_from_different_dates(
+    payment_type: str, payment_date: date | None, on: date, expired: bool
+) -> None:
+    if not expired:
+        terms.check_presentable(payment_type, ISSUED, payment_date, on)
+        return
+    with pytest.raises(AppError) as caught:
+        terms.check_presentable(payment_type, ISSUED, payment_date, on)
+    assert caught.value.code == "cheque_presentation_expired"
 
 
 def _physical(number: str, branch: str | None, account: str | None) -> identity.Identity:

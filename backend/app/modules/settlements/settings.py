@@ -14,13 +14,6 @@ SETTINGS = SettingsScope(
             "Un pendiente vigente con saldo alerta cuando pasaron más de estas horas desde que se registró.",
         ),
         SettingSpec(
-            "cheque_presentation_days",
-            30,
-            "Plazo de presentación de cheques (días)",
-            "Días para presentar un cheque al banco desde que es pagadero: desde su emisión si es común, desde "
-            "su fecha de pago si es diferido. Pasado el plazo, el cheque está vencido.",
-        ),
-        SettingSpec(
             "cash_denominations",
             DEFAULT_DENOMINATIONS,
             "Denominaciones de efectivo",

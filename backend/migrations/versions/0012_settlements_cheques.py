@@ -364,7 +364,8 @@ def upgrade() -> None:
             "(origin_type = 'SETTLEMENT') = (settlement_id IS NOT NULL)", name=op.f("ck_cheques_settlement_origin")
         ),
         sa.CheckConstraint(
-            "(payment_type = 'DEFERRED') = (payment_date IS NOT NULL) AND (payment_date IS NULL OR payment_date > issue_date)",
+            "(payment_type = 'DEFERRED') = (payment_date IS NOT NULL) AND "
+            "(payment_date IS NULL OR (payment_date > issue_date AND payment_date <= issue_date + 360))",
             name=op.f("ck_cheques_payment_date_by_type"),
         ),
         sa.CheckConstraint(

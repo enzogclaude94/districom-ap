@@ -663,7 +663,6 @@ def _instrument(db: Session, data: dict[str, Any], *, received_on: date) -> Inst
         issue_date=issue_date,
         payment_date=payment_date,
         received_on=received_on,
-        days=terms.presentation_days(db),
     )
     ident = identity.compute(
         kind=kind,

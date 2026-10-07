@@ -135,6 +135,30 @@ def test_a_closed_settlement_freezes_its_cheques_load(db: Session, closed) -> No
     assert "not OPEN" in message
 
 
+def test_a_deferred_cheque_pays_within_360_days_of_its_issue(db: Session, closed) -> None:  # type: ignore[no-untyped-def]
+    db.execute(
+        text("UPDATE settlements.settlements SET status = 'OPEN', version = 2 WHERE id = :s"),
+        {"s": closed["settlement"]},
+    )
+    db.commit()
+    message = _refused(
+        db,
+        "INSERT INTO settlements.cheques (kind, payment_type, amount, issuer_bank_id, cheque_number, issue_date, "
+        "payment_date, drawer_name, delivered_by_name, origin_type, settlement_id, received_business_date, "
+        "physical_receipt_confirmed_by, physical_receipt_confirmed_at, client_request_id, request_fingerprint, "
+        "created_by) VALUES ('PHYSICAL', 'DEFERRED', 1, :b, '1', :d, :p, 'x', 'x', 'SETTLEMENT', :s, :d, :u, "
+        "now(), :k, :f, :u)",
+        b=_bank(db),
+        d=DAY,
+        p=DAY + timedelta(days=361),
+        s=closed["settlement"],
+        u=closed["user"],
+        k=uuid4(),
+        f="a" * 64,
+    )
+    assert "ck_cheques_payment_date_by_type" in message
+
+
 _RAW_ADJUSTMENT = (
     "WITH op AS (INSERT INTO settlements.financial_operations (type, business_date, description, "
     "client_request_id, request_fingerprint, created_by) VALUES ('ADJUSTMENT', :d, 'A mano', :k, :f, :u) "
