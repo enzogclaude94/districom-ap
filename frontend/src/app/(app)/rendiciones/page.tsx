@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 
 import { EmptyState } from "@/components/common/empty-state";
 import { SettlementsLogo } from "@/modules/settlements/logo";
+import { PendingAlertCard } from "@/modules/settlements/pending/alerts";
 
 export const metadata: Metadata = { title: "Rendiciones" };
 
@@ -17,10 +18,11 @@ export default function SettlementsHomePage() {
           dónde terminó cada valor.
         </p>
       </div>
+      <PendingAlertCard />
       <EmptyState
         icon={CalendarClock}
         title="El módulo está habilitado"
-        description="Ya podés usar Rendiciones de reparto, en Operación diaria, y Cajas, en Tesorería. Las próximas funciones llegan por etapas: pendientes (R3), cartera de cheques (R4) y combustible (R5)."
+        description="Ya podés usar Rendiciones de reparto y Pendientes, en Operación diaria, y Cajas, en Tesorería. Las próximas funciones llegan por etapas: cartera de cheques (R4) y combustible (R5)."
       />
     </>
   );

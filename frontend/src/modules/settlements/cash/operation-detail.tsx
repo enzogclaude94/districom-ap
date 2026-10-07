@@ -23,6 +23,7 @@ import { formatDate, formatDateTime, formatMoney, todayIso } from "@/lib/format"
 
 import { cashErrorView } from "./errors";
 import { ACCOUNT_KIND_LABELS, DOCUMENT_OPERATION_TYPES, OPERATION_LABELS, sourceLabel } from "./labels";
+import { SourceLink } from "./source-link";
 import { StoredAttempt } from "./stored-attempt";
 import { useCashOperation } from "./use-cash-operation";
 
@@ -229,9 +230,15 @@ export function OperationDetail({ operationId }: { operationId: number }) {
       )}
       {ownedByDocument && operation.reversed_by_operation_id === null && (
         <div className="rounded-md border border-border bg-muted px-4 py-3 text-sm">
-          {operation.type === "SETTLEMENT_CLOSE"
-            ? `Esta operación pertenece a la ${sourceLabel(operation.source_type, operation.source_id)}: se corrige reabriendo la rendición, y al confirmar el nuevo cierre se registra su reverso.`
-            : `Esta operación pertenece al ${sourceLabel(operation.source_type, operation.source_id)}: se revierte desde el pendiente.`}
+          {operation.type === "SETTLEMENT_CLOSE" ? (
+            `Esta operación pertenece a la ${sourceLabel(operation.source_type, operation.source_id)}: se corrige reabriendo la rendición, y al confirmar el nuevo cierre se registra su reverso.`
+          ) : (
+            <>
+              Esta operación pertenece al{" "}
+              <SourceLink sourceType={operation.source_type} sourceId={operation.source_id} />: se revierte desde el
+              pendiente.
+            </>
+          )}
         </div>
       )}
       {operation.reverses_operation_id !== null && (
@@ -257,7 +264,9 @@ export function OperationDetail({ operationId }: { operationId: number }) {
             <Field label={operation.type === "ADJUSTMENT" || operation.type === "REVERSAL" ? "Motivo" : "Descripción"}>
               {operation.description ?? "—"}
             </Field>
-            <Field label="Origen">{sourceLabel(operation.source_type, operation.source_id)}</Field>
+            <Field label="Origen">
+              <SourceLink sourceType={operation.source_type} sourceId={operation.source_id} />
+            </Field>
           </dl>
         </CardContent>
       </Card>

@@ -16,6 +16,7 @@ import { authApi, currentUserQueryKey, moduleRole, roleAtLeast } from "@/lib/api
 import { cn } from "@/lib/cn";
 import { formatDate, formatDateTime, formatMoney } from "@/lib/format";
 import { cashApi, cashQueryKey } from "@/modules/settlements/cash/api";
+import { SettlementPendings } from "@/modules/settlements/pending/settlement-pendings";
 
 import {
   deliveryApi,
@@ -23,6 +24,7 @@ import {
   settlementQueryKey,
   type Addition,
   type Expense,
+  type Person,
   type Settlement,
   type Transfer,
   type TransferStatus,
@@ -152,11 +154,13 @@ function Load({
   editable,
   isAdmin,
   open,
+  employees,
 }: {
   settlement: Settlement;
   editable: boolean;
   isAdmin: boolean;
   open: (dialog: Open) => void;
+  employees: Person[];
 }) {
   const s = settlement.summary;
   return (
@@ -409,6 +413,8 @@ function Load({
           </Table>
         )}
       </Section>
+
+      <SettlementPendings settlement={settlement} editable={editable} employees={employees} />
     </div>
   );
 }
@@ -446,6 +452,11 @@ export function SettlementDetail({ settlementId }: { settlementId: number }) {
   const categories = useQuery({
     queryKey: [...deliveryQueryKey, "categories"],
     queryFn: deliveryApi.categories,
+    enabled: canOperate,
+  });
+  const employees = useQuery({
+    queryKey: [...deliveryQueryKey, "employees"],
+    queryFn: deliveryApi.employees,
     enabled: canOperate,
   });
   const [dialog, setDialog] = useState<Open>(null);
@@ -613,7 +624,13 @@ export function SettlementDetail({ settlementId }: { settlementId: number }) {
 
       <div role="tabpanel">
         {tab === "load" ? (
-          <Load settlement={settlement} editable={editable} isAdmin={isAdmin} open={setDialog} />
+          <Load
+            settlement={settlement}
+            editable={editable}
+            isAdmin={isAdmin}
+            open={setDialog}
+            employees={employees.data ?? []}
+          />
         ) : (
           <HistoryTab settlement={settlement} />
         )}

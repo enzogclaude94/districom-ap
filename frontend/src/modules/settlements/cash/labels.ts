@@ -47,3 +47,9 @@ export function sourceLabel(sourceType: string | null, sourceId: number | null) 
   if (label) return sourceId === null ? label : `${label} #${sourceId}`;
   return sourceId === null ? sourceType : `${sourceType} #${sourceId}`;
 }
+
+/** Screen of the document an operation came from, when it has one (a pending collection: R3). */
+export function sourceHref(sourceType: string | null, sourceId: number | null): string | null {
+  if (sourceType === "pending_collection" && sourceId !== null) return `/rendiciones/pendientes/${sourceId}`;
+  return null;
+}

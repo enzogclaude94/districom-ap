@@ -212,7 +212,9 @@ describe("Cajas error messages", () => {
     );
     expect(cashErrorView(error(409, "idempotency_conflict"), names).conflict).toBe(true);
     expect(cashErrorView(error(409, "operation_already_reversed")).message).toBe("Esta operación ya fue revertida.");
-    expect(cashErrorView(error(409, "operation_owned_by_document")).message).toContain("reabriendo la rendición");
+    expect(cashErrorView(error(409, "operation_owned_by_document")).message).toContain(
+      "se corrige desde ese documento",
+    );
     expect(cashErrorView(error(409, "account_inactive")).message).toContain("dada de baja");
     expect(cashErrorView(error(409, "account_name_taken", { account_id: 7, active: false }), names).message).toBe(
       "Ya existe la cuenta «Socia vieja», dada de baja. No se crea otra con un nombre parecido.",

@@ -58,7 +58,10 @@ export function cashErrorView(
     case "operation_already_reversed":
       return { message: "Esta operación ya fue revertida." };
     case "operation_owned_by_document":
-      return { message: "Esta operación es el cierre de una rendición: se corrige reabriendo la rendición." };
+      return {
+        message:
+          "Esta operación pertenece a una rendición o a un pendiente de cobro: se corrige desde ese documento, no desde Cajas.",
+      };
     case "cannot_reverse_reversal":
       return { message: "Un reverso no se puede revertir. Si hace falta, registrá una operación nueva." };
     case "account_inactive":

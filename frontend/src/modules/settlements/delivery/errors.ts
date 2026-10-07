@@ -1,5 +1,6 @@
 import { ApiError } from "@/lib/api/client";
 import { cashErrorView } from "@/modules/settlements/cash/errors";
+import { pendingMessage } from "@/modules/settlements/pending/errors";
 
 /** What the user reads for each error of the delivery settlements API. Never codes or internal text. */
 export interface DeliveryErrorView {
@@ -36,6 +37,14 @@ export function deliveryErrorView(error: unknown, accountName?: (id: number) => 
     case "insufficient_funds":
     case "operation_owned_by_document":
       return { message: cashErrorView(error, accountName).message };
+    case "pending_has_activity":
+    case "pending_below_applied":
+    case "pending_customer_locked":
+    case "pending_voided":
+    case "pending_already_voided":
+    case "invalid_expected_date":
+    case "employee_not_found":
+      return { message: pendingMessage(error)! };
     case "forbidden":
       return { message: error.message || "No tenés permiso para realizar esta operación." };
     case "validation_error":

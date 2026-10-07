@@ -2,7 +2,8 @@
 
 The load is written from its settlement (`/deliveries/{id}/pending-collections`). Here, once a close put the
 pending in effect: viewer reads the global list, its alert summary and each pending; operator records a
-receipt; admin resolves, reverses receipts and resolutions and changes the responsible after the close.
+receipt; admin resolves, reverses receipts and resolutions, changes the responsible after the close and sets
+the alert threshold (`settlements.pending_alert_hours`, stored in `app_settings`).
 Creations are idempotent by `client_request_id` (201 created, 200 repeated, 409 `idempotency_conflict`),
 and so are reversals. Every write answers with the pending's detail.
 """
@@ -74,6 +75,34 @@ def list_pending_collections(
 def pending_collections_summary(db: DbSession, _: Viewer) -> s.PendingAlertSummary:
     hours, count, balance = listing.summary(db)
     return s.PendingAlertSummary(alert_hours=hours, count=count, balance=balance)
+
+
+def _alert_settings(db: DbSession) -> s.AlertSettingsOut:
+    return s.AlertSettingsOut(
+        alert_hours=listing.alert_hours(db),
+        is_default=listing.alert_hours_is_default(db),
+        min_hours=listing.ALERT_HOURS_MIN,
+        max_hours=listing.ALERT_HOURS_MAX,
+    )
+
+
+@router.get(
+    "/pending-alert-settings",
+    response_model=s.AlertSettingsOut,
+    summary="Después de cuántas horas alerta un pendiente con saldo",
+)
+def get_pending_alert_settings(db: DbSession, _: Viewer) -> s.AlertSettingsOut:
+    return _alert_settings(db)
+
+
+@router.put(
+    "/pending-alert-settings",
+    response_model=s.AlertSettingsOut,
+    summary="Cambiar las horas de alerta de pendientes (`settlements.pending_alert_hours`)",
+)
+def update_pending_alert_settings(body: s.AlertSettingsIn, db: DbSession, user: Admin) -> s.AlertSettingsOut:
+    listing.update_alert_hours(db, user, body.alert_hours)
+    return _alert_settings(db)
 
 
 @router.get(

@@ -19,6 +19,7 @@ from typing import Any
 from sqlalchemy import Select, Subquery, and_, case, func, or_, select
 from sqlalchemy.orm import Session
 
+from app.core.errors import AppError
 from app.modules.settlements.delivery.models import Settlement
 from app.modules.settlements.pending.models import (
     PendingCollection,
@@ -27,9 +28,15 @@ from app.modules.settlements.pending.models import (
     SettlementClosingPending,
 )
 from app.modules.settlements.pending.state import State
-from app.platform.settings.service import get_setting
+from app.platform.audit.service import record_change
+from app.platform.auth.models import User
+from app.platform.settings.registry import registry
+from app.platform.settings.service import get_setting, set_setting
 
 ALERT_HOURS_KEY = "settlements.pending_alert_hours"
+# From one hour to 30 days: below that every pending would alert at once, above it the alert says nothing.
+ALERT_HOURS_MIN = 1
+ALERT_HOURS_MAX = 720
 OWED_STATES: tuple[State, ...] = ("OPEN", "PARTIAL")
 
 
@@ -52,6 +59,38 @@ def utc_now() -> datetime:
 
 def alert_hours(db: Session) -> int:
     return int(get_setting(db, ALERT_HOURS_KEY))
+
+
+def alert_hours_is_default(db: Session) -> bool:
+    return alert_hours(db) == int(registry.spec(ALERT_HOURS_KEY).default)
+
+
+def update_alert_hours(db: Session, actor: User, hours: int) -> None:
+    """Store the alert threshold in `app_settings` (admin, from the module's configuration); audited.
+    Alerts are computed on read, so the new value applies to every pending on the next read."""
+    if not ALERT_HOURS_MIN <= hours <= ALERT_HOURS_MAX:
+        raise AppError(
+            422,
+            "invalid_alert_hours",
+            f"Las horas de alerta van de {ALERT_HOURS_MIN} a {ALERT_HOURS_MAX}.",
+            {"min": ALERT_HOURS_MIN, "max": ALERT_HOURS_MAX},
+        )
+    before = alert_hours(db)
+    if before == hours:
+        db.commit()
+        return
+    set_setting(db, ALERT_HOURS_KEY, hours, user_id=actor.id)
+    record_change(
+        db,
+        "settlements.pending_alert_hours.updated",
+        action="update",
+        user_id=actor.id,
+        entity_type="setting",
+        entity_id=ALERT_HOURS_KEY,
+        before={"hours": before},
+        after={"hours": hours},
+    )
+    db.commit()
 
 
 def is_alert(*, in_effect: bool, balance: Decimal | None, created_at: datetime, hours: int, now: datetime) -> bool:

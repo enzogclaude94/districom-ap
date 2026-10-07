@@ -1,6 +1,7 @@
 import { ClipboardList, Fuel, Home, Landmark, SlidersHorizontal, Users } from "lucide-react";
 
 import type { NavSection } from "@/lib/modules";
+import { PendingAlertBadge } from "@/modules/settlements/pending/alerts";
 
 /** Rendiciones navigation. Items stay disabled until their roadmap phase (R1–R8) ships. */
 export const SETTLEMENTS_NAV: NavSection[] = [
@@ -11,7 +12,7 @@ export const SETTLEMENTS_NAV: NavSection[] = [
     items: [
       { label: "Rendiciones de reparto", href: "/rendiciones/repartos" },
       { label: "Boca de expendio", href: "/rendiciones/boca", phase: 7 },
-      { label: "Pendientes", href: "/rendiciones/pendientes", phase: 3 },
+      { label: "Pendientes", href: "/rendiciones/pendientes", indicator: PendingAlertBadge },
     ],
   },
   {

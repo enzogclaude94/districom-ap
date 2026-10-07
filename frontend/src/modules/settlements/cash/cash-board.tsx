@@ -18,7 +18,8 @@ import { cashApi, cashQueryKey, type Account, type Operation } from "@/modules/s
 import { cn } from "@/lib/cn";
 import { formatDate, formatDateTime, formatMoney } from "@/lib/format";
 
-import { ACCOUNT_KIND_LABELS, OPERATION_LABELS, sourceLabel } from "./labels";
+import { ACCOUNT_KIND_LABELS, OPERATION_LABELS } from "./labels";
+import { SourceLink } from "./source-link";
 import { OperationFormDialog, type CashAction } from "./operation-forms";
 import { OwnerAccountDialog } from "./owner-account-dialog";
 import { listPending } from "./pending-operations";
@@ -140,7 +141,7 @@ function Movements({ account }: { account: Account }) {
                       {formatDateTime(movement.created_at)}
                     </TableCell>
                     <TableCell className="whitespace-nowrap text-muted-foreground">
-                      {sourceLabel(movement.source_type, movement.source_id)}
+                      <SourceLink sourceType={movement.source_type} sourceId={movement.source_id} />
                     </TableCell>
                     <TableCell>
                       <Link

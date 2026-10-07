@@ -222,3 +222,16 @@ class PendingAlertSummary(BaseModel):
     alert_hours: int
     count: int
     balance: Money
+
+
+class AlertSettingsOut(BaseModel):
+    """`settlements.pending_alert_hours`, with the range the backend accepts."""
+
+    alert_hours: int
+    is_default: bool
+    min_hours: int
+    max_hours: int
+
+
+class AlertSettingsIn(StrictIn):
+    alert_hours: int

@@ -971,3 +971,40 @@ def test_list_shows_what_is_owed_by_default_and_filters(as_role, ids, pending, s
     assert listed(viewer, min_age_hours=1) == {}
     assert listed(viewer, alert=True) == {}
     assert as_role("viewer").get(f"{BASE}/pending-collections", params={"state": "OTHER"}).status_code == 422
+
+
+# --- alert setting (R3-3) -------------------------------------------------------------------------
+
+
+def test_admin_changes_the_alert_hours_in_app_settings(as_role, pending, later, db: Session) -> None:  # type: ignore[no-untyped-def]
+    """Enzo's R3-3 D3: an admin edits `settlements.pending_alert_hours` from the module (stored in
+    `app_settings`, audited); viewers read it; the alert follows on the next read. `as_role` logs the same
+    client in again, so each call takes its own."""
+    url = f"{BASE}/pending-alert-settings"
+    default = {"alert_hours": 24, "is_default": True, "min_hours": 1, "max_hours": 720}
+    assert as_role("viewer").get(url).json() == default
+    later(13)
+    assert summary(as_role("viewer"))["count"] == 0
+
+    assert as_role("operator").put(url, json={"alert_hours": 12}).status_code == 403
+    response = as_role("admin").put(url, json={"alert_hours": 12})
+    assert response.status_code == 200, response.text
+    assert response.json() == {"alert_hours": 12, "is_default": False, "min_hours": 1, "max_hours": 720}
+    assert summary(as_role("viewer")) == {"alert_hours": 12, "count": 1, "balance": "100000.00"}
+    assert db.scalar(text("SELECT value FROM app_settings WHERE key = 'settlements.pending_alert_hours'")) == 12
+    audited = db.scalar(
+        text("SELECT count(*) FROM audit_events WHERE event_type = 'settlements.pending_alert_hours.updated'")
+    )
+    assert audited == 1
+
+    # The platform settings screen reads the same value; no second store.
+    scopes = {scope["scope"]: scope for scope in as_role("admin").get("/api/v1/settings").json()}
+    setting = next(x for x in scopes["settlements"]["settings"] if x["key"] == "settlements.pending_alert_hours")
+    assert (setting["value"], setting["is_default"]) == (12, False)
+
+    admin = as_role("admin")
+    for invalid in (0, 721, -5):
+        rejected = admin.put(url, json={"alert_hours": invalid})
+        assert (rejected.status_code, rejected.json()["code"]) == (422, "invalid_alert_hours")
+    assert admin.put(url, json={"alert_hours": "doce"}).status_code == 422
+    assert admin.put(url, json={"alert_hours": 24}).json()["is_default"] is True

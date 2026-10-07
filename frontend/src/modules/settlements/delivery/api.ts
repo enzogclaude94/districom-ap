@@ -1,4 +1,5 @@
 import { apiFetch } from "@/lib/api/client";
+import type { Pending } from "@/modules/settlements/pending/api";
 
 /**
  * Delivery settlements API (`/api/v1/settlements/deliveries`, R2). Amounts travel as decimal strings
@@ -196,6 +197,8 @@ export interface Settlement {
   reopened_at: string | null;
   reopen_reason: string | null;
   current_difference: Difference | null;
+  /** Load and financial state of each pending collection, voided ones included (R3). */
+  pending_collections: Pending[];
 }
 
 export interface Leg {
@@ -222,6 +225,8 @@ export interface ClosingPreview {
   amount_to_allocate: string;
   blockers: Blocker[];
   legs: Leg[];
+  /** What the close would publish per pending (the load) next to what is in effect now. */
+  pending_collections: Pending[];
   preview_token: string;
   close_in_effect: CloseRef | null;
 }
