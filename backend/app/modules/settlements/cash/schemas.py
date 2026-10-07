@@ -84,6 +84,9 @@ class AccountOut(BaseModel):
     allow_negative: bool
     active: bool
     balance: Money
+    # «Banco en descubierto» (R4-2): a bank below zero, only ever by a cheque rejected after its crediting.
+    overdrawn: bool
+    overdrawn_label: str | None
 
 
 class MovementOut(BaseModel):

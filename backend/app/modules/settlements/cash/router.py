@@ -35,6 +35,8 @@ def _account_out(balance: AccountBalance) -> schemas.AccountOut:
         allow_negative=balance.allow_negative,
         active=balance.active,
         balance=balance.balance,
+        overdrawn=balance.overdrawn,
+        overdrawn_label="Banco en descubierto" if balance.overdrawn else None,
     )
 
 
