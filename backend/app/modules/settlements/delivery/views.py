@@ -5,6 +5,8 @@ from collections.abc import Iterable
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.modules.settlements.cheques import service as cheque_service
+from app.modules.settlements.cheques import views as cheque_views
 from app.modules.settlements.delivery import (
     additions,
     closing,
@@ -154,6 +156,7 @@ def settlement(db: Session, settlement_id: int) -> s.SettlementOut:
             for e in spent
         ],
         pending_collections=pending_views.items(db, pending_service.of(db, row.id)),
+        cheques=cheque_views.items(db, cheque_service.of(db, row.id)),
         summary=_summary(totals, accounts),
         financial_state=closing.financial_state(row),
         financial_state_detail=closing.financial_state_detail(row),
@@ -175,6 +178,7 @@ def closing_preview(db: Session, settlement_id: int) -> s.ClosingPreviewOut:
     row = plan.settlement
     accounts = {a.account_id: a for a in ledger.account_balances(db, include_inactive=True)}
     in_effect = closing.close_of(db, row.current_close_operation_id) if row.current_close_operation_id else None
+    portfolio = ledger.system_account_id(db, "cheque_portfolio")
     return s.ClosingPreviewOut(
         settlement_id=row.id,
         version=row.version,
@@ -188,14 +192,16 @@ def closing_preview(db: Session, settlement_id: int) -> s.ClosingPreviewOut:
         preview_token=preview.token,
         legs=[
             s.LegOut(
-                account_id=ref,
-                account_name=accounts[ref].name,
-                account_kind=accounts[ref].kind,
+                account_id=portfolio if kind == "cheque" else ref,
+                account_name=accounts[portfolio if kind == "cheque" else ref].name,
+                account_kind=accounts[portfolio if kind == "cheque" else ref].kind,
+                cheque_id=ref if kind == "cheque" else None,
                 amount=amount,
             )
-            for (_, ref), amount in sorted(plan.legs.items())
+            for (kind, ref), amount in sorted(plan.legs.items())
         ],
         pending_collections=pending_views.items(db, pending_service.of(db, row.id)),
+        cheques=cheque_views.items(db, cheque_service.of(db, row.id)),
         close_in_effect=_close_ref(in_effect),
     )
 
@@ -236,6 +242,7 @@ def history(db: Session, settlement_id: int) -> s.HistoryOut:
                         account_name=entry.account_name,
                         account_kind=entry.account_kind,
                         employee_id=employees.get(entry.account_id),
+                        cheque_id=entry.cheque_id,
                         amount=entry.amount,
                     )
                     for entry in details[c.operation_id].entries
@@ -328,6 +335,7 @@ def _summary(totals: summary.Totals, accounts: dict[int, str]) -> s.Summary:
         transfers_rejected=totals.transfers["REJECTED"],
         declared_transfers_count=totals.declared_transfers_count,
         cheques=totals.cheques,
+        unverified_echeqs_count=totals.unverified_echeqs_count,
         pending=totals.pending,
         expenses=totals.expenses,
         justified=totals.justified,

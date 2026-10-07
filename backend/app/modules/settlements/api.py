@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from app.modules.settlements.cash.router import router as cash_router
+from app.modules.settlements.cheques.router import router as cheques_router
 from app.modules.settlements.delivery.router import router as delivery_router
 from app.modules.settlements.pending.router import router as pending_router
 from app.platform.auth.access import module_role, require_module_access
@@ -38,3 +39,4 @@ def status(user: ModuleViewer) -> ModuleStatusOut:
 router.include_router(cash_router)
 router.include_router(delivery_router)
 router.include_router(pending_router)
+router.include_router(cheques_router)

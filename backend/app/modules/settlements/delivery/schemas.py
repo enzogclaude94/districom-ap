@@ -8,6 +8,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.modules.settlements.cash.schemas import Amount, Money, Reason
+from app.modules.settlements.cheques.schemas import ChequeOut
 from app.modules.settlements.pending.schemas import PendingOut
 
 Text500 = Annotated[str, Field(max_length=500)]
@@ -66,8 +67,9 @@ class Summary(BaseModel):
     transfers_declared: Money
     transfers_rejected: Money
     declared_transfers_count: int
-    # Cheques (R4) and pending collections (R3) are always zero until their phase.
+    # Cheques that justify (physical confirmed in hand, verified ECHEQ); declared ECHEQ block the close.
     cheques: Money
+    unverified_echeqs_count: int = 0
     pending: Money
     expenses: Money
     justified: Money
@@ -266,6 +268,8 @@ class LegOut(BaseModel):
     account_name: str
     account_kind: str
     employee_id: int | None = None
+    # The cheque a leg on "Cartera de cheques" moves (R4-1).
+    cheque_id: int | None = None
     amount: Money
 
 
@@ -289,6 +293,7 @@ class ClosingPreviewOut(BaseModel):
     legs: list[LegOut]
     # What the close would publish per pending (the load) next to what is in effect now.
     pending_collections: list[PendingOut]
+    cheques: list[ChequeOut] = []
     # Send it back with the close: if the settlement changed since, the close is refused as stale.
     preview_token: str
     close_in_effect: CloseRef | None
@@ -383,6 +388,7 @@ class SettlementOut(BaseModel):
     expenses: list[ExpenseOut]
     # Load and financial state of each pending collection (R3-1), voided ones included.
     pending_collections: list[PendingOut]
+    cheques: list[ChequeOut] = []
     summary: Summary
     financial_state: FinancialState
     # Plain words for the screen, e.g. that a settlement being corrected keeps its last close in Cajas.

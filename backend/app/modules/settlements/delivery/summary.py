@@ -3,9 +3,10 @@
 justified = cash (count + additions not voided) + VERIFIED transfers + cheques + pending + expenses
 difference = justified - expected (negative: shortage, positive: surplus)
 
-DECLARED and REJECTED transfers are shown but never justify money (Enzo's R2-P3). Cheques (R4) are zero
-until their phase. Pending collections (R3-1) count with their load, not voided: what the next close
-publishes. Voided additions, expenses and pendings do not count.
+DECLARED and REJECTED transfers are shown but never justify money (Enzo's R2-P3). Cheques (R4-1) count
+when they justify (a physical one confirmed in hand, a verified ECHEQ, not voided); a DECLARED ECHEQ is
+counted apart because it blocks the close (Enzo's R4 decision D-K). Pending collections (R3-1) count with
+their load, not voided: what the next close publishes. Voided additions, expenses and pendings do not count.
 """
 
 from collections import defaultdict
@@ -14,9 +15,10 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Literal
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
+from app.modules.settlements.cheques.models import Cheque
 from app.modules.settlements.delivery.models import (
     CashAddition,
     CashCountLine,
@@ -48,6 +50,7 @@ class Totals:
     declared_transfers_count: int = 0
     expenses: Decimal = ZERO
     cheques: Decimal = ZERO
+    unverified_echeqs_count: int = 0
     pending: Decimal = ZERO
 
     @property
@@ -132,4 +135,29 @@ def totals(db: Session, settlement_ids: Sequence[int]) -> dict[int, Totals]:
     )
     for sid, amount in pending:
         result[sid].pending = amount
+    cheques = db.execute(
+        select(Cheque.settlement_id, func.sum(Cheque.amount))
+        .where(
+            Cheque.settlement_id.in_(ids),
+            Cheque.voided_at.is_(None),
+            or_(Cheque.kind == "PHYSICAL", Cheque.verification_status == "VERIFIED"),
+        )
+        .group_by(Cheque.settlement_id)
+    )
+    for owner, amount in cheques:
+        if owner is not None:  # filtered by settlement: always set
+            result[owner].cheques = amount
+    unverified = db.execute(
+        select(Cheque.settlement_id, func.count())
+        .where(
+            Cheque.settlement_id.in_(ids),
+            Cheque.voided_at.is_(None),
+            Cheque.kind == "ECHEQ",
+            Cheque.verification_status == "DECLARED",
+        )
+        .group_by(Cheque.settlement_id)
+    )
+    for owner, count in unverified:
+        if owner is not None:
+            result[owner].unverified_echeqs_count = count
     return result

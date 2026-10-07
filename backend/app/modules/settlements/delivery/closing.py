@@ -18,6 +18,7 @@ freeze the settlement and audit. Legs:
     each bank                  +VERIFIED transfers to that bank
     Gastos operativos          +valid expenses
     Pendientes de cobro        +pending collections not voided (R3-1)
+    Cartera de cheques         +each cheque that justifies, one leg per cheque with its cheque_id (R4-1)
     employee internal account  +its part of a shortage / -its part of a surplus
     Diferencias de rendición   the company's part, same sign
 
@@ -29,12 +30,14 @@ Reopen (admin, with a reason) records a `settlement_reopenings` row, unfreezes t
 the version: the ledger is not touched and the previous close stays in effect until the new close
 replaces it. The same holds for pending collections (R3-1): each close freezes what it published per
 pending in `settlement_closing_pendings`, and that row of the close in effect is the amount in effect,
-whatever the load of a correction says until it is closed.
+whatever the load of a correction says until it is closed. Cheques (R4-1) work the same way with
+`settlement_closing_cheques`: a cheque added in a correction is not in the portfolio until the new close,
+and one voided in it stays there until then; a DECLARED ECHEQ blocks the close.
 
 The close carries the `preview_token` of the preview the user confirmed: if anything that could alter
 the close changed since, it is refused (`settlement_preview_stale`) before any financial write.
 
-Lock order, always: the settlement row, then its pending collections by id, then (inside the ledger) the
+Lock order, always: the settlement row, its pending collections by id, its cheques by id, then (inside the ledger) the
 accounts that lose value, in id order. Load changes lock the settlement row too, so they never interleave with a close.
 """
 
@@ -50,6 +53,8 @@ from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.core.errors import AppError
+from app.modules.settlements.cheques import service as cheques
+from app.modules.settlements.cheques.models import Cheque
 from app.modules.settlements.delivery import schemas as s
 from app.modules.settlements.delivery import service, summary
 from app.modules.settlements.delivery.models import (
@@ -80,7 +85,8 @@ REOPENED_EVENT = "settlements.settlement.reopened"
 CLOSE_NAMESPACE = UUID("5d0f6c1e-8a43-4a52-9a43-1d2b8d7f0c21")
 ZERO = Decimal("0.00")
 
-# A leg before its account exists: ("account", account_id) or ("employee", employee_id).
+# A leg before its account exists: ("account", account_id), ("employee", employee_id) or
+# ("cheque", cheque_id), the latter on "Cartera de cheques" with the cheque named on the leg.
 LegKey = tuple[str, int]
 
 
@@ -162,6 +168,13 @@ def preview(db: Session, settlement_id: int) -> Preview:
                 message=f"Hay {plan.totals.declared_transfers_count} transferencias sin verificar ni rechazar.",
             )
         )
+    if plan.totals.unverified_echeqs_count:
+        blockers.append(
+            s.Blocker(
+                code="settlement_has_unverified_echeqs",
+                message=f"Hay {plan.totals.unverified_echeqs_count} ECHEQ declarados sin verificar.",
+            )
+        )
     return Preview(plan, blockers, preview_token(db, plan))
 
 
@@ -214,6 +227,7 @@ def preview_token(db: Session, plan: Plan) -> str:
         "transfers": sorted([tid, service.money(amount), bank, status] for tid, amount, bank, status in sent),
         "expenses": sorted([eid, category, service.money(amount)] for eid, category, amount in spent),
         "pendings": pending_collections.preview_rows(db, sid),
+        "cheques": cheques.preview_rows(db, sid),
         "cash_by_box": sorted([box, service.money(t.total)] for box, t in totals.by_box.items()),
         "verified_by_bank": sorted([bank, service.money(amount)] for bank, amount in plan.verified_by_bank.items()),
         "difference": service.money(plan.difference),
@@ -229,9 +243,10 @@ def preview_token(db: Session, plan: Plan) -> str:
 def close(db: Session, actor: User, settlement_id: int, body: s.CloseIn) -> service.Created:
     settlement = _lock(db, settlement_id)
     pendings = pending_collections.lock_for_close(db, settlement)
+    locked_cheques = cheques.lock_for_close(db, settlement)
     plan = _plan(db, settlement)
     allocations = _normalize(body.allocations)
-    fingerprint = _fingerprint(plan, body.version, allocations, pendings)
+    fingerprint = _fingerprint(plan, body.version, allocations, pendings, locked_cheques)
 
     existing = db.scalars(
         select(SettlementClosing).where(
@@ -272,7 +287,9 @@ def close(db: Session, actor: User, settlement_id: int, body: s.CloseIn) -> serv
             "Hay transferencias declaradas sin verificar ni rechazar: resolvelas antes de cerrar.",
             {"declared_transfers_count": plan.totals.declared_transfers_count},
         )
+    cheques.require_settlement_cheques_verified(plan.totals.unverified_echeqs_count)
     pending_collections.check_against_applied(db, pendings)
+    cheques.check_close(db, locked_cheques)
     _check_allocations(db, actor, plan, allocations)
     if not body.confirm:
         raise AppError(422, "confirmation_required", "Confirmá el cierre de la rendición.")
@@ -309,6 +326,7 @@ def close(db: Session, actor: User, settlement_id: int, body: s.CloseIn) -> serv
         operation, reversal_id = replaced.replacement, replaced.reversal.id
 
     pending_collections.publish(db, actor, settlement, pendings, operation.id, settlement.current_close_operation_id)
+    cheques.publish(db, actor, settlement, locked_cheques, operation.id, settlement.current_close_operation_id)
     now = datetime.now(UTC)
     superseded = db.execute(
         update(SettlementDifference)
@@ -542,7 +560,6 @@ def _concurrent_change(settlement: Settlement) -> AppError:
 
 def _plan(db: Session, settlement: Settlement) -> Plan:
     totals = summary.totals(db, [settlement.id])[settlement.id]
-    # Cheques (R4) are always zero in this phase; they get their leg then.
     verified = db.execute(
         select(SettlementTransfer.bank_account_id, func.sum(SettlementTransfer.amount))
         .where(SettlementTransfer.settlement_id == settlement.id, SettlementTransfer.status == "VERIFIED")
@@ -563,6 +580,8 @@ def _plan(db: Session, settlement: Settlement) -> Plan:
         add(("account", ledger.system_account_id(db, "expense")), totals.expenses)
     if totals.pending:
         add(("account", ledger.system_account_id(db, "pending_collections")), totals.pending)
+    for cheque in cheques.justifying(cheques.of(db, settlement.id)):
+        add(("cheque", cheque.id), cheque.amount)
     plan.legs = {key: amount for key, amount in legs.items() if amount != 0}
     return plan
 
@@ -660,16 +679,25 @@ def _ledger_legs(db: Session, actor: User, plan: Plan, allocations: list[Allocat
             )
         ).all()
     )
+    portfolio = ledger.system_account_id(db, "cheque_portfolio")
     for (kind, ref), amount in sorted(_all_legs(db, plan, allocations).items()):
         if kind == "account":
-            account_id = ref
+            legs.append(ledger.Leg(ref, amount))
+        elif kind == "cheque":
+            legs.append(ledger.Leg(portfolio, amount, ref))
         else:
             account_id = employee_account_id(db, employee_id=ref, employee_name=names[ref], user_id=actor.id)
-        legs.append(ledger.Leg(account_id, amount))
+            legs.append(ledger.Leg(account_id, amount))
     return legs
 
 
-def _fingerprint(plan: Plan, version: int, allocations: list[Allocation], pendings: list[PendingCollection]) -> str:
+def _fingerprint(
+    plan: Plan,
+    version: int,
+    allocations: list[Allocation],
+    pendings: list[PendingCollection],
+    locked_cheques: list[Cheque],
+) -> str:
     """SHA-256 of everything the close means; who sends it does not change what it is."""
     totals = plan.totals
     payload: dict[str, Any] = {
@@ -693,5 +721,8 @@ def _fingerprint(plan: Plan, version: int, allocations: list[Allocation], pendin
     published = sorted([p.id, service.money(p.amount), p.customer_name] for p in pendings if p.voided_at is None)
     if published:  # absent when there are none, so a retry of a close made before R3 keeps its fingerprint
         payload["pendings"] = published
+    portfolio = sorted([c.id, service.money(c.amount)] for c in cheques.justifying(locked_cheques))
+    if portfolio:  # same: absent when there are none, so a close made before R4 keeps its fingerprint
+        payload["cheques"] = portfolio
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode()).hexdigest()
