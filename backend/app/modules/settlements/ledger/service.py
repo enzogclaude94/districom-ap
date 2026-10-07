@@ -31,6 +31,7 @@ from sqlalchemy.orm import Session, aliased
 from app.core.clock import business_today
 from app.core.errors import AppError
 from app.modules.settlements.ledger.models import (
+    CHEQUE_KINDS,
     REASON_REQUIRED_TYPES,
     Account,
     FinancialOperation,
@@ -56,6 +57,9 @@ MAX_AMOUNT = Decimal("999999999999.99")  # numeric(14,2)
 class Leg:
     account_id: int
     amount: Decimal
+    # The cheque this leg moves: required on the cheque accounts (R4), forbidden elsewhere. An operation
+    # may have several legs on the same cheque account, one per cheque.
+    cheque_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -176,7 +180,7 @@ def reverse_operation(
         db,
         actor=actor,
         type="REVERSAL",
-        legs=[Leg(entry.account_id, -entry.amount) for entry in original.entries],
+        legs=[Leg(entry.account_id, -entry.amount, entry.cheque_id) for entry in original.entries],
         client_request_id=client_request_id,
         business_date=business_date,
         description=reason,
@@ -217,7 +221,7 @@ def reverse_document_operation(
         db,
         actor=actor,
         type="REVERSAL",
-        legs=[Leg(entry.account_id, -entry.amount) for entry in original.entries],
+        legs=[Leg(entry.account_id, -entry.amount, entry.cheque_id) for entry in original.entries],
         client_request_id=client_request_id,
         business_date=original.business_date,
         description=reason,
@@ -257,7 +261,7 @@ def replace_operation(
         raise AppError(422, "unknown_operation_type", "El tipo de operación no se puede reemplazar.")
     _require_role(actor, rule.min_role)
     description = (description or "").strip() or None
-    new_legs = [Leg(leg.account_id, _money(leg.amount)) for leg in legs]
+    new_legs = [Leg(leg.account_id, _money(leg.amount), leg.cheque_id) for leg in legs]
     fingerprint = command_fingerprint(
         actor_id=actor.id,
         type=type,
@@ -283,10 +287,11 @@ def replace_operation(
     if _reversed_by(db, original.id) is not None:
         raise AppError(409, "operation_already_reversed", "La operación ya fue revertida.")
     reason = reason.strip()
-    reversal_legs = [Leg(entry.account_id, -entry.amount) for entry in original.entries]
+    reversal_legs = [Leg(entry.account_id, -entry.amount, entry.cheque_id) for entry in original.entries]
     _validate_command("REVERSAL", business_date, reason or None, reversal_legs)
     _validate_command(type, business_date, description, new_legs)
     accounts = _load_accounts(db, new_legs + reversal_legs)
+    _check_cheque_legs(new_legs, accounts)
     shape_error = leg_shape_error(
         rule, [accounts[leg.account_id].kind for leg in new_legs], [1 if leg.amount > 0 else -1 for leg in new_legs]
     )
@@ -341,7 +346,7 @@ def _post(
 ) -> Posted:
     business_date = business_date or business_today()
     description = (description or "").strip() or None
-    legs = [Leg(leg.account_id, _money(leg.amount)) for leg in legs]
+    legs = [Leg(leg.account_id, _money(leg.amount), leg.cheque_id) for leg in legs]
     fingerprint = command_fingerprint(
         actor_id=actor.id,
         type=type,
@@ -359,6 +364,7 @@ def _post(
 
     _validate_command(type, business_date, description, legs)
     accounts = _load_accounts(db, legs)
+    _check_cheque_legs(legs, accounts)
     if reverses is None:
         rule = RULES[type]
         shape_error = leg_shape_error(
@@ -382,7 +388,9 @@ def _post(
         reverses_operation_id=reverses.id if reverses else None,
         created_by=actor.id,
     )
-    operation.entries = [LedgerEntry(account_id=leg.account_id, amount=leg.amount) for leg in legs]
+    operation.entries = [
+        LedgerEntry(account_id=leg.account_id, amount=leg.amount, cheque_id=leg.cheque_id) for leg in legs
+    ]
     try:
         with db.begin_nested():
             db.add(operation)
@@ -418,7 +426,12 @@ def command_fingerprint(
         "type": type,
         "business_date": business_date.isoformat(),
         "description": description,
-        "legs": sorted([leg.account_id, str(_money(leg.amount))] for leg in legs),
+        # A cheque is part of the leg only when there is one, so fingerprints of operations without
+        # cheques (everything before R4) stay what they were.
+        "legs": sorted(
+            [leg.account_id, str(_money(leg.amount))] + ([leg.cheque_id] if leg.cheque_id is not None else [])
+            for leg in legs
+        ),
         "source": [source.type, source.id] if source else None,
         "reverses": reverses_operation_id,
     }
@@ -457,12 +470,19 @@ def _validate_command(type: str, business_date: date, description: str | None, l
         raise AppError(422, "reason_required", "Esta operación requiere un motivo.")
     if len(legs) < 2:
         raise AppError(422, "invalid_legs", "Una operación tiene al menos dos movimientos.")
-    if len({leg.account_id for leg in legs}) != len(legs):
+    if len({(leg.account_id, leg.cheque_id) for leg in legs}) != len(legs):
         raise AppError(422, "invalid_legs", "Una cuenta aparece más de una vez en la operación.")
     if any(leg.amount == 0 or abs(leg.amount) > MAX_AMOUNT for leg in legs):
         raise AppError(422, "invalid_amount", "Cada movimiento debe tener un importe distinto de cero.")
     if sum((leg.amount for leg in legs), Decimal(0)) != 0:
         raise AppError(422, "unbalanced_operation", "Los movimientos de la operación no suman cero.")
+
+
+def _check_cheque_legs(legs: list[Leg], accounts: dict[int, Account]) -> None:
+    """A leg on a cheque account names its cheque, and no other leg does (the database checks it too)."""
+    for leg in legs:
+        if (accounts[leg.account_id].kind in CHEQUE_KINDS) != (leg.cheque_id is not None):
+            raise AppError(422, "invalid_legs", "Cada movimiento de la cartera de cheques corresponde a un cheque.")
 
 
 def _load_accounts(db: Session, legs: list[Leg]) -> dict[int, Account]:
@@ -484,11 +504,13 @@ def _check_funds(db: Session, legs: list[Leg], accounts: dict[int, Account], bus
     other in a cycle; `NO KEY UPDATE` does not block the foreign-key checks of concurrent inserts into
     other accounts.
     """
-    debits = sorted(
-        (leg for leg in legs if leg.amount < 0 and not accounts[leg.account_id].allow_negative),
-        key=lambda leg: leg.account_id,
-    )
-    for leg in debits:
+    # Several legs may leave the same account (one per cheque): what is checked is their sum.
+    debits: dict[int, Decimal] = {}
+    for leg in legs:
+        if leg.amount < 0 and not accounts[leg.account_id].allow_negative:
+            debits[leg.account_id] = debits.get(leg.account_id, Decimal(0)) + leg.amount
+    for account_id, amount in sorted(debits.items()):
+        leg = Leg(account_id, amount)
         db.execute(select(Account.id).where(Account.id == leg.account_id).with_for_update(key_share=True))
         lowest, on = _lowest_balance_since(db, leg.account_id, business_date)
         if lowest + leg.amount < 0:
@@ -550,7 +572,10 @@ def _audit(db: Session, actor: User, operation: FinancialOperation, reverses: Fi
         "type": operation.type,
         "business_date": operation.business_date.isoformat(),
         "description": operation.description,
-        "legs": [{"account_id": e.account_id, "amount": str(e.amount)} for e in operation.entries],
+        "legs": [
+            {"account_id": e.account_id, "amount": str(e.amount)} | ({"cheque_id": e.cheque_id} if e.cheque_id else {})
+            for e in operation.entries
+        ],
     }
     if reverses is not None:
         after["reverses_operation_id"] = reverses.id
@@ -657,6 +682,7 @@ class EntryDetail:
     account_name: str
     account_kind: str
     amount: Decimal
+    cheque_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -695,7 +721,7 @@ def operation_detail(db: Session, operation_id: int) -> OperationDetail:
         reverses_operation_id=operation.reverses_operation_id,
         reversed_by_operation_id=_reversed_by(db, operation.id),
         entries=[
-            EntryDetail(e.account_id, accounts[e.account_id].name, accounts[e.account_id].kind, e.amount)
+            EntryDetail(e.account_id, accounts[e.account_id].name, accounts[e.account_id].kind, e.amount, e.cheque_id)
             for e in operation.entries
         ],
     )
@@ -715,3 +741,59 @@ def system_account_id(db: Session, code: str) -> int:
     if account_id is None:
         raise AppError(500, "missing_system_account", "Falta una cuenta del sistema.")
     return account_id
+
+
+def cheque_positions(db: Session, cheque_ids: Sequence[int]) -> dict[int, dict[str, Decimal]]:
+    """Where each cheque is: the net of its legs per account kind (R4). A cheque in the portfolio has
+    +amount there; one that never had effect, or left the company's hands, has nothing."""
+    result: dict[int, dict[str, Decimal]] = {cid: {} for cid in cheque_ids}
+    if not cheque_ids:
+        return result
+    rows = db.execute(
+        select(LedgerEntry.cheque_id, Account.kind, func.sum(LedgerEntry.amount))
+        .join(Account, Account.id == LedgerEntry.account_id)
+        .where(LedgerEntry.cheque_id.in_(cheque_ids))
+        .group_by(LedgerEntry.cheque_id, Account.kind)
+    )
+    for cheque_id, kind, amount in rows:
+        if cheque_id is not None and amount != 0:
+            result[cheque_id][kind] = amount
+    return result
+
+
+def cheques_with_effect(db: Session, cheque_ids: Sequence[int]) -> set[int]:
+    """Cheques that ever had a financial effect (any leg, even if later reversed): published instruments."""
+    if not cheque_ids:
+        return set()
+    return set(db.scalars(select(LedgerEntry.cheque_id).where(LedgerEntry.cheque_id.in_(cheque_ids)).distinct()))
+
+
+def cheque_activity(db: Session, cheque_ids: Sequence[int], *, except_types: Sequence[str]) -> set[int]:
+    """Cheques moved by an operation of another type than `except_types` (nor its reversal)."""
+    if not cheque_ids:
+        return set()
+    original = aliased(FinancialOperation)
+    rows = db.scalars(
+        select(LedgerEntry.cheque_id)
+        .join(FinancialOperation, FinancialOperation.id == LedgerEntry.operation_id)
+        .outerjoin(original, original.id == FinancialOperation.reverses_operation_id)
+        .where(
+            LedgerEntry.cheque_id.in_(cheque_ids),
+            func.coalesce(original.type, FinancialOperation.type).not_in(list(except_types)),
+        )
+        .distinct()
+    )
+    return {cid for cid in rows if cid is not None}
+
+
+def cheques_held(db: Session, kind: str) -> dict[int, Decimal]:
+    """Cheques whose legs leave a positive balance in an account of `kind` (CHEQUE_PORTFOLIO or
+    CHEQUES_IN_TRANSIT): what the portfolio or the deposited cheques are made of, cheque by cheque."""
+    rows = db.execute(
+        select(LedgerEntry.cheque_id, func.sum(LedgerEntry.amount))
+        .join(Account, Account.id == LedgerEntry.account_id)
+        .where(Account.kind == kind, LedgerEntry.cheque_id.is_not(None))
+        .group_by(LedgerEntry.cheque_id)
+        .having(func.sum(LedgerEntry.amount) > 0)
+    )
+    return {cid: amount for cid, amount in rows if cid is not None}

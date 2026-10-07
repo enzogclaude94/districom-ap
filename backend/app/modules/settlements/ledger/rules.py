@@ -40,11 +40,27 @@ RULES: dict[str, OperationRule] = {
     # cash, verified transfers, expenses and pending collections (R3) justify it; the difference goes to
     # employees or the company. Who may absorb a difference for the company is checked by the settlement,
     # which owns that rule.
+    # R4-1: each cheque received (physical) or verified (ECHEQ) enters "Cartera de cheques" with its own leg.
     "SETTLEMENT_CLOSE": OperationRule(
         "operator",
-        CASH_AND_BANK | {"DELIVERY_COLLECTIONS", "EXPENSE", "EMPLOYEE", "SETTLEMENT_DIFFERENCE", "PENDING_COLLECTIONS"},
+        CASH_AND_BANK
+        | {
+            "DELIVERY_COLLECTIONS",
+            "EXPENSE",
+            "EMPLOYEE",
+            "SETTLEMENT_DIFFERENCE",
+            "PENDING_COLLECTIONS",
+            "CHEQUE_PORTFOLIO",
+        },
         "DELIVERY_COLLECTIONS",
-        (("DELIVERY_COLLECTIONS", -1), ("CASH_BOX", 1), ("BANK", 1), ("EXPENSE", 1), ("PENDING_COLLECTIONS", 1)),
+        (
+            ("DELIVERY_COLLECTIONS", -1),
+            ("CASH_BOX", 1),
+            ("BANK", 1),
+            ("EXPENSE", 1),
+            ("PENDING_COLLECTIONS", 1),
+            ("CHEQUE_PORTFOLIO", 1),
+        ),
     ),
     # A customer pays a pending collection (R3-2): it leaves "Pendientes de cobro" and enters the cash box
     # (CASH) or the bank (TRANSFER). The pending decides which one; exactly two legs.
@@ -62,9 +78,32 @@ RULES: dict[str, OperationRule] = {
         "PENDING_COLLECTIONS",
         (("PENDING_COLLECTIONS", -1), ("UNCOLLECTIBLE", 1), ("EMPLOYEE", 1)),
     ),
+    # Administrative entries of a cheque into the portfolio (Enzo's R4 decision D-B), admin only: a cheque
+    # already held when Rendiciones starts, or a partner's contribution with a cheque. Never a generic
+    # "extraordinary" entry: every value has a known economic cause.
+    "CHEQUE_OPENING_BALANCE": OperationRule(
+        "admin",
+        frozenset({"OPENING_BALANCE", "CHEQUE_PORTFOLIO"}),
+        "OPENING_BALANCE",
+        (("OPENING_BALANCE", -1), ("CHEQUE_PORTFOLIO", 1)),
+    ),
+    "CHEQUE_OWNER_CONTRIBUTION": OperationRule(
+        "admin",
+        frozenset({"OWNER_EQUITY", "CHEQUE_PORTFOLIO"}),
+        "OWNER_EQUITY",
+        (("OWNER_EQUITY", -1), ("CHEQUE_PORTFOLIO", 1)),
+    ),
 }
 # Operations that belong to a source document: only that document's flow corrects them, never Cajas.
-DOCUMENT_TYPES = frozenset({"SETTLEMENT_CLOSE", "PENDING_COLLECTION", "PENDING_WRITE_OFF"})
+DOCUMENT_TYPES = frozenset(
+    {
+        "SETTLEMENT_CLOSE",
+        "PENDING_COLLECTION",
+        "PENDING_WRITE_OFF",
+        "CHEQUE_OPENING_BALANCE",
+        "CHEQUE_OWNER_CONTRIBUTION",
+    }
+)
 # Document operations undone with `reverse_document_operation` (a settlement close is replaced instead).
 REVERSIBLE_DOCUMENT_TYPES = frozenset({"PENDING_COLLECTION", "PENDING_WRITE_OFF"})
 # REVERSAL has no rule here: it is only built by `reverse_operation` from the original's legs.

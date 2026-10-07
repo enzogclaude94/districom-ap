@@ -20,7 +20,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
-from sqlalchemy import text
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -32,6 +32,9 @@ TRUNCATED_TABLES = (
     "audit_events",
     "app_settings",
     "user_module_roles",
+    "settlements.cheque_events",
+    "settlements.settlement_closing_cheques",
+    "settlements.cheques",
     "settlements.pending_collection_events",
     "settlements.pending_resolution_allocations",
     "settlements.pending_collection_resolutions",
@@ -53,6 +56,8 @@ TRUNCATED_TABLES = (
     "settlements.settlements",
 )
 # Rendiciones accounts seeded by migrations 0005 and 0008-0010; tests may add others, removed afterwards.
+# The official bank catalog as migration 0011 seeds it (JSON), restored after each test.
+SEEDED_BANKS = "[]"
 SEEDED_ACCOUNTS = (
     "main_cash",
     "change_cash",
@@ -64,6 +69,8 @@ SEEDED_ACCOUNTS = (
     "settlement_difference",
     "pending_collections",
     "uncollectible",
+    "cheque_portfolio",
+    "cheques_in_transit",
 )
 
 
@@ -79,6 +86,16 @@ def migrated_db() -> None:
     cfg = alembic_config()
     command.downgrade(cfg, "base")
     command.upgrade(cfg, "head")
+    global SEEDED_BANKS
+    engine = create_engine(os.environ["DATABASE_URL"])
+    with engine.connect() as conn:
+        SEEDED_BANKS = conn.execute(
+            text(
+                "SELECT coalesce(jsonb_agg(jsonb_build_object('id', id, 'bcra_code', bcra_code, 'name', name, "
+                "'source', source)), '[]')::text FROM financial_institutions WHERE source = 'BCRA'"
+            )
+        ).scalar_one()
+    engine.dispose()
 
 
 @pytest.fixture
@@ -90,6 +107,23 @@ def db(migrated_db: None) -> Iterator[Session]:
     session.close()
     with session.get_bind().begin() as conn:  # type: ignore[union-attr]
         conn.execute(text(f"TRUNCATE {', '.join(TRUNCATED_TABLES)} RESTART IDENTITY CASCADE"))
+        # TRUNCATE users CASCADE empties the bank catalog too (a manual entry names its author): put back
+        # the official entries the migration seeded, with their ids.
+        conn.execute(text("TRUNCATE financial_institutions CASCADE"))
+        conn.execute(
+            text(
+                "INSERT INTO financial_institutions (id, bcra_code, name, source, active) OVERRIDING SYSTEM VALUE "
+                "SELECT id, bcra_code, name, source, true FROM jsonb_to_recordset(CAST(:rows AS jsonb)) "
+                "AS r(id bigint, bcra_code int, name text, source text)"
+            ),
+            {"rows": SEEDED_BANKS},
+        )
+        conn.execute(
+            text(
+                "SELECT setval(pg_get_serial_sequence('financial_institutions', 'id'), "
+                "(SELECT coalesce(max(id), 0) + 1 FROM financial_institutions), false)"
+            )
+        )
         conn.execute(
             text("DELETE FROM settlements.accounts WHERE code IS NULL OR code <> ALL(:codes)"),
             {"codes": list(SEEDED_ACCOUNTS)},

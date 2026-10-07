@@ -60,6 +60,8 @@ def test_viewer_reads_accounts_with_balances_as_decimal_strings(as_role, funded)
         ("settlement_difference", "Diferencias de rendición", "SETTLEMENT_DIFFERENCE", "0.00"),
         ("pending_collections", "Pendientes de cobro", "PENDING_COLLECTIONS", "0.00"),
         ("uncollectible", "Incobrables", "UNCOLLECTIBLE", "0.00"),
+        ("cheque_portfolio", "Cartera de cheques", "CHEQUE_PORTFOLIO", "0.00"),
+        ("cheques_in_transit", "Cheques depositados", "CHEQUES_IN_TRANSIT", "0.00"),
     ]
     one = viewer.get(f"{BASE}/accounts/{funded['main_cash']}").json()
     assert one["balance"] == "100000.00"
@@ -230,6 +232,8 @@ def test_cash_and_bank_operations_move_the_balances(as_role, funded) -> None:  #
         "settlement_difference": "0.00",
         "pending_collections": "0.00",
         "uncollectible": "0.00",
+        "cheque_portfolio": "0.00",
+        "cheques_in_transit": "0.00",
     }
 
 

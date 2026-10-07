@@ -13,6 +13,7 @@ EXPECTED_TABLES = {
     "employees",
     "employee_functions",
     "user_module_roles",
+    "financial_institutions",
 }
 
 
@@ -45,6 +46,9 @@ SETTLEMENTS_TABLES = {
     "pending_collection_receipts",
     "pending_collection_resolutions",
     "pending_resolution_allocations",
+    "cheques",
+    "cheque_events",
+    "settlement_closing_cheques",
 }
 
 
@@ -122,6 +126,8 @@ def test_settlements_system_accounts_seeded(migrated_db: None) -> None:
         ("settlement_difference", "SETTLEMENT_DIFFERENCE", True),
         ("pending_collections", "PENDING_COLLECTIONS", False),
         ("uncollectible", "UNCOLLECTIBLE", False),
+        ("cheque_portfolio", "CHEQUE_PORTFOLIO", False),
+        ("cheques_in_transit", "CHEQUES_IN_TRANSIT", False),
     ]
 
 
@@ -182,6 +188,8 @@ def test_account_name_key_backfill() -> None:
             "diferencias de rendicion",
             "pendientes de cobro",
             "incobrables",
+            "cartera de cheques",
+            "cheques depositados",
         ]
     finally:
         with engine.begin() as conn:
