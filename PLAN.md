@@ -327,12 +327,12 @@ Cada PR espera la aprobación de Enzo antes del siguiente.
 
 ## 16. Rendiciones — R3 (pendientes de cobro)
 
-Propuesta `PROPUESTA_R3_PENDIENTES_DE_COBRO.md` aprobada por Enzo el 2026-10-05, con sus ocho decisiones y dos precisiones: el importe financiero vigente es el del cierre vigente aunque la rendición esté en corrección, y `pending_collection_events` es obligatoria. R3‑1 aprobado el 2026-10-06 (`0009` congelada); R3‑2 aprobado el 2026-10-07 (`0010` congelada) y R3‑3 autorizado con las decisiones D1–D4 de pantallas. Alcance en `ROADMAP.md`.
+Propuesta `PROPUESTA_R3_PENDIENTES_DE_COBRO.md` aprobada por Enzo el 2026-10-05, con sus ocho decisiones y dos precisiones: el importe financiero vigente es el del cierre vigente aunque la rendición esté en corrección, y `pending_collection_events` es obligatoria. R3‑1 aprobado el 2026-10-06 (`0009` congelada); R3‑2 aprobado el 2026-10-07 (`0010` congelada) y R3‑3 aprobado el 2026-10-07 (decisiones D1–D4 de pantallas). Alcance en `ROADMAP.md`.
 
 | PR | Contenido | Estado |
 |---|---|---|
 | R3‑1 | Pendientes en la rendición y en el cierre: migración `0009` (`pending_collections`, `settlement_closing_pendings`, `pending_collection_events`, cuenta «Pendientes de cobro»), alta idempotente, corrección y anulación, pata del cierre, snapshot por cierre, vista previa y token, reemplazo con efecto neto, estado financiero vigente durante una corrección, tests | Mergeado (PR #13) |
 | R3‑2 | Acreditaciones, resoluciones, «Incobrables», reversos, tope por pendiente, lista global con estado y alertas, concurrencia | Mergeado (PR #14) |
-| R3‑3 | Pendientes en la rendición, lista global, detalle, cobro (también rápido), resolución, reversos, responsable, alertas en Inicio y menú, horas de alerta editables, enlaces Cajas ↔ pendiente, tests y E2E | Esperando aprobación |
+| R3‑3 | Pendientes en la rendición, lista global, detalle, cobro (también rápido), resolución, reversos, responsable, alertas en Inicio y menú, horas de alerta editables, enlaces Cajas ↔ pendiente, tests y E2E | Mergeado (PR #16) |
 
-**R3 IN_PROGRESS.**
+**R3 DONE** (2026-10-07). R4 (cartera de cheques) espera una propuesta actualizada con las decisiones R4‑D1 a R4‑D4 de Enzo antes de autorizar R4‑1.

@@ -5,6 +5,7 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 ## [Unreleased]
 
 ### Added — Pantallas de pendientes de cobro (R3‑3)
+- **R3 DONE:** pendientes de cobro completos (R3‑1, R3‑2 y R3‑3 aprobados).
 - **Pendientes dentro de la rendición** (`/rendiciones/repartos/{id}`): sección «Pendientes» con cliente, importe de carga, importe vigente, estado, saldo, responsable y fecha esperada. Con la rendición abierta, el operator agrega (responsable preseleccionado: el repartidor), corrige y anula con motivo. Durante una corrección, cada pendiente separa lo vigente de lo que aplicará el nuevo cierre («Vigente: $100.000 · Nuevo importe propuesto: $70.000», «Marcado para quitar en esta corrección. Sigue vigente por $100.000 hasta confirmar el nuevo cierre»); nunca se muestra anulado antes del nuevo cierre.
 - **`/rendiciones/pendientes`:** por defecto Pendiente y Parcial, paginada en el backend, con cliente, rendición, repartidor, responsable, importe vigente, cobrado, resuelto, saldo, antigüedad, estado, alerta y fecha esperada. Filtros por cliente, repartidor, responsable, estado, antigüedad y «Solo en alerta». Un Parcial siempre muestra «Cobrado · Resuelto · Saldo». La alerta («En alerta · 2 días», con el saldo) y la fecha esperada vencida se muestran por separado.
 - **`/rendiciones/pendientes/{id}`:** origen, estado financiero, cobros (medio, cuenta, fecha de negocio, quién y cuándo, reverso), resoluciones (partes empresa y empleados, motivo, reverso) e historia desde `pending_collection_events`, con enlaces a Cajas.
