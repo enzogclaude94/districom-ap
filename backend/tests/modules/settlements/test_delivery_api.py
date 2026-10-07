@@ -669,6 +669,7 @@ def test_the_board_is_computed_by_the_backend(as_role, ids, opened, category) ->
         "transfers_rejected": "0.00",
         "declared_transfers_count": 1,
         "cheques": "0.00",
+        "unverified_echeqs_count": 0,
         "pending": "0.00",
         "expenses": "1500.00",
         "justified": "78500.00",

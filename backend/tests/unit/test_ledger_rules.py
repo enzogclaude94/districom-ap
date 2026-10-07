@@ -85,6 +85,8 @@ def test_adjustments_and_partner_movements_need_admin() -> None:
         "OWNER_WITHDRAWAL",
         "ADJUSTMENT",
         "PENDING_WRITE_OFF",
+        "CHEQUE_OPENING_BALANCE",
+        "CHEQUE_OWNER_CONTRIBUTION",
     }
     assert {t for t, rule in RULES.items() if rule.min_role == "operator"} == {
         "CASH_TRANSFER",

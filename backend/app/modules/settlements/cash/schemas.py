@@ -112,6 +112,8 @@ class EntryOut(BaseModel):
     account_name: str
     account_kind: str
     amount: Money
+    # The cheque a leg on a cheque account moves (R4-1); null on every other account.
+    cheque_id: int | None = None
 
 
 class OperationOut(BaseModel):

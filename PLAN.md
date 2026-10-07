@@ -335,4 +335,14 @@ Propuesta `PROPUESTA_R3_PENDIENTES_DE_COBRO.md` aprobada por Enzo el 2026-10-05,
 | R3‑2 | Acreditaciones, resoluciones, «Incobrables», reversos, tope por pendiente, lista global con estado y alertas, concurrencia | Mergeado (PR #14) |
 | R3‑3 | Pendientes en la rendición, lista global, detalle, cobro (también rápido), resolución, reversos, responsable, alertas en Inicio y menú, horas de alerta editables, enlaces Cajas ↔ pendiente, tests y E2E | Mergeado (PR #16) |
 
-**R3 DONE** (2026-10-07). R4 (cartera de cheques) espera una propuesta actualizada con las decisiones R4‑D1 a R4‑D4 de Enzo antes de autorizar R4‑1.
+**R3 DONE** (2026-10-07).
+
+## 17. Rendiciones — R4 (cartera de cheques)
+
+Propuesta `PROPUESTA_R4_CARTERA_DE_CHEQUES.md` aprobada con ajustes por Enzo el 2026-10-07 (decisiones D‑A…D‑K, en `ROADMAP.md`); autorizó solo R4‑1. Cada PR espera su aprobación antes del siguiente.
+
+| PR | Contenido | Estado |
+|---|---|---|
+| R4‑1 | Modelo, cartera y cheques en rendición: catálogo de bancos (`0011`, plataforma) y cheques (`0012`, settlements) | En revisión |
+| R4‑2 | Depósito, acreditación, rechazo, devolución y pendientes por rechazo | Espera aprobación |
+| R4‑3 | Pantallas | Espera aprobación |

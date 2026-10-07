@@ -46,7 +46,13 @@ ACCOUNT_KINDS = (
     "PENDING_COLLECTIONS",
     # R3-2: what the company gave up collecting ("Incobrables"); a loss, never available money.
     "UNCOLLECTIBLE",
+    # R4: cheques the company holds ("Cartera de cheques") and cheques deposited but not yet credited
+    # ("Cheques depositados"). Assets, never available money; every leg in them names its cheque.
+    "CHEQUE_PORTFOLIO",
+    "CHEQUES_IN_TRANSIT",
 )
+# Accounts whose every leg is one cheque (`ledger_entries.cheque_id`), and only those.
+CHEQUE_KINDS = ("CHEQUE_PORTFOLIO", "CHEQUES_IN_TRANSIT")
 # Technical counter-accounts: exactly one of each.
 TECHNICAL_KINDS = (
     "OPENING_BALANCE",
@@ -56,6 +62,8 @@ TECHNICAL_KINDS = (
     "SETTLEMENT_DIFFERENCE",
     "PENDING_COLLECTIONS",
     "UNCOLLECTIBLE",
+    "CHEQUE_PORTFOLIO",
+    "CHEQUES_IN_TRANSIT",
 )
 
 OPERATION_TYPES = (
@@ -71,6 +79,9 @@ OPERATION_TYPES = (
     # R3-2: a receipt of a pending collection, and its administrative resolution (write-off).
     "PENDING_COLLECTION",
     "PENDING_WRITE_OFF",
+    # R4-1: cheques already held when Rendiciones starts, and a partner's contribution with a cheque.
+    "CHEQUE_OPENING_BALANCE",
+    "CHEQUE_OWNER_CONTRIBUTION",
 )
 # Operations whose description is the mandatory reason.
 REASON_REQUIRED_TYPES = ("ADJUSTMENT", "REVERSAL", "PENDING_WRITE_OFF")
@@ -191,5 +202,9 @@ class LedgerEntry(IdMixin, Base):
     )
     account_id: Mapped[int] = mapped_column(BigInteger, ForeignKey(f"{SCHEMA}.accounts.id", ondelete="RESTRICT"))
     amount: Mapped[Decimal] = mapped_column(Numeric(14, 2))
+    # The cheque this leg moves (R4): set exactly on legs of the cheque accounts, for its full amount.
+    cheque_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey(f"{SCHEMA}.cheques.id", ondelete="RESTRICT"), index=True
+    )
 
     operation: Mapped[FinancialOperation] = relationship(back_populates="entries")
