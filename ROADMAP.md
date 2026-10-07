@@ -40,7 +40,7 @@ DistriCom es una plataforma modular (ADR 006). Este roadmap tiene tres carriles:
 | R0 | Habilitación del módulo | **DONE** (aprobada por Enzo el 2026-10-04) | PL‑1 |
 | R1 | Ledger y cajas | **DONE** (aprobada por Enzo el 2026-10-04; PRs #7–#9 mergeados) | R0 |
 | R2 | Rendición de reparto básica | **DONE** (aprobada por Enzo el 2026-10-05; PRs #10–#12 mergeados) | R1 |
-| R3 | Pendientes de cobro | **IN_PROGRESS** (propuesta aprobada por Enzo el 2026-10-05; R3‑1 aprobado y mergeado; R3‑2 en curso) | R2 |
+| R3 | Pendientes de cobro | **IN_PROGRESS** (propuesta aprobada por Enzo el 2026-10-05; R3‑1 y R3‑2 aprobados y mergeados; R3‑3 esperando aprobación) | R2 |
 | R4 | Cartera de cheques | PLANNED | R2 |
 | R5 | Combustible y vehículos | PLANNED | R2 |
 | R6 | Pagos a proveedores y terceros | PLANNED | R1 · R4 |
@@ -165,7 +165,13 @@ Modelo conceptual en `DATA_MODEL.md §13`; decisiones en ADR 007. Cada fase crea
 - un reverso dice «la operación estaba mal», nunca es un hecho económico nuevo: lleva la fecha de negocio de la operación original y `created_at` registra cuándo se corrigió; los controles históricos de Caja, Banco y Pendientes se validan en esa fecha (puede dar `insufficient_funds`). Las devoluciones a clientes no se modelan por ahora;
 - un admin puede cambiar el responsable de un pendiente después del cierre, sin ledger ni reapertura; es lo único de la carga que cambia con la rendición cerrada.
 
-**PRs:** R3‑1 pendientes en la rendición y en el cierre (migración `0009`) · R3‑2 acreditaciones, resoluciones y alertas (`0010`) · R3‑3 pantallas y E2E. Cada uno espera la aprobación de Enzo antes del siguiente.
+**Decisiones de R3‑3 (Enzo, 2026-10-07):**
+- D1: el contador de pendientes en alerta va en el Inicio de Rendiciones (tarjeta con cantidad, saldo y enlace a la lista filtrada) y como insignia discreta en el menú; nunca como notificación invasiva;
+- D2: a un operator se le ocultan las acciones que no puede usar (resolver, revertir, cambiar responsable); la API sigue siendo la autoridad;
+- D3: un admin edita `settlements.pending_alert_hours` desde la configuración del módulo, guardado en `app_settings` (de 1 a 720 horas); sin scheduler, email, WhatsApp ni push;
+- D4: un cobro se registra desde el detalle o como acción rápida de la lista, siempre releyendo el pendiente y con un paso de confirmación explícito.
+
+**PRs:** R3‑1 pendientes en la rendición y en el cierre (migración `0009`) · R3‑2 acreditaciones, resoluciones y alertas (`0010`) · R3‑3 pantallas y E2E (sin migración). Cada uno espera la aprobación de Enzo antes del siguiente.
 
 ### R4 — Cartera de cheques
 **Alcance:** cheque único (físico / ECHEQ) con titular y entregador, historial de estados (en cartera, depositado, rechazado, entregado con destinatario), alta desde rendición, pendiente u operación extraordinaria.
