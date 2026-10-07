@@ -46,6 +46,7 @@ function NavLink({ item, pathname, phasePrefix, nested, icon: Icon }: NavLinkPro
     );
   }
   const active = isActive(pathname, item);
+  const Indicator = item.indicator;
   return (
     <Link
       href={item.href}
@@ -53,6 +54,7 @@ function NavLink({ item, pathname, phasePrefix, nested, icon: Icon }: NavLinkPro
       className={cn(base, active ? "bg-primary-soft font-medium text-primary" : "text-foreground hover:bg-muted")}
     >
       {label}
+      {Indicator && <Indicator />}
     </Link>
   );
 }

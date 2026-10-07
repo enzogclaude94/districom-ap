@@ -9,6 +9,8 @@ export interface NavItem {
   phase?: number;
   /** Active only on this exact path (module home pages). */
   exact?: boolean;
+  /** Small live indicator next to the label, provided by the module (e.g. a count in alert). */
+  indicator?: ComponentType;
 }
 
 export interface NavSection {

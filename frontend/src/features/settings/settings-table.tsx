@@ -55,7 +55,7 @@ export function SettingsTable() {
             <CardDescription>
               {scope.scope === "platform"
                 ? "Parámetros generales de DistriCom."
-                : `Parámetros del módulo ${scope.label}. La edición llega en una fase posterior.`}
+                : `Parámetros del módulo ${scope.label}. Los que se pueden cambiar se editan desde la configuración del módulo.`}
             </CardDescription>
           </CardHeader>
           <CardContent className="p-0">
