@@ -49,6 +49,12 @@ SETTLEMENTS_TABLES = {
     "cheques",
     "cheque_events",
     "settlement_closing_cheques",
+    "cheque_deposits",
+    "cheque_deposit_items",
+    "cheque_credits",
+    "cheque_credit_items",
+    "cheque_rejections",
+    "cheque_returns",
 }
 
 

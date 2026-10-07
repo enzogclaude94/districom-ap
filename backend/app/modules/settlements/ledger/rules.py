@@ -64,11 +64,12 @@ RULES: dict[str, OperationRule] = {
     ),
     # A customer pays a pending collection (R3-2): it leaves "Pendientes de cobro" and enters the cash box
     # (CASH) or the bank (TRANSFER). The pending decides which one; exactly two legs.
+    # R4-2: or with a cheque (method CHEQUE), which enters "Cartera de cheques".
     "PENDING_COLLECTION": OperationRule(
         "operator",
-        CASH_AND_BANK | {"PENDING_COLLECTIONS"},
+        CASH_AND_BANK | {"PENDING_COLLECTIONS", "CHEQUE_PORTFOLIO"},
         "PENDING_COLLECTIONS",
-        (("PENDING_COLLECTIONS", -1), ("CASH_BOX", 1), ("BANK", 1)),
+        (("PENDING_COLLECTIONS", -1), ("CASH_BOX", 1), ("BANK", 1), ("CHEQUE_PORTFOLIO", 1)),
     ),
     # Administrative resolution of a pending (R3-2): admin only, with a reason. The company's part goes to
     # "Incobrables", each employee's part to their internal account (the employee owes it).
@@ -93,7 +94,38 @@ RULES: dict[str, OperationRule] = {
         "OWNER_EQUITY",
         (("OWNER_EQUITY", -1), ("CHEQUE_PORTFOLIO", 1)),
     ),
+    # The financial cycle of a cheque (R4-2). Each is the operation of its document (deposit slip, crediting,
+    # rejection, return), which builds the exact legs; the database checks them against the document.
+    # A deposit slip: per cheque, "Cartera de cheques" -X and "Cheques depositados" +X.
+    "CHEQUE_DEPOSIT": OperationRule(
+        "operator",
+        frozenset({"CHEQUE_PORTFOLIO", "CHEQUES_IN_TRANSIT"}),
+        None,
+        (("CHEQUE_PORTFOLIO", -1), ("CHEQUES_IN_TRANSIT", 1)),
+    ),
+    # A crediting: per cheque, "Cheques depositados" -X; the bank +total.
+    "CHEQUE_CREDIT": OperationRule(
+        "operator",
+        frozenset({"CHEQUES_IN_TRANSIT", "BANK"}),
+        "BANK",
+        (("CHEQUES_IN_TRANSIT", -1), ("BANK", 1)),
+    ),
+    # A rejection: "Cheques depositados" -X (in transit) or the bank -X (after crediting), and a new pending.
+    "CHEQUE_REJECTION": OperationRule(
+        "operator",
+        frozenset({"CHEQUES_IN_TRANSIT", "BANK", "PENDING_COLLECTIONS"}),
+        "PENDING_COLLECTIONS",
+        (("CHEQUES_IN_TRANSIT", -1), ("BANK", -1), ("PENDING_COLLECTIONS", 1)),
+    ),
+    # A cheque of the portfolio given back (admin, with a reason): "Cartera de cheques" -X, a new pending.
+    "CHEQUE_RETURN": OperationRule(
+        "admin",
+        frozenset({"CHEQUE_PORTFOLIO", "PENDING_COLLECTIONS"}),
+        "PENDING_COLLECTIONS",
+        (("CHEQUE_PORTFOLIO", -1), ("PENDING_COLLECTIONS", 1)),
+    ),
 }
+CHEQUE_CYCLE_TYPES = frozenset({"CHEQUE_DEPOSIT", "CHEQUE_CREDIT", "CHEQUE_REJECTION", "CHEQUE_RETURN"})
 # Operations that belong to a source document: only that document's flow corrects them, never Cajas.
 DOCUMENT_TYPES = frozenset(
     {
@@ -103,9 +135,15 @@ DOCUMENT_TYPES = frozenset(
         "CHEQUE_OPENING_BALANCE",
         "CHEQUE_OWNER_CONTRIBUTION",
     }
+    | CHEQUE_CYCLE_TYPES
 )
 # Document operations undone with `reverse_document_operation` (a settlement close is replaced instead).
-REVERSIBLE_DOCUMENT_TYPES = frozenset({"PENDING_COLLECTION", "PENDING_WRITE_OFF"})
+REVERSIBLE_DOCUMENT_TYPES = frozenset({"PENDING_COLLECTION", "PENDING_WRITE_OFF"} | CHEQUE_CYCLE_TYPES)
+# «Banco en descubierto» (Enzo's R4-2 policy): the only debits a bank account books even if they create or
+# deepen an overdraft. A rejection of a cheque already credited is an external event, not a decision of the
+# company. Every other debit of a bank (withdrawal, transfer out, a reversal...) keeps every end-of-day
+# balance from its date on >= 0; incomes are never limited. The database applies the same rule (0013).
+EXTERNAL_BANK_DEBITS = frozenset({"CHEQUE_REJECTION"})
 # REVERSAL has no rule here: it is only built by `reverse_operation` from the original's legs.
 REVERSAL_MIN_ROLE = "admin"
 
