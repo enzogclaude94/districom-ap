@@ -143,6 +143,7 @@ function settlement(changes: Partial<Settlement> = {}): Settlement {
     reopened_at: null,
     reopen_reason: null,
     current_difference: null,
+    pending_collections: [],
     ...changes,
   };
 }
@@ -161,6 +162,7 @@ function preview(changes: Partial<ClosingPreview> = {}): ClosingPreview {
     legs: [],
     preview_token: "a".repeat(64),
     close_in_effect: null,
+    pending_collections: [],
     ...changes,
   };
 }

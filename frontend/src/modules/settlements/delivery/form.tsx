@@ -10,8 +10,11 @@ import { Label } from "@/components/ui/label";
 import { formatDateTime, formatMoney } from "@/lib/format";
 import { parseAmount } from "@/modules/settlements/cash/amount";
 
-import { deliveryErrorView } from "./errors";
-import type { DeliveryAction, DeliveryRequest } from "./use-delivery-action";
+import { deliveryErrorView, type DeliveryErrorView } from "./errors";
+import type { DeliveryRequest, WriteAction } from "./use-delivery-action";
+
+/** Reads an API error for the user; each document passes its own (settlement, pending collection). */
+export type ErrorView = (error: unknown) => DeliveryErrorView;
 
 export const selectClass =
   "flex h-9 w-full rounded-md border border-border bg-surface px-3 text-sm focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:opacity-50";
@@ -132,11 +135,22 @@ export function FormError({ message }: { message: string | null | undefined }) {
  * Shown instead of a form when an earlier attempt of the same action has an unknown outcome: it can be
  * retried exactly as it was (never duplicated) or, after a clear warning, abandoned.
  */
-export function PendingAttempt({ action, onClose }: { action: DeliveryAction; onClose: () => void }) {
+export function PendingAttempt({
+  action,
+  onClose,
+  errorView = deliveryErrorView,
+  where = "la rendición",
+}: {
+  action: WriteAction;
+  onClose: () => void;
+  errorView?: ErrorView;
+  /** What to check before abandoning: "la rendición", "el pendiente". */
+  where?: string;
+}) {
   const [confirmAbandon, setConfirmAbandon] = useState(false);
   const stored = action.stored!;
   const pending = action.mutation.isPending;
-  const error = action.mutation.error ? deliveryErrorView(action.mutation.error) : null;
+  const error = action.mutation.error ? errorView(action.mutation.error) : null;
 
   return (
     <div className="space-y-4">
@@ -155,8 +169,8 @@ export function PendingAttempt({ action, onClose }: { action: DeliveryAction; on
         <div className="space-y-3 rounded-md border border-danger/30 px-3 py-3 text-sm" role="alertdialog">
           <p className="font-medium">¿Descartar el intento?</p>
           <p>
-            Si esa operación sí se registró y después cargás otra igual, quedaría duplicada. Antes de descartar, revisá
-            la rendición.
+            Si esa operación sí se registró y después cargás otra igual, quedaría duplicada. Antes de descartar, revisá{" "}
+            {where}.
           </p>
           <div className="flex flex-wrap justify-end gap-2">
             <Button variant="ghost" onClick={() => setConfirmAbandon(false)}>
@@ -184,7 +198,7 @@ export function PendingAttempt({ action, onClose }: { action: DeliveryAction; on
   );
 }
 
-/** Shell of every write on a settlement: idempotent submit, pending attempt and readable errors. */
+/** Shell of every write on a settlement or a pending: idempotent submit, pending attempt and readable errors. */
 export function ActionDialog({
   title,
   description,
@@ -194,11 +208,18 @@ export function ActionDialog({
   validate,
   build,
   children,
+  errorView = deliveryErrorView,
+  where,
+  submitDisabled = false,
 }: {
   title: string;
   description?: ReactNode;
   submitLabel: string;
-  action: DeliveryAction;
+  action: WriteAction;
+  errorView?: ErrorView;
+  where?: string;
+  /** Keeps the confirmation unavailable while the form cannot be sent (parts that do not add up). */
+  submitDisabled?: boolean;
   onClose: () => void;
   /** Form-level check before sending; returns the message to show or null. */
   validate: () => string | null;
@@ -207,7 +228,7 @@ export function ActionDialog({
 }) {
   const [problem, setProblem] = useState<string | null>(null);
   const pending = action.mutation.isPending;
-  const error = action.mutation.error ? deliveryErrorView(action.mutation.error) : null;
+  const error = action.mutation.error ? errorView(action.mutation.error) : null;
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -219,7 +240,7 @@ export function ActionDialog({
   return (
     <Dialog title={title} description={description} onClose={onClose}>
       {action.stored ? (
-        <PendingAttempt action={action} onClose={onClose} />
+        <PendingAttempt action={action} onClose={onClose} errorView={errorView} where={where} />
       ) : (
         <form className="space-y-4" onSubmit={submit} noValidate>
           <fieldset disabled={pending} className="space-y-4">
@@ -230,7 +251,7 @@ export function ActionDialog({
             <Button variant="ghost" onClick={onClose}>
               Cancelar
             </Button>
-            <Button type="submit" disabled={pending}>
+            <Button type="submit" disabled={pending || submitDisabled}>
               {pending ? "Guardando…" : submitLabel}
             </Button>
           </div>

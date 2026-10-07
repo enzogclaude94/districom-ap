@@ -65,13 +65,14 @@ export function VoidDialog({
   what,
   path,
   onClose,
-}: Base & { title: string; what: string; path: string }) {
+  note,
+}: Base & { title: string; what: string; path: string; note?: string }) {
   const [reason, setReason] = useState("");
   const action = useDeliveryAction(`void:${settlement.id}:${path}`, onClose);
   return (
     <ActionDialog
       title={title}
-      description={`${what} no se borra: queda en el historial como anulado, con el motivo.`}
+      description={`${what} no se borra: queda en el historial como anulado, con el motivo.${note ? ` ${note}` : ""}`}
       submitLabel="Anular"
       action={action}
       onClose={onClose}

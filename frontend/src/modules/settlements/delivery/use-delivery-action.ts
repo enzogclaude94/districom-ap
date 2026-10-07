@@ -6,6 +6,7 @@ import { useRef, useState } from "react";
 import { authApi, currentUserQueryKey } from "@/lib/api/auth";
 import { cashQueryKey } from "@/modules/settlements/cash/api";
 import { newRequestId } from "@/modules/settlements/cash/request-id";
+import { pendingQueryKey } from "@/modules/settlements/pending/api";
 
 import { deliveryApi, deliveryQueryKey, type Settlement } from "./api";
 import { deliveryErrorView } from "./errors";
@@ -29,7 +30,7 @@ export interface StoredRequest extends DeliveryRequest {
 /**
  * Requests whose outcome is unknown (network error, timeout, 5xx), kept in `sessionStorage` until they are
  * confirmed or explicitly abandoned. Separate from the Cajas ones: a delivery attempt is retried from its
- * settlement, never from the Cajas board.
+ * settlement and a pending collection's from its pending, never from the Cajas board.
  */
 const PREFIX = "districom:settlements:delivery-pending:";
 
@@ -83,15 +84,22 @@ export function clearStored(slot: string) {
 }
 
 /**
- * One write on a settlement (create it, add cash, declare a transfer, close, reopen…).
+ * One write whose outcome must never be duplicated (ADR 008), parameterized by what it writes and reads.
  *
- * As in Cajas (ADR 008): the `client_request_id` of a creation is generated when the form opens and kept
- * for every retry of that form; a request whose outcome is unknown is kept under the form's `slot` and
- * reopening the form offers to resend exactly the same request (the backend answers with what it already
- * recorded) or, after a warning, to abandon it. A second click while a request is in flight is ignored.
- * After every answer the settlement and Cajas are re-read from the API.
+ * As in Cajas: the `client_request_id` of a creation is generated when the form opens and kept for every
+ * retry of that form; a request whose outcome is unknown is kept under the form's `slot` and reopening the
+ * form offers to resend exactly the same request (the backend answers with what it already recorded) or,
+ * after a warning, to abandon it. A second click while a request is in flight is ignored. After every
+ * answer the given queries are re-read from the API.
  */
-export function useDeliveryAction(slot: string, onDone: (settlement: Settlement) => void) {
+export function useWriteAction<T>(options: {
+  slot: string;
+  write: (request: DeliveryRequest) => Promise<T>;
+  invalidate: readonly (readonly unknown[])[];
+  isUncertain: (error: unknown) => boolean;
+  onDone: (result: T) => void;
+}) {
+  const { slot, write, invalidate, isUncertain, onDone } = options;
   const queryClient = useQueryClient();
   const me = useQuery({ queryKey: currentUserQueryKey, queryFn: authApi.me });
   const userId = me.data?.id ?? null;
@@ -103,20 +111,19 @@ export function useDeliveryAction(slot: string, onDone: (settlement: Settlement)
   const inFlight = useRef(false);
 
   const refresh = () => {
-    void queryClient.invalidateQueries({ queryKey: deliveryQueryKey });
-    void queryClient.invalidateQueries({ queryKey: cashQueryKey });
+    for (const queryKey of invalidate) void queryClient.invalidateQueries({ queryKey });
   };
 
   const mutation = useMutation({
-    mutationFn: (request: DeliveryRequest) => deliveryApi.write(request.method, request.path, request.body),
-    onSuccess: (settlement) => {
+    mutationFn: write,
+    onSuccess: (result) => {
       clearStored(slot);
       setStored(null);
       refresh();
-      onDone(settlement);
+      onDone(result);
     },
     onError: (error, request) => {
-      if (deliveryErrorView(error).uncertain) {
+      if (isUncertain(error)) {
         const entry = { slot, userId, ...request, savedAt: new Date().toISOString() };
         saveStored(entry);
         setStored(entry);
@@ -147,7 +154,7 @@ export function useDeliveryAction(slot: string, onDone: (settlement: Settlement)
 
   return {
     requestId,
-    mutation,
+    mutation: mutation as { isPending: boolean; error: Error | null; reset: () => void },
     stored,
     submit: (build: (requestId: string) => DeliveryRequest) => send(build(requestId)),
     /** Resends the stored attempt exactly as it was (same id, same body). */
@@ -159,4 +166,18 @@ export function useDeliveryAction(slot: string, onDone: (settlement: Settlement)
   };
 }
 
-export type DeliveryAction = ReturnType<typeof useDeliveryAction>;
+/** A write action of any document: what the shared dialogs (`ActionDialog`, `PendingAttempt`) need. */
+export type WriteAction = ReturnType<typeof useWriteAction<unknown>>;
+
+/** One write on a settlement (create it, add cash, declare a transfer, close, reopen…). */
+export function useDeliveryAction(slot: string, onDone: (settlement: Settlement) => void) {
+  return useWriteAction<Settlement>({
+    slot,
+    write: (request) => deliveryApi.write(request.method, request.path, request.body),
+    invalidate: [deliveryQueryKey, cashQueryKey, pendingQueryKey],
+    isUncertain: (error) => Boolean(deliveryErrorView(error).uncertain),
+    onDone,
+  });
+}
+
+export type DeliveryAction = WriteAction;
