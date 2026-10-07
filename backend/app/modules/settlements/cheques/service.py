@@ -564,10 +564,17 @@ def closings_of(db: Session, cheque_id: int) -> list[SettlementClosingCheque]:
 
 
 def entry_operation_id(db: Session, cheque_id: int) -> int | None:
+    """The operation that put it in the portfolio outside a settlement (an administrative entry, or the receipt
+    of a pending it paid), if any."""
     return db.scalar(
-        select(ChequeEvent.operation_id).where(
-            ChequeEvent.cheque_id == cheque_id, ChequeEvent.operation_id.is_not(None)
+        select(ChequeEvent.operation_id)
+        .where(
+            ChequeEvent.cheque_id == cheque_id,
+            ChequeEvent.event_type.in_(["PUBLISHED", "COLLECTED"]),
+            ChequeEvent.operation_id.is_not(None),
         )
+        .order_by(ChequeEvent.id)
+        .limit(1)
     )
 
 

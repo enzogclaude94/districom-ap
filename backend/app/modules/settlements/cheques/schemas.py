@@ -126,11 +126,15 @@ class ChequeOut(BaseModel):
     payment_date: date | None
     payable_from: date
     presentation_deadline: date
+    # In the portfolio past its deadline: it can no longer be deposited, only returned (R4-2 decision A).
+    presentation_expired: bool
     drawer_name: str
     drawer_tax_id: str | None
     delivered_by_name: str
     origin_type: str
     settlement_id: int | None
+    # The pending collection a customer paid with it (origin PENDING_RECEIPT, R4-2).
+    origin_pending_id: int | None
     received_business_date: date
     received_by_employee_id: int | None
     received_by_name: str | None
@@ -189,6 +193,8 @@ class ChequeDetailOut(ChequeOut):
     closings: list[ChequeClosingOut]
     # The operation that put it in the portfolio outside a settlement, if any.
     entry_operation_id: int | None
+    # Its financial cycle (R4-2): deposits, creditings, rejections, returns and the receipt it paid, oldest first.
+    documents: list["ChequeDocumentOut"]
 
 
 class ChequePage(BaseModel):
@@ -203,3 +209,168 @@ class PortfolioSummaryOut(BaseModel):
     portfolio_amount: Money
     in_transit_count: int
     in_transit_amount: Money
+
+
+# --- the financial cycle (R4-2) -------------------------------------------------------------------
+
+ChequeIds = Annotated[list[int], Field(min_length=1, max_length=100)]
+Notes = Annotated[str, Field(max_length=1000)]
+
+
+class DepositIn(StrictIn):
+    """A deposit slip: cheques of the portfolio taken to one bank account (operator)."""
+
+    # Generated once per user action and resent on retries: a retry never deposits twice.
+    client_request_id: UUID
+    bank_account_id: int
+    cheque_ids: ChequeIds
+    # When the slip was presented; today when omitted. Never in the future.
+    business_date: date | None = None
+    slip_number: Annotated[str, Field(min_length=1, max_length=40)] | None = None
+    notes: Notes | None = None
+
+
+class CreditIn(StrictIn):
+    """The bank credited deposited cheques (operator): one or several, as the statement shows them."""
+
+    client_request_id: UUID
+    bank_account_id: int
+    cheque_ids: ChequeIds
+    # The date of the statement; today when omitted.
+    business_date: date | None = None
+    notes: Notes | None = None
+
+
+class RejectionIn(StrictIn):
+    """The bank rejected a deposited cheque (operator or admin), with the bank's reason. A new pending is
+    owed by who delivered it; its responsible is the driver of the cheque's settlement unless said."""
+
+    client_request_id: UUID
+    reason: Reason
+    business_date: date | None = None
+    responsible_employee_id: int | None = None
+
+
+class ReturnIn(RejectionIn):
+    """A cheque of the portfolio given back to who delivered it (admin, with a reason)."""
+
+
+class CycleReversalIn(StrictIn):
+    """Reverse a deposit, a crediting, a rejection or a return: it was wrong. Admin only, with a reason;
+    it keeps the original's business date. Idempotent."""
+
+    client_request_id: UUID
+    reason: Reason
+
+
+class DocumentReversalOut(BaseModel):
+    operation_id: int
+    reversed_by: int
+    reversed_by_name: str
+    reversed_at: datetime
+    reason: str
+
+
+class CycleItemOut(BaseModel):
+    cheque_id: int
+    amount: Money
+    kind: str
+    cheque_number: str
+    bank_name: str
+    delivered_by_name: str
+    state: State
+    state_label: str
+
+
+class DepositOut(BaseModel):
+    id: int
+    bank_account_id: int
+    bank_account_name: str
+    business_date: date
+    slip_number: str | None
+    notes: str | None
+    total: Money
+    items: list[CycleItemOut]
+    operation_id: int
+    created_by: int
+    created_by_name: str
+    created_at: datetime
+    reversal: DocumentReversalOut | None
+
+
+class CreditOut(BaseModel):
+    id: int
+    bank_account_id: int
+    bank_account_name: str
+    business_date: date
+    notes: str | None
+    total: Money
+    items: list[CycleItemOut]
+    operation_id: int
+    created_by: int
+    created_by_name: str
+    created_at: datetime
+    reversal: DocumentReversalOut | None
+
+
+class RejectionOut(BaseModel):
+    id: int
+    cheque_id: int
+    # IN_TRANSIT (the bank never credited it) or AFTER_CREDIT (it debited the bank).
+    stage: str
+    business_date: date
+    reason: str
+    bank_account_id: int | None
+    # The new pending collection the rejection created.
+    pending_id: int
+    operation_id: int
+    created_by: int
+    created_by_name: str
+    created_at: datetime
+    reversal: DocumentReversalOut | None
+
+
+class ReturnOut(BaseModel):
+    id: int
+    cheque_id: int
+    business_date: date
+    reason: str
+    pending_id: int
+    operation_id: int
+    created_by: int
+    created_by_name: str
+    created_at: datetime
+    reversal: DocumentReversalOut | None
+
+
+class ChequeDocumentOut(BaseModel):
+    """One document of a cheque's cycle, as its history shows it."""
+
+    type: Literal["DEPOSIT", "CREDIT", "REJECTION", "RETURN", "PENDING_RECEIPT"]
+    id: int
+    business_date: date
+    operation_id: int
+    reversed: bool
+    reversal_operation_id: int | None
+    # The pending a rejection or a return created, or the one a receipt collected.
+    pending_id: int | None
+
+
+class ChequeReceiptIn(InstrumentIn):
+    """A customer pays a pending collection with a cheque (R4-2). A physical cheque, confirmed in hand, pays it
+    at once and enters the portfolio; an ECHEQ is declared and pays nothing until it is verified. Never above
+    the pending's balance, never partially accepted."""
+
+    client_request_id: UUID
+    # When the customer gave it; today when omitted. Not before the pending's origin, not in the future.
+    business_date: date | None = None
+
+
+class PendingEcheqVerificationIn(StrictIn):
+    """Verify the ECHEQ declared for a pending (it pays it then, if the balance still allows it), or reject its
+    verification (with a reason). Decided once: a rejected ECHEQ is declared again as a new one."""
+
+    status: Literal["VERIFIED", "VERIFICATION_REJECTED"]
+    reason: Reason | None = None
+    # The day it pays the pending when verified; today when omitted.
+    business_date: date | None = None
