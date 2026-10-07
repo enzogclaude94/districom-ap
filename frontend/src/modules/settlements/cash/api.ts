@@ -13,7 +13,9 @@ export type AccountKind =
   | "SETTLEMENT_DIFFERENCE"
   | "EMPLOYEE"
   | "PENDING_COLLECTIONS"
-  | "UNCOLLECTIBLE";
+  | "UNCOLLECTIBLE"
+  | "CHEQUE_PORTFOLIO"
+  | "CHEQUES_IN_TRANSIT";
 
 export type OperationType =
   | "OPENING_BALANCE"
@@ -26,6 +28,8 @@ export type OperationType =
   | "SETTLEMENT_CLOSE"
   | "PENDING_COLLECTION"
   | "PENDING_WRITE_OFF"
+  | "CHEQUE_OPENING_BALANCE"
+  | "CHEQUE_OWNER_CONTRIBUTION"
   | "REVERSAL";
 
 export interface Account {
