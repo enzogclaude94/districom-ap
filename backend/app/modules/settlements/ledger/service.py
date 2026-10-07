@@ -36,7 +36,13 @@ from app.modules.settlements.ledger.models import (
     FinancialOperation,
     LedgerEntry,
 )
-from app.modules.settlements.ledger.rules import DOCUMENT_TYPES, REVERSAL_MIN_ROLE, RULES, leg_shape_error
+from app.modules.settlements.ledger.rules import (
+    DOCUMENT_TYPES,
+    REVERSAL_MIN_ROLE,
+    REVERSIBLE_DOCUMENT_TYPES,
+    RULES,
+    leg_shape_error,
+)
 from app.platform.audit.service import record_change
 from app.platform.auth.access import has_module_access
 from app.platform.auth.models import User
@@ -124,6 +130,8 @@ def post_operation(
     if rule is None:
         raise AppError(422, "unknown_operation_type", "El tipo de operación no existe.")
     _require_role(actor, rule.min_role)
+    if type in DOCUMENT_TYPES and source is None:
+        raise AppError(422, "source_required", "Esta operación se registra desde su documento.")
     return _post(
         db,
         actor=actor,
@@ -161,7 +169,7 @@ def reverse_operation(
         raise AppError(
             409,
             "operation_owned_by_document",
-            "Esta operación pertenece a un documento (por ejemplo, una rendición): se corrige reabriéndolo.",
+            "Esta operación pertenece a un documento (una rendición o un pendiente de cobro): se corrige desde él.",
             {"source_type": original.source_type, "source_id": original.source_id},
         )
     return _post(
@@ -171,6 +179,47 @@ def reverse_operation(
         legs=[Leg(entry.account_id, -entry.amount) for entry in original.entries],
         client_request_id=client_request_id,
         business_date=business_date,
+        description=reason,
+        source=None,
+        reverses=original,
+    )
+
+
+def reverse_document_operation(
+    db: Session,
+    *,
+    actor: User,
+    operation_id: int,
+    source: SourceRef,
+    reason: str,
+    client_request_id: UUID,
+) -> Posted:
+    """Undo an operation of a document (a pending's receipt or resolution, R3-2) from that document's flow.
+
+    A reversal says "that operation was wrong", never a new economic fact: it carries the ORIGINAL
+    business date, and `created_at` records when the correction happened. Funds are checked on that date
+    and every later end of day, so reversing a receipt whose cash already left the box is
+    `insufficient_funds`. The caller must mark its domain row reversed in the same transaction; the
+    database refuses the commit otherwise (migration 0010). A retry with the same request returns it.
+    """
+    _require_role(actor, REVERSAL_MIN_ROLE)
+    original = db.get(FinancialOperation, operation_id)
+    if original is None:
+        raise AppError(404, "operation_not_found", "La operación no existe.")
+    if original.type not in REVERSIBLE_DOCUMENT_TYPES or (original.source_type, original.source_id) != (
+        source.type,
+        source.id,
+    ):
+        raise AppError(
+            422, "invalid_document_reversal", "La operación no pertenece a ese documento o no se revierte así."
+        )
+    return _post(
+        db,
+        actor=actor,
+        type="REVERSAL",
+        legs=[Leg(entry.account_id, -entry.amount) for entry in original.entries],
+        client_request_id=client_request_id,
+        business_date=original.business_date,
         description=reason,
         source=None,
         reverses=original,

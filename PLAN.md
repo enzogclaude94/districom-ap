@@ -327,7 +327,7 @@ Cada PR espera la aprobación de Enzo antes del siguiente.
 
 ## 16. Rendiciones — R3 (pendientes de cobro)
 
-Propuesta `PROPUESTA_R3_PENDIENTES_DE_COBRO.md` aprobada por Enzo el 2026-10-05, con sus ocho decisiones y dos precisiones: el importe financiero vigente es el del cierre vigente aunque la rendición esté en corrección, y `pending_collection_events` es obligatoria. Alcance en `ROADMAP.md`.
+Propuesta `PROPUESTA_R3_PENDIENTES_DE_COBRO.md` aprobada por Enzo el 2026-10-05, con sus ocho decisiones y dos precisiones: el importe financiero vigente es el del cierre vigente aunque la rendición esté en corrección, y `pending_collection_events` es obligatoria. R3‑1 aprobado el 2026-10-06 (`0009` congelada) y R3‑2 autorizado con las decisiones D1–D4 y la precisión de fechas de reverso. Alcance en `ROADMAP.md`.
 
 | PR | Contenido | Estado |
 |---|---|---|

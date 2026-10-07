@@ -22,7 +22,7 @@ import { cashApi, cashQueryKey, reversePath, type Operation } from "@/modules/se
 import { formatDate, formatDateTime, formatMoney, todayIso } from "@/lib/format";
 
 import { cashErrorView } from "./errors";
-import { ACCOUNT_KIND_LABELS, OPERATION_LABELS, sourceLabel } from "./labels";
+import { ACCOUNT_KIND_LABELS, DOCUMENT_OPERATION_TYPES, OPERATION_LABELS, sourceLabel } from "./labels";
 import { StoredAttempt } from "./stored-attempt";
 import { useCashOperation } from "./use-cash-operation";
 
@@ -197,8 +197,8 @@ export function OperationDetail({ operationId }: { operationId: number }) {
   }
 
   const operation = query.data;
-  // A settlement close belongs to its settlement: it is corrected by reopening it, never reversed here.
-  const ownedByDocument = operation.type === "SETTLEMENT_CLOSE";
+  // A settlement close, a receipt or a resolution belongs to its document: it is corrected there, never reversed here.
+  const ownedByDocument = DOCUMENT_OPERATION_TYPES.includes(operation.type);
   const canReverse =
     isAdmin && operation.type !== "REVERSAL" && !ownedByDocument && operation.reversed_by_operation_id === null;
 
@@ -229,8 +229,9 @@ export function OperationDetail({ operationId }: { operationId: number }) {
       )}
       {ownedByDocument && operation.reversed_by_operation_id === null && (
         <div className="rounded-md border border-border bg-muted px-4 py-3 text-sm">
-          Esta operación pertenece a la {sourceLabel(operation.source_type, operation.source_id)}: se corrige reabriendo
-          la rendición, y al confirmar el nuevo cierre se registra su reverso.
+          {operation.type === "SETTLEMENT_CLOSE"
+            ? `Esta operación pertenece a la ${sourceLabel(operation.source_type, operation.source_id)}: se corrige reabriendo la rendición, y al confirmar el nuevo cierre se registra su reverso.`
+            : `Esta operación pertenece al ${sourceLabel(operation.source_type, operation.source_id)}: se revierte desde el pendiente.`}
         </div>
       )}
       {operation.reverses_operation_id !== null && (

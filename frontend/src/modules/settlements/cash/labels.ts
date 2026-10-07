@@ -9,8 +9,17 @@ export const OPERATION_LABELS: Record<OperationType, string> = {
   OWNER_WITHDRAWAL: "Devolución a socio",
   ADJUSTMENT: "Ajuste administrativo",
   SETTLEMENT_CLOSE: "Cierre de rendición",
+  PENDING_COLLECTION: "Cobro de pendiente",
+  PENDING_WRITE_OFF: "Resolución de pendiente",
   REVERSAL: "Reverso",
 };
+
+/** Operations that belong to a document (a settlement, a pending collection): corrected from it, never here. */
+export const DOCUMENT_OPERATION_TYPES: readonly OperationType[] = [
+  "SETTLEMENT_CLOSE",
+  "PENDING_COLLECTION",
+  "PENDING_WRITE_OFF",
+];
 
 export const ACCOUNT_KIND_LABELS: Record<AccountKind, string> = {
   CASH_BOX: "Caja",
@@ -23,12 +32,13 @@ export const ACCOUNT_KIND_LABELS: Record<AccountKind, string> = {
   SETTLEMENT_DIFFERENCE: "Cuenta técnica",
   EMPLOYEE: "Cuenta interna de empleado",
   PENDING_COLLECTIONS: "Pendientes de cobro",
+  UNCOLLECTIBLE: "Incobrables",
 };
 
 /** Accounts that hold money or partner contributions. Technical counterparts never show as available money. */
 export const OPERATIONAL_KINDS: readonly AccountKind[] = ["CASH_BOX", "BANK", "OWNER_EQUITY"];
 
-const SOURCE_LABELS: Record<string, string> = { settlement: "Rendición" };
+const SOURCE_LABELS: Record<string, string> = { settlement: "Rendición", pending_collection: "Pendiente de cobro" };
 
 /** Where an operation came from: entered by hand on this screen, or a document such as a settlement. */
 export function sourceLabel(sourceType: string | null, sourceId: number | null) {

@@ -44,6 +44,8 @@ ACCOUNT_KINDS = (
     "EMPLOYEE",
     # R3: what customers still owe from settlements ("Pendientes de cobro"); never negative.
     "PENDING_COLLECTIONS",
+    # R3-2: what the company gave up collecting ("Incobrables"); a loss, never available money.
+    "UNCOLLECTIBLE",
 )
 # Technical counter-accounts: exactly one of each.
 TECHNICAL_KINDS = (
@@ -53,6 +55,7 @@ TECHNICAL_KINDS = (
     "EXPENSE",
     "SETTLEMENT_DIFFERENCE",
     "PENDING_COLLECTIONS",
+    "UNCOLLECTIBLE",
 )
 
 OPERATION_TYPES = (
@@ -65,9 +68,12 @@ OPERATION_TYPES = (
     "ADJUSTMENT",
     "SETTLEMENT_CLOSE",
     "REVERSAL",
+    # R3-2: a receipt of a pending collection, and its administrative resolution (write-off).
+    "PENDING_COLLECTION",
+    "PENDING_WRITE_OFF",
 )
 # Operations whose description is the mandatory reason.
-REASON_REQUIRED_TYPES = ("ADJUSTMENT", "REVERSAL")
+REASON_REQUIRED_TYPES = ("ADJUSTMENT", "REVERSAL", "PENDING_WRITE_OFF")
 
 
 _ACCENTS = str.maketrans("áàäâéèëêíìïîóòöôúùüû", "aaaaeeeeiiiioooouuuu")

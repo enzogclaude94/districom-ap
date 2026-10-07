@@ -11,7 +11,7 @@ SETTINGS = SettingsScope(
             "pending_alert_hours",
             24,
             "Alerta de pendientes de cobro (horas)",
-            "Un pendiente sin acreditar alerta al superar este plazo y vuelve a alertar cada vez que se cumple.",
+            "Un pendiente vigente con saldo alerta cuando pasaron más de estas horas desde que se registró.",
         ),
         SettingSpec(
             "cash_denominations",
