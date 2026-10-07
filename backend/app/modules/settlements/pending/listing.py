@@ -1,9 +1,11 @@
 """Global list of pending collections and their alerts (R3-2), computed on read: nothing is scheduled or
 stored.
 
-The financial state is derived in SQL exactly as `state.financial` does in Python (the amount of the
-settlement's close in effect, minus receipts and resolutions not reversed), so filters and pagination run
-in the database. By default the list holds what is still owed in Cajas: OPEN and PARTIAL (Enzo's D2).
+The financial state is derived in SQL exactly as `state.financial` does in Python (the amount in effect,
+minus receipts and resolutions not reversed), so filters and pagination run in the database. The amount in
+effect is the one of the settlement's close in effect or, for a pending born from a rejected or returned
+cheque (R4-2), its own amount while it is not voided. By default the list holds what is still owed in Cajas:
+OPEN and PARTIAL (Enzo's D2).
 
 A pending alerts when it is in effect, has a balance and was registered more than
 `settlements.pending_alert_hours` ago (24 by default). DRAFT, VOIDED, COLLECTED and RESOLVED never alert;
@@ -47,6 +49,7 @@ class Filters:
     driver_id: int | None = None
     responsible_employee_id: int | None = None
     settlement_id: int | None = None
+    origin_type: str | None = None
     # Registered more than this many hours ago.
     min_age_hours: int | None = None
     alert_only: bool = False
@@ -118,6 +121,8 @@ def page(db: Session, filters: Filters, *, limit: int, offset: int) -> tuple[lis
         query = query.where(rows.c.responsible_employee_id == filters.responsible_employee_id)
     if filters.settlement_id is not None:
         query = query.where(rows.c.settlement_id == filters.settlement_id)
+    if filters.origin_type is not None:
+        query = query.where(rows.c.origin_type == filters.origin_type)
     now = utc_now()
     if filters.min_age_hours is not None:
         query = query.where(rows.c.created_at < now - timedelta(hours=filters.min_age_hours))
@@ -160,10 +165,19 @@ def _rows() -> Subquery:
     )
     collected = func.coalesce(receipts.c.amount, 0)
     resolved = func.coalesce(resolutions.c.amount, 0)
-    balance = SettlementClosingPending.amount - collected - resolved
+    from_settlement = PendingCollection.origin_type == "SETTLEMENT"
+    effect = case(
+        (from_settlement, SettlementClosingPending.amount),
+        (PendingCollection.voided_at.is_(None), PendingCollection.amount),
+    )
+    customer_in_effect = case(
+        (from_settlement, SettlementClosingPending.customer_name),
+        (PendingCollection.voided_at.is_(None), PendingCollection.customer_name),
+    )
+    balance = effect - collected - resolved
     state = case(
-        (and_(SettlementClosingPending.id.is_(None), PendingCollection.voided_at.is_not(None)), "VOIDED"),
-        (SettlementClosingPending.id.is_(None), "DRAFT"),
+        (and_(effect.is_(None), PendingCollection.voided_at.is_not(None)), "VOIDED"),
+        (effect.is_(None), "DRAFT"),
         (balance > 0, case((collected + resolved > 0, "PARTIAL"), else_="OPEN")),
         (resolved > 0, "RESOLVED"),
         else_="COLLECTED",
@@ -172,15 +186,16 @@ def _rows() -> Subquery:
         select(
             PendingCollection.id,
             PendingCollection.settlement_id,
+            PendingCollection.origin_type,
             PendingCollection.customer_name,
             PendingCollection.responsible_employee_id,
             PendingCollection.created_at,
             Settlement.employee_id.label("driver_id"),
-            SettlementClosingPending.customer_name.label("customer_in_effect"),
+            customer_in_effect.label("customer_in_effect"),
             balance.label("balance"),
             state.label("state"),
         )
-        .join(Settlement, Settlement.id == PendingCollection.settlement_id)
+        .outerjoin(Settlement, Settlement.id == PendingCollection.settlement_id)
         .outerjoin(
             SettlementClosingPending,
             and_(

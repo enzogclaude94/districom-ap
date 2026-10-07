@@ -14,6 +14,10 @@ locked, it freezes in `settlement_closing_pendings` what the new close publishes
 WITHDRAWN events. Until then the amount in effect is the one of the previous close.
 
 Lock order, always: the settlement row, then its pendings by id (then, in the ledger, the accounts).
+
+R4-2: a pending is also born from a cheque the bank rejected or that was given back (`origin_type`). It has
+no load nor settlement: it is in effect for its amount from the operation of its origin, and is voided
+only together with the reversal of that origin (`amounts_in_effect`, migration 0013).
 """
 
 from collections.abc import Sequence
@@ -81,6 +85,7 @@ def create(db: Session, actor: User, settlement_id: int, body: s.PendingIn) -> s
         responsible = active_employee(db, body.responsible_employee_id).id
     _check_expected_date(settlement, body.expected_date)
     pending = PendingCollection(
+        origin_type="SETTLEMENT",
         settlement_id=settlement.id,
         customer_name=customer,
         amount=body.amount,
@@ -349,6 +354,27 @@ def applied_amounts(db: Session, pending_ids: Sequence[int]) -> dict[int, Decima
     return {pid: collected + resolved for pid, (collected, resolved) in collected_and_resolved(db, pending_ids).items()}
 
 
+def amounts_in_effect(db: Session, pendings: Sequence[PendingCollection]) -> dict[int, InEffect]:
+    """What is in effect per pending, whatever its origin: for a settlement's pending, what the close in
+    effect of its settlement published; for one born from a cheque, its own amount unless it was voided
+    (with the reversal of its origin)."""
+    result: dict[int, InEffect] = {}
+    settlement_ids = {p.settlement_id for p in pendings if p.settlement_id is not None}
+    if settlement_ids:
+        closes = db.scalars(
+            select(Settlement.current_close_operation_id).where(
+                Settlement.id.in_(settlement_ids), Settlement.current_close_operation_id.is_not(None)
+            )
+        )
+        wanted = {p.id for p in pendings}
+        for close_id in closes:
+            result.update({pid: e for pid, e in in_effect(db, close_id).items() if pid in wanted})
+    for p in pendings:
+        if p.origin_type != "SETTLEMENT" and p.voided_at is None:
+            result[p.id] = InEffect(p.amount, p.customer_name)
+    return result
+
+
 def in_effect(db: Session, close_operation_id: int | None) -> dict[int, InEffect]:
     """What a close published per pending: for the settlement's close in effect, the amounts in effect."""
     if close_operation_id is None:
@@ -406,7 +432,7 @@ def events_of(db: Session, pending_id: int) -> list[PendingCollectionEvent]:
 def record_event(
     db: Session,
     actor: User,
-    settlement: Settlement,
+    settlement: Settlement | None,
     pending_id: int,
     event_type: str,
     before: dict[str, Any] | None,
@@ -416,12 +442,14 @@ def record_event(
     close_operation_id: int | None = None,
     receipt_id: int | None = None,
     resolution_id: int | None = None,
+    cheque_id: int | None = None,
 ) -> None:
+    """One event of a pending; `settlement` is None for a pending born from a cheque (R4-2)."""
     db.add(
         PendingCollectionEvent(
             pending_id=pending_id,
-            settlement_id=settlement.id,
-            settlement_version=settlement.version,
+            settlement_id=settlement.id if settlement else None,
+            settlement_version=settlement.version if settlement else None,
             event_type=event_type,
             before=before,
             after=after,
@@ -429,6 +457,7 @@ def record_event(
             close_operation_id=close_operation_id,
             receipt_id=receipt_id,
             resolution_id=resolution_id,
+            cheque_id=cheque_id,
             created_by=actor.id,
         )
     )

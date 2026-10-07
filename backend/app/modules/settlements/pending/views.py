@@ -1,11 +1,14 @@
-"""Responses of pending collections, built from the rows and the close in effect of each settlement."""
+"""Responses of pending collections, built from the rows and the close in effect of each settlement (or, for a
+pending born from a cheque, R4-2, from the pending itself and its origin)."""
 
 from collections.abc import Sequence
+from datetime import date
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.clock import business_today
+from app.modules.settlements.cheques.models import Cheque, ChequeRejection, ChequeReturn
 from app.modules.settlements.delivery import closing
 from app.modules.settlements.delivery.models import Settlement
 from app.modules.settlements.ledger import service as ledger
@@ -26,12 +29,9 @@ def items(db: Session, rows: Sequence[PendingCollection]) -> list[s.PendingOut]:
     """Each pending with its load, its financial state and what a correction in progress proposes."""
     if not rows:
         return []
-    settlements = {
-        row.id: row for row in db.scalars(select(Settlement).where(Settlement.id.in_({p.settlement_id for p in rows})))
-    }
-    published: dict[int, service.InEffect] = {}
-    for settlement in settlements.values():
-        published.update(service.in_effect(db, settlement.current_close_operation_id))
+    settlements = _settlements(db, rows)
+    published = service.amounts_in_effect(db, rows)
+    origins = _origins(db, rows)
     applied = service.collected_and_resolved(db, [p.id for p in rows])
     users = _names(
         db,
@@ -44,8 +44,10 @@ def items(db: Session, rows: Sequence[PendingCollection]) -> list[s.PendingOut]:
     today = business_today()
     result = []
     for p in rows:
-        settlement = settlements[p.settlement_id]
+        settlement = settlements.get(p.settlement_id) if p.settlement_id else None
         in_effect = published.get(p.id)
+        born = settlement.business_date if settlement else origins[p.id][0]
+        assert born is not None  # every pending has exactly one origin
         collected, resolved = applied[p.id]
         financial = state.financial(
             amount_in_effect=in_effect.amount if in_effect else None,
@@ -54,7 +56,7 @@ def items(db: Session, rows: Sequence[PendingCollection]) -> list[s.PendingOut]:
             resolved=resolved,
         )
         change = state.load_change(
-            being_corrected=closing.financial_state(settlement) == "BEING_CORRECTED",
+            being_corrected=settlement is not None and closing.financial_state(settlement) == "BEING_CORRECTED",
             in_effect=(in_effect.amount, in_effect.customer_name) if in_effect else None,
             amount=p.amount,
             customer_name=p.customer_name,
@@ -63,7 +65,12 @@ def items(db: Session, rows: Sequence[PendingCollection]) -> list[s.PendingOut]:
         result.append(
             s.PendingOut(
                 id=p.id,
+                origin_type=p.origin_type,
                 settlement_id=p.settlement_id,
+                origin_cheque_rejection_id=p.origin_cheque_rejection_id,
+                origin_cheque_return_id=p.origin_cheque_return_id,
+                origin_cheque_id=origins[p.id][1],
+                origin_business_date=born,
                 customer_name=p.customer_name,
                 amount=p.amount,
                 reason=p.reason,
@@ -107,20 +114,18 @@ def items(db: Session, rows: Sequence[PendingCollection]) -> list[s.PendingOut]:
 
 def list_items(db: Session, rows: Sequence[PendingCollection]) -> list[s.PendingListItem]:
     """Rows of the global list: each pending with its settlement and driver."""
-    settlements = {
-        row.id: row for row in db.scalars(select(Settlement).where(Settlement.id.in_({p.settlement_id for p in rows})))
-    }
+    settlements = _settlements(db, rows)
     drivers = _names(db, Employee, [st.employee_id for st in settlements.values()])
     result = []
     for item in items(db, rows):
-        settlement = settlements[item.settlement_id]
+        settlement = settlements.get(item.settlement_id) if item.settlement_id else None
         result.append(
             s.PendingListItem(
                 **item.model_dump(),
-                settlement_business_date=settlement.business_date,
-                settlement_sequence_number=settlement.sequence_number,
-                driver_id=settlement.employee_id,
-                driver_name=drivers.get(settlement.employee_id, ""),
+                settlement_business_date=settlement.business_date if settlement else None,
+                settlement_sequence_number=settlement.sequence_number if settlement else None,
+                driver_id=settlement.employee_id if settlement else None,
+                driver_name=drivers.get(settlement.employee_id, "") if settlement else None,
             )
         )
     return result
@@ -129,8 +134,8 @@ def list_items(db: Session, rows: Sequence[PendingCollection]) -> list[s.Pending
 def detail(db: Session, pending_id: int) -> s.PendingDetailOut:
     pending = service.get(db, pending_id)
     base = items(db, [pending])[0]
-    settlement = db.get(Settlement, pending.settlement_id)
-    assert settlement is not None  # foreign key
+    settlement = db.get(Settlement, pending.settlement_id) if pending.settlement_id else None
+    echeqs = list(db.scalars(select(Cheque).where(Cheque.origin_pending_id == pending.id).order_by(Cheque.id)))
     published = service.published_of(db, pending.id)
     events = service.events_of(db, pending.id)
     receipts = list(
@@ -165,15 +170,26 @@ def detail(db: Session, pending_id: int) -> s.PendingDetailOut:
     )
     employees = _names(db, Employee, [p.employee_id for ps in parts.values() for p in ps if p.employee_id])
     accounts = {a.account_id: a.name for a in ledger.account_balances(db, include_inactive=True)}
-    driver = db.get(Employee, settlement.employee_id)
+    driver = db.get(Employee, settlement.employee_id) if settlement else None
     return s.PendingDetailOut(
         **base.model_dump(),
-        settlement_business_date=settlement.business_date,
-        settlement_sequence_number=settlement.sequence_number,
-        driver_id=settlement.employee_id,
-        driver_name=driver.full_name if driver else "",
-        settlement_financial_state=closing.financial_state(settlement),
-        published=[_published(row, settlement) for row in published],
+        settlement_business_date=settlement.business_date if settlement else None,
+        settlement_sequence_number=settlement.sequence_number if settlement else None,
+        driver_id=settlement.employee_id if settlement else None,
+        driver_name=(driver.full_name if driver else "") if settlement else None,
+        settlement_financial_state=closing.financial_state(settlement) if settlement else None,
+        echeqs=[
+            s.EcheqDeclaredOut(
+                cheque_id=c.id,
+                amount=c.amount,
+                cheque_number=c.cheque_number,
+                verification_status=c.verification_status or "",
+                voided=c.voided_at is not None,
+            )
+            for c in echeqs
+            if c.kind == "ECHEQ"
+        ],
+        published=[_published(row, settlement) for row in published] if settlement else [],
         receipts=[
             s.ReceiptOut(
                 id=r.id,
@@ -182,6 +198,7 @@ def detail(db: Session, pending_id: int) -> s.PendingDetailOut:
                 method=r.method,
                 destination_account_id=r.destination_account_id,
                 destination_name=accounts.get(r.destination_account_id, ""),
+                cheque_id=r.cheque_id,
                 operation_id=r.operation_id,
                 created_by=r.created_by,
                 created_by_name=users.get(r.created_by, ""),
@@ -224,6 +241,7 @@ def detail(db: Session, pending_id: int) -> s.PendingDetailOut:
                 close_operation_id=e.close_operation_id,
                 receipt_id=e.receipt_id,
                 resolution_id=e.resolution_id,
+                cheque_id=e.cheque_id,
                 created_by=e.created_by,
                 created_by_name=users.get(e.created_by, ""),
                 created_at=e.created_at,
@@ -231,6 +249,28 @@ def detail(db: Session, pending_id: int) -> s.PendingDetailOut:
             for e in events
         ],
     )
+
+
+def _settlements(db: Session, rows: Sequence[PendingCollection]) -> dict[int, Settlement]:
+    ids = {p.settlement_id for p in rows if p.settlement_id is not None}
+    if not ids:
+        return {}
+    return {row.id: row for row in db.scalars(select(Settlement).where(Settlement.id.in_(ids)))}
+
+
+def _origins(db: Session, rows: Sequence[PendingCollection]) -> dict[int, tuple[date | None, int | None]]:
+    """(business date, cheque) of the rejection or return each pending was born from; (None, None) for a
+    settlement's pending, whose date is its settlement's."""
+    result: dict[int, tuple[date | None, int | None]] = {p.id: (None, None) for p in rows}
+    rejections = {p.origin_cheque_rejection_id: p.id for p in rows if p.origin_cheque_rejection_id}
+    returns = {p.origin_cheque_return_id: p.id for p in rows if p.origin_cheque_return_id}
+    for model, wanted in ((ChequeRejection, rejections), (ChequeReturn, returns)):
+        if wanted:
+            for doc_id, day, cheque_id in db.execute(
+                select(model.id, model.business_date, model.cheque_id).where(model.id.in_(list(wanted)))
+            ):
+                result[wanted[doc_id]] = (day, cheque_id)
+    return result
 
 
 def _reversal(
