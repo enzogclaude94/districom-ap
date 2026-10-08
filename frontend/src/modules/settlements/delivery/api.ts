@@ -1,4 +1,5 @@
 import { apiFetch } from "@/lib/api/client";
+import type { Cheque } from "@/modules/settlements/cheques/api";
 import type { Pending } from "@/modules/settlements/pending/api";
 
 /**
@@ -199,6 +200,8 @@ export interface Settlement {
   current_difference: Difference | null;
   /** Load and financial state of each pending collection, voided ones included (R3). */
   pending_collections: Pending[];
+  /** The cheques received in this delivery, voided ones included (R4). */
+  cheques: Cheque[];
 }
 
 export interface Leg {

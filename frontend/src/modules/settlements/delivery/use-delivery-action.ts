@@ -5,6 +5,7 @@ import { useRef, useState } from "react";
 
 import { authApi, currentUserQueryKey } from "@/lib/api/auth";
 import { cashQueryKey } from "@/modules/settlements/cash/api";
+import { chequeQueryKey } from "@/modules/settlements/cheques/api";
 import { newRequestId } from "@/modules/settlements/cash/request-id";
 import { pendingQueryKey } from "@/modules/settlements/pending/api";
 
@@ -174,7 +175,7 @@ export function useDeliveryAction(slot: string, onDone: (settlement: Settlement)
   return useWriteAction<Settlement>({
     slot,
     write: (request) => deliveryApi.write(request.method, request.path, request.body),
-    invalidate: [deliveryQueryKey, cashQueryKey, pendingQueryKey],
+    invalidate: [deliveryQueryKey, cashQueryKey, pendingQueryKey, chequeQueryKey],
     isUncertain: (error) => Boolean(deliveryErrorView(error).uncertain),
     onDone,
   });

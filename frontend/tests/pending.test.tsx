@@ -624,6 +624,7 @@ function settlement(changes: Partial<Settlement> = {}): Settlement {
     count_lines: [],
     additions: [],
     transfers: [],
+    cheques: [],
     expenses: [],
     summary: {
       expected: "100000.00",

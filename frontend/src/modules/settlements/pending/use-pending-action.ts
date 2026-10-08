@@ -1,6 +1,7 @@
 "use client";
 
 import { cashQueryKey } from "@/modules/settlements/cash/api";
+import { chequeQueryKey } from "@/modules/settlements/cheques/api";
 import { deliveryQueryKey } from "@/modules/settlements/delivery/api";
 import { useWriteAction } from "@/modules/settlements/delivery/use-delivery-action";
 
@@ -17,7 +18,7 @@ export function usePendingAction(slot: string, onDone: (pending: PendingDetail) 
   return useWriteAction<PendingDetail>({
     slot: `pending:${slot}`,
     write: (request) => pendingApi.write(request.method, request.path, request.body),
-    invalidate: [pendingQueryKey, deliveryQueryKey, cashQueryKey],
+    invalidate: [pendingQueryKey, deliveryQueryKey, cashQueryKey, chequeQueryKey],
     isUncertain: (error) => Boolean(pendingErrorView(error).uncertain),
     onDone,
   });
