@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -371,7 +371,7 @@ describe("receipt form", () => {
     return { spy, dialog };
   }
 
-  it("offers only active cash boxes for cash and only active banks for a transfer; no cheque or other", async () => {
+  it("offers only active cash boxes for cash and only active banks for a transfer; plus cheque, never other", async () => {
     const { dialog } = await openReceipt();
     const options = (label: string) =>
       Array.from(within(dialog).getByLabelText(label).querySelectorAll("option")).map((o) => o.textContent);
@@ -380,7 +380,7 @@ describe("receipt form", () => {
       within(dialog)
         .getAllByRole("radio")
         .map((r) => r.closest("label")?.textContent),
-    ).toEqual(["Efectivo", "Transferencia"]);
+    ).toEqual(["Efectivo", "Transferencia", "Cheque"]);
     await userEvent.click(within(dialog).getByRole("radio", { name: "Transferencia" }));
     expect(options("Banco de destino")).toEqual(["Elegí…", "Banco"]);
   });
@@ -875,5 +875,158 @@ describe("home, menu, configuration and Cajas", () => {
     );
     expect(screen.getByText("Rendición #7")).not.toHaveAttribute("href");
     expect(screen.getByText("Carga manual")).toBeInTheDocument();
+  });
+});
+
+describe("collect a pending with a cheque", () => {
+  const BANKS = [
+    { id: 11, bcra_code: 11, name: "Banco de la Nación Argentina", source: "BCRA", active: true },
+    { id: 7, bcra_code: 7, name: "Banco de Galicia", source: "BCRA", active: true },
+  ];
+
+  async function openCheque(extra: Record<string, Handler> = {}) {
+    const spy = mockApi({
+      ...base("operator"),
+      "GET /financial-institutions": () => jsonResponse(200, BANKS),
+      ...extra,
+    });
+    renderWithQuery(<PendingDetailView pendingId={12} />);
+    await userEvent.click(await screen.findByRole("button", { name: "Registrar cobro" }));
+    const dialog = await screen.findByRole("dialog", { name: "Registrar cobro" });
+    await within(dialog).findByTestId("receipt-balance");
+    await userEvent.click(within(dialog).getByRole("radio", { name: "Cheque" }));
+    await within(dialog).findByRole("option", { name: /Banco de Galicia/ });
+    return { spy, dialog };
+  }
+
+  async function fill(dialog: HTMLElement, amount: string, kind: "Físico" | "ECHEQ" = "Físico") {
+    await userEvent.click(within(dialog).getByRole("radio", { name: kind }));
+    await userEvent.type(within(dialog).getByLabelText("Importe del cheque"), amount);
+    await userEvent.selectOptions(within(dialog).getByLabelText("Banco emisor"), "7");
+    await userEvent.type(within(dialog).getByLabelText("Número"), "00012345");
+    fireEvent.change(within(dialog).getByLabelText("Fecha de emisión"), { target: { value: "2026-10-04" } });
+    await userEvent.type(within(dialog).getByLabelText("Titular / librador"), "Don José SRL");
+    if (kind === "ECHEQ") await userEvent.type(within(dialog).getByLabelText("CUIT del librador"), "30711222333");
+  }
+
+  it("blocks a cheque larger than the balance: there are no credit balances", async () => {
+    const { spy, dialog } = await openCheque();
+    await fill(dialog, "150000");
+    expect(within(dialog).getAllByText(/supera el saldo pendiente/)[0]).toHaveTextContent(
+      "El importe del cheque supera el saldo pendiente. DistriCom todavía no gestiona saldos a favor del cliente.",
+    );
+    await userEvent.click(within(dialog).getByRole("checkbox", { name: /Recibí el cheque físicamente/ }));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Revisar cobro" }));
+    expect(within(dialog).queryByRole("button", { name: "Confirmar cobro" })).not.toBeInTheDocument();
+    expect(calls(spy, "POST", "/settlements/pending-collections/12/cheque-receipts")).toHaveLength(0);
+  });
+
+  it("asks to confirm the cheque is in hand, reviews Pendiente − / Cartera + and links to the new cheque", async () => {
+    const after = detail({
+      state: "COLLECTED",
+      balance: "0.00",
+      receipts: [{ ...RECEIPT, id: 30, method: "CHEQUE", cheque_id: 55, destination_name: "Cartera de cheques" }],
+    });
+    const { spy, dialog } = await openCheque({
+      "POST /settlements/pending-collections/12/cheque-receipts": () => jsonResponse(201, after),
+    });
+    await fill(dialog, "100000");
+    expect(within(dialog).getByLabelText("Quién lo entregó")).toHaveValue("Almacén Don José");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Revisar cobro" }));
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("Confirmá «Recibí el cheque físicamente»");
+    await userEvent.click(within(dialog).getByRole("checkbox", { name: /Recibí el cheque físicamente/ }));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Revisar cobro" }));
+    const review = within(dialog).getByRole("group", { name: "Revisá el cobro" });
+    expect(review).toHaveTextContent("Pendiente−$ 100.000,00");
+    expect(review).toHaveTextContent("Cartera de cheques+$ 100.000,00");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Confirmar cobro" }));
+    expect(await within(dialog).findByRole("link", { name: "Ver cheque" })).toHaveAttribute(
+      "href",
+      "/rendiciones/cheques/55",
+    );
+    const [body] = bodies(spy, "POST", "/settlements/pending-collections/12/cheque-receipts");
+    expect(body).toMatchObject({
+      kind: "PHYSICAL",
+      amount: "100000.00",
+      issuer_bank_id: 7,
+      physical_receipt_confirmed: true,
+      delivered_by_name: "Almacén Don José",
+    });
+    expect(body.client_request_id).toEqual(expect.any(String));
+  });
+
+  it("declares an ECHEQ without lowering the balance", async () => {
+    const after = detail({
+      echeqs: [
+        {
+          cheque_id: 56,
+          amount: "40000.00",
+          cheque_number: "00012345",
+          verification_status: "DECLARED",
+          voided: false,
+        },
+      ],
+    });
+    const { dialog } = await openCheque({
+      "POST /settlements/pending-collections/12/cheque-receipts": () => jsonResponse(201, after),
+    });
+    await fill(dialog, "40000", "ECHEQ");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Revisar cobro" }));
+    expect(within(dialog).getByRole("group", { name: "Revisá el cobro" })).toHaveTextContent(
+      "Queda declarado. El saldo no baja hasta verificarlo.",
+    );
+    await userEvent.click(within(dialog).getByRole("button", { name: "Declarar ECHEQ" }));
+    expect(await within(dialog).findByRole("status")).toHaveTextContent(
+      "Este ECHEQ todavía no fue verificado. El saldo pendiente continúa vigente.",
+    );
+  });
+
+  it("shows declared ECHEQs with Verificar / Rechazar verificación and shows the backend refusal", async () => {
+    const current = detail({
+      echeqs: [
+        {
+          cheque_id: 56,
+          amount: "40000.00",
+          cheque_number: "00012345",
+          verification_status: "DECLARED",
+          voided: false,
+        },
+      ],
+    });
+    const spy = mockApi({
+      ...base("operator", current),
+      "POST /settlements/pending-collections/12/cheque-receipts/56/verification": () =>
+        apiError(409, "pending_amount_exceeds_balance", { balance: "30000.00" }),
+    });
+    renderWithQuery(<PendingDetailView pendingId={12} />);
+    const block = await screen.findByTestId("declared-echeqs");
+    expect(block).toHaveTextContent("Este ECHEQ todavía no fue verificado. El saldo pendiente continúa vigente.");
+    expect(within(block).getByRole("link", { name: "ECHEQ n.º 00012345" })).toHaveAttribute(
+      "href",
+      "/rendiciones/cheques/56",
+    );
+    await userEvent.click(within(block).getByRole("button", { name: "Verificar" }));
+    const dialog = await screen.findByRole("dialog", { name: "Verificar ECHEQ" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Verificar y cobrar" }));
+    expect(
+      await within(dialog).findByText(/El importe supera el saldo pendiente \(\$ 30\.000,00\)/),
+    ).toBeInTheDocument();
+    expect(bodies(spy, "POST", "/settlements/pending-collections/12/cheque-receipts/56/verification")[0]).toMatchObject(
+      {
+        status: "VERIFIED",
+      },
+    );
+  });
+
+  it("hides the ECHEQ decision from a viewer", async () => {
+    const current = detail({
+      echeqs: [
+        { cheque_id: 56, amount: "40000.00", cheque_number: "1", verification_status: "DECLARED", voided: false },
+      ],
+    });
+    mockApi(base("viewer", current));
+    renderWithQuery(<PendingDetailView pendingId={12} />);
+    const block = await screen.findByTestId("declared-echeqs");
+    expect(within(block).queryByRole("button")).not.toBeInTheDocument();
   });
 });
