@@ -1,6 +1,7 @@
 """Rules of cheques that need no database (R4-1): dates by payment type [8] [9] [10], the identity strategy
 [11] [13] [16] and the derived states [6] [26], checked by hand."""
 
+import inspect
 from datetime import date
 from decimal import Decimal
 
@@ -62,7 +63,10 @@ def test_terms_are_rules_of_the_instrument_not_settings() -> None:
     from app.modules.settlements.settings import SETTINGS
 
     assert (terms.PRESENTATION_DAYS, terms.MAX_DEFERRED_DAYS) == (30, 360)
-    assert not any("cheque" in spec.key for spec in SETTINGS.specs)
+    # The only cheque setting is when the list starts warning «Vence en N días» (R4-3): it moves no term,
+    # validates nothing and the terms never read settings.
+    assert [spec.key for spec in SETTINGS.specs if "cheque" in spec.key] == ["cheque_expiring_soon_days"]
+    assert "settings" not in inspect.getsource(terms)
 
 
 @pytest.mark.parametrize(
