@@ -162,6 +162,29 @@ def test_derived_state(
     assert state.derive(kind=kind, voided=voided, verification_status=verification, position=position) == expected
 
 
+@pytest.mark.parametrize(
+    ("position", "outcome", "voided", "expected"),
+    [
+        # R4-2: where the ledger has it comes first; then the document in effect that took it out.
+        ({}, "CREDITED", False, "CREDITED"),
+        ({}, "REJECTED", False, "REJECTED"),
+        ({}, "RETURNED", False, "RETURNED"),
+        # A rejection reversed in transit: back in "depositados", whatever happened before.
+        ({"CHEQUES_IN_TRANSIT": D(10)}, "CREDITED", False, "DEPOSITED"),
+        # A return reversed: back in the portfolio.
+        ({"CHEQUE_PORTFOLIO": D(10)}, None, False, "IN_PORTFOLIO"),
+        # The cheque of a receipt that was reversed: voided, out of the portfolio.
+        ({}, None, True, "VOIDED"),
+    ],
+)
+def test_derived_state_of_the_cycle(
+    position: dict[str, Decimal], outcome: state.Outcome | None, voided: bool, expected: str
+) -> None:
+    derived = state.derive(kind="PHYSICAL", voided=voided, verification_status=None, position=position, outcome=outcome)
+    assert derived == expected
+    assert state.LABELS[derived]
+
+
 def test_only_received_or_verified_cheques_justify() -> None:
     assert state.justifies(kind="PHYSICAL", voided=False, verification_status=None)
     assert state.justifies(kind="ECHEQ", voided=False, verification_status="VERIFIED")

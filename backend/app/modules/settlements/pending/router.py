@@ -8,7 +8,7 @@ Creations are idempotent by `client_request_id` (201 created, 200 repeated, 409 
 and so are reversals. Every write answers with the pending's detail.
 """
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Query, Response
 
@@ -49,6 +49,7 @@ def list_pending_collections(
     driver_id: int | None = None,
     responsible_employee_id: int | None = None,
     settlement_id: int | None = None,
+    origin_type: Literal["SETTLEMENT", "CHEQUE_REJECTION", "CHEQUE_RETURN"] | None = None,
     min_age_hours: Annotated[int | None, Query(ge=0)] = None,
     alert: bool = False,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
@@ -60,6 +61,7 @@ def list_pending_collections(
         driver_id=driver_id,
         responsible_employee_id=responsible_employee_id,
         settlement_id=settlement_id,
+        origin_type=origin_type,
         min_age_hours=min_age_hours,
         alert_only=alert,
     )

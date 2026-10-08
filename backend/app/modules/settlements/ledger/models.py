@@ -82,9 +82,16 @@ OPERATION_TYPES = (
     # R4-1: cheques already held when Rendiciones starts, and a partner's contribution with a cheque.
     "CHEQUE_OPENING_BALANCE",
     "CHEQUE_OWNER_CONTRIBUTION",
+    # R4-2: the financial cycle of a cheque. Each one is the operation of exactly one document (a deposit
+    # slip, a crediting, a rejection, a return), which is its source.
+    "CHEQUE_DEPOSIT",
+    "CHEQUE_CREDIT",
+    "CHEQUE_REJECTION",
+    "CHEQUE_RETURN",
 )
+CHEQUE_DOCUMENT_TYPES = ("CHEQUE_DEPOSIT", "CHEQUE_CREDIT", "CHEQUE_REJECTION", "CHEQUE_RETURN")
 # Operations whose description is the mandatory reason.
-REASON_REQUIRED_TYPES = ("ADJUSTMENT", "REVERSAL", "PENDING_WRITE_OFF")
+REASON_REQUIRED_TYPES = ("ADJUSTMENT", "REVERSAL", "PENDING_WRITE_OFF", "CHEQUE_REJECTION", "CHEQUE_RETURN")
 
 
 _ACCENTS = str.maketrans("áàäâéèëêíìïîóòöôúùüû", "aaaaeeeeiiiioooouuuu")
@@ -164,6 +171,14 @@ class FinancialOperation(IdMixin, Base):
             postgresql_where=text("reverses_operation_id IS NOT NULL"),
         ),
         Index("ix_financial_operations_source", "source_type", "source_id"),
+        # A document of the cheque cycle has exactly one operation (R4-2); reversals point at it instead.
+        Index(
+            "uq_financial_operations_cheque_document",
+            "source_type",
+            "source_id",
+            unique=True,
+            postgresql_where=text(f"type IN ({_in(CHEQUE_DOCUMENT_TYPES)})"),
+        ),
         {"schema": SCHEMA},
     )
 

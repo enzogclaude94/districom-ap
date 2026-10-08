@@ -41,7 +41,7 @@ DistriCom es una plataforma modular (ADR 006). Este roadmap tiene tres carriles:
 | R1 | Ledger y cajas | **DONE** (aprobada por Enzo el 2026-10-04; PRs #7–#9 mergeados) | R0 |
 | R2 | Rendición de reparto básica | **DONE** (aprobada por Enzo el 2026-10-05; PRs #10–#12 mergeados) | R1 |
 | R3 | Pendientes de cobro | **DONE** (2026-10-07; R3‑1, R3‑2 y R3‑3 aprobados y mergeados, PRs #13, #14 y #16) | R2 |
-| R4 | Cartera de cheques | IN_PROGRESS (R4‑1 en revisión) | R2 · R3 |
+| R4 | Cartera de cheques | IN_PROGRESS (R4‑1 DONE, PR #17; R4‑2 en revisión) | R2 · R3 |
 | R5 | Combustible y vehículos | PLANNED | R2 |
 | R6 | Pagos a proveedores y terceros | PLANNED | R1 · R4 |
 | R7 | Boca de expendio | PLANNED | R2–R5 |
@@ -187,8 +187,8 @@ Modelo conceptual en `DATA_MODEL.md §13`; decisiones en ADR 007. Cada fase crea
 
 | PR | Contenido | Estado |
 |---|---|---|
-| R4‑1 | Catálogo de bancos (`0011`), cheques físicos y ECHEQ, identidad y duplicados, fechas por tipo, eventos, estados derivados, verificación, Cartera y Cheques depositados, `ledger_entries.cheque_id`, cheques en la rendición y en su cierre (`0012`), snapshot y token, saldo inicial y aporte de socio, API y tests | En revisión |
-| R4‑2 | Depósito, acreditación, rechazo (con la excepción de Banco en descubierto), devolución, nuevo pendiente por rechazo, cobrar un pendiente con cheque | Espera aprobación |
+| R4‑1 | Catálogo de bancos (`0011`), cheques físicos y ECHEQ, identidad y duplicados, fechas por tipo, eventos, estados derivados, verificación, Cartera y Cheques depositados, `ledger_entries.cheque_id`, cheques en la rendición y en su cierre (`0012`), snapshot y token, saldo inicial y aporte de socio, API y tests | **DONE** (aprobada por Enzo el 2026-10-07 con catálogo BCRA oficial y plazos como reglas del instrumento; PR #17 mergeado; `0011`/`0012` congeladas) |
+| R4‑2 | Depósito, acreditación, rechazo (con la excepción de Banco en descubierto), devolución, nuevo pendiente por rechazo o devolución, cobrar un pendiente con cheque (`0013`) | En revisión |
 | R4‑3 | Pantallas: cheques en la rendición, cartera, detalle e historia | Espera aprobación |
 
 ### R5 — Combustible y vehículos

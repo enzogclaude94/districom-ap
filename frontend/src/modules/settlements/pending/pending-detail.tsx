@@ -27,7 +27,7 @@ import {
   type Resolution,
 } from "./api";
 import { CorrectionNote } from "./settlement-pendings";
-import { EVENT_LABELS, METHOD_LABELS, STATE_LABELS, STATE_TONES, ageText, pendingTitle } from "./labels";
+import { METHOD_LABELS, ORIGIN_LABELS, STATE_LABELS, STATE_TONES, ageText, eventLabel, pendingTitle } from "./labels";
 
 type Open =
   | { kind: "receipt" | "resolve" | "responsible" }
@@ -126,6 +126,15 @@ function eventDetail(event: PendingEvent): string | null {
   }
 }
 
+/** Where the pending was born, for the page header. */
+function originText(pending: Detail) {
+  if (pending.settlement_sequence_number !== null) {
+    return `${settlementTitle(pending.settlement_sequence_number)} de ${pending.driver_name ?? ""} del ${formatDate(pending.settlement_business_date)}`;
+  }
+  const cheque = pending.origin_cheque_id !== null ? ` #${pending.origin_cheque_id}` : "";
+  return `${ORIGIN_LABELS[pending.origin_type]}${cheque} del ${formatDate(pending.origin_business_date)}`;
+}
+
 /** Functional history from `pending_collection_events` (never from the audit log), newest last. */
 function History({ pending }: { pending: Detail }) {
   if (pending.events.length === 0) return <p className="text-sm text-muted-foreground">Sin eventos.</p>;
@@ -135,7 +144,7 @@ function History({ pending }: { pending: Detail }) {
         const detail = eventDetail(event);
         return (
           <li key={event.id} className="border-l-2 border-border pl-3 text-sm">
-            <p className="font-medium">{EVENT_LABELS[event.event_type] ?? event.event_type}</p>
+            <p className="font-medium">{eventLabel(event.event_type, pending.origin_type)}</p>
             {detail && <p className="tabular-nums">{detail}</p>}
             {event.reason && <p className="text-muted-foreground">Motivo: {event.reason}</p>}
             <p className="text-xs text-muted-foreground">
@@ -203,7 +212,7 @@ export function PendingDetailView({ pendingId }: { pendingId: number }) {
       {back}
       <PageHeader
         title={`${pendingTitle(pending.id)} · ${pending.customer_in_effect ?? pending.customer_name}`}
-        description={`${settlementTitle(pending.settlement_sequence_number)} de ${pending.driver_name} del ${formatDate(pending.settlement_business_date)}`}
+        description={originText(pending)}
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <Badge tone={STATE_TONES[pending.state]} data-testid="pending-state">
@@ -277,13 +286,30 @@ export function PendingDetailView({ pendingId }: { pendingId: number }) {
           <CardContent>
             <dl className="grid grid-cols-2 gap-4">
               <Field label="Cliente">{pending.customer_in_effect ?? pending.customer_name}</Field>
-              <Field label="Rendición">
-                <Link href={`/rendiciones/repartos/${pending.settlement_id}`} className="text-primary hover:underline">
-                  {settlementTitle(pending.settlement_sequence_number)} del{" "}
-                  {formatDate(pending.settlement_business_date)}
-                </Link>
-              </Field>
-              <Field label="Repartidor">{pending.driver_name}</Field>
+              {pending.settlement_id !== null && pending.settlement_sequence_number !== null ? (
+                <>
+                  <Field label="Rendición">
+                    <Link
+                      href={`/rendiciones/repartos/${pending.settlement_id}`}
+                      className="text-primary hover:underline"
+                    >
+                      {settlementTitle(pending.settlement_sequence_number)} del{" "}
+                      {formatDate(pending.settlement_business_date)}
+                    </Link>
+                  </Field>
+                  <Field label="Repartidor">{pending.driver_name}</Field>
+                </>
+              ) : (
+                <>
+                  <Field label="Origen">
+                    <span data-testid="pending-origin">{ORIGIN_LABELS[pending.origin_type]}</span>
+                  </Field>
+                  <Field label="Cheque">
+                    {pending.origin_cheque_id !== null ? `Cheque #${pending.origin_cheque_id}` : "—"} del{" "}
+                    {formatDate(pending.origin_business_date)}
+                  </Field>
+                </>
+              )}
               <Field label="Responsable">
                 <span data-testid="pending-responsible">{pending.responsible_name}</span>
               </Field>

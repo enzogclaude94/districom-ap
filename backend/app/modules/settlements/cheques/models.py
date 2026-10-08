@@ -52,8 +52,22 @@ SCHEMA = "settlements"
 KINDS = ("PHYSICAL", "ECHEQ")
 PAYMENT_TYPES = ("COMMON", "DEFERRED")
 VERIFICATION_STATUSES = ("DECLARED", "VERIFIED", "VERIFICATION_REJECTED")
-# R4-2 adds PENDING_RECEIPT (a pending collected with a cheque).
-ORIGIN_TYPES = ("SETTLEMENT", "OPENING_BALANCE", "OWNER_CONTRIBUTION")
+# R4-2: PENDING_RECEIPT, a cheque a customer gave to pay a pending collection.
+ORIGIN_TYPES = ("SETTLEMENT", "OPENING_BALANCE", "OWNER_CONTRIBUTION", "PENDING_RECEIPT")
+# R4-2: what the financial cycle did to it. Each names its operation (`operation_id`).
+CYCLE_EVENT_TYPES = (
+    "DEPOSITED",
+    "DEPOSIT_REVERSED",
+    "CREDITED",
+    "CREDIT_REVERSED",
+    "REJECTED",
+    "REJECTION_REVERSED",
+    "RETURNED",
+    "RETURN_REVERSED",
+    # A pending was collected with it (it entered the portfolio), or that receipt was reversed.
+    "COLLECTED",
+    "COLLECTION_REVERSED",
+)
 EVENT_TYPES = (
     "RECEIVED",
     "CORRECTED",
@@ -64,12 +78,33 @@ EVENT_TYPES = (
     "PUBLISHED",
     "WITHDRAWN",
     "DESCRIPTIVE_CORRECTED",
+    *CYCLE_EVENT_TYPES,
 )
 CLOSE_EVENT_TYPES = ("PUBLISHED", "WITHDRAWN")
-REASON_EVENT_TYPES = ("VOIDED", "VERIFICATION_REJECTED", "DESCRIPTIVE_CORRECTED")
+REASON_EVENT_TYPES = (
+    "VOIDED",
+    "VERIFICATION_REJECTED",
+    "DESCRIPTIVE_CORRECTED",
+    "DEPOSIT_REVERSED",
+    "CREDIT_REVERSED",
+    "REJECTED",
+    "REJECTION_REVERSED",
+    "RETURNED",
+    "RETURN_REVERSED",
+    "COLLECTION_REVERSED",
+)
+REJECTION_STAGES = ("IN_TRANSIT", "AFTER_CREDIT")
 
 _SETTLEMENT_FK = f"{SCHEMA}.settlements.id"
 _CHEQUE_FK = f"{SCHEMA}.cheques.id"
+_ACCOUNT_FK = f"{SCHEMA}.accounts.id"
+_PENDING_FK = f"{SCHEMA}.pending_collections.id"
+# Reversal of a cycle document: all of it or none, once (migration 0013 freezes it after that).
+_REVERSAL_COMPLETE = (
+    "(reversal_operation_id IS NULL AND reversed_by IS NULL AND reversed_at IS NULL AND reversal_reason IS NULL) OR "
+    "(reversal_operation_id IS NOT NULL AND reversed_by IS NOT NULL AND reversed_at IS NOT NULL AND "
+    "length(btrim(coalesce(reversal_reason, ''))) > 0)"
+)
 # An instrument blocks its identity unless it was voided or its verification was rejected.
 _HOLDS_IDENTITY = "voided_at IS NULL AND coalesce(verification_status, '') <> 'VERIFICATION_REJECTED'"
 
@@ -112,6 +147,9 @@ class Cheque(IdMixin, TimestampMixin, Base):
         CheckConstraint("kind = 'ECHEQ' OR echeq_external_id IS NULL", name="external_id_only_echeq"),
         CheckConstraint("kind = 'PHYSICAL' OR drawer_tax_id IS NOT NULL", name="echeq_drawer_tax_id"),
         CheckConstraint("(origin_type = 'SETTLEMENT') = (settlement_id IS NOT NULL)", name="settlement_origin"),
+        CheckConstraint(
+            "(origin_type = 'PENDING_RECEIPT') = (origin_pending_id IS NOT NULL)", name="pending_receipt_origin"
+        ),
         CheckConstraint("request_fingerprint ~ '^[0-9a-f]{64}$'", name="fingerprint_format"),
         CheckConstraint(
             "(voided_at IS NULL AND voided_by IS NULL AND void_reason IS NULL) OR "
@@ -162,6 +200,11 @@ class Cheque(IdMixin, TimestampMixin, Base):
     settlement_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey(_SETTLEMENT_FK, ondelete="RESTRICT"), index=True
     )
+    # The pending collection the customer paid with it (origin PENDING_RECEIPT, R4-2).
+    # `use_alter`: pendings born from a cheque point back at cheques (their rejection or return).
+    origin_pending_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey(_PENDING_FK, ondelete="RESTRICT", use_alter=True), index=True
+    )
     received_business_date: Mapped[date] = mapped_column(Date)
     received_by_employee_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("employees.id", ondelete="RESTRICT")
@@ -202,6 +245,9 @@ class ChequeEvent(IdMixin, Base):
             name="reason_required",
         ),
         CheckConstraint("(settlement_id IS NULL) = (settlement_version IS NULL)", name="settlement_pair"),
+        CheckConstraint(
+            f"event_type NOT IN ({_in(CYCLE_EVENT_TYPES)}) OR operation_id IS NOT NULL", name="cycle_operation"
+        ),
         {"schema": SCHEMA},
     )
 
@@ -246,3 +292,184 @@ class SettlementClosingCheque(IdMixin, Base):
     cheque_id: Mapped[int] = mapped_column(BigInteger, ForeignKey(_CHEQUE_FK, ondelete="RESTRICT"), index=True)
     amount: Mapped[Decimal] = mapped_column(Numeric(14, 2))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+# --- the financial cycle (R4-2) -------------------------------------------------------------------
+#
+# Each document below is the source of exactly one ledger operation (`source_type` / `source_id`, unique
+# per document type in `financial_operations`), written in the same transaction. Documents are never
+# deleted; the only change ever allowed is their reversal, all four fields at once, once, pointing at
+# the REVERSAL of their own operation (migration 0013).
+
+
+class ChequeDeposit(IdMixin, Base):
+    """A deposit slip: one or more cheques of the portfolio taken to one bank account. One CHEQUE_DEPOSIT
+    operation with two legs per cheque (Cartera -X / Cheques depositados +X, each with its cheque)."""
+
+    __tablename__ = "cheque_deposits"
+    __table_args__ = (
+        CheckConstraint("request_fingerprint ~ '^[0-9a-f]{64}$'", name="fingerprint_format"),
+        CheckConstraint(_REVERSAL_COMPLETE, name="reversal_complete"),
+        {"schema": SCHEMA},
+    )
+
+    bank_account_id: Mapped[int] = mapped_column(BigInteger, ForeignKey(_ACCOUNT_FK, ondelete="RESTRICT"))
+    business_date: Mapped[date] = mapped_column(Date)
+    # The number printed on the bank's slip, when there is one.
+    slip_number: Mapped[str | None] = mapped_column(String(40))
+    notes: Mapped[str | None] = mapped_column(Text)
+    client_request_id: Mapped[UUID] = mapped_column(Uuid, unique=True)
+    request_fingerprint: Mapped[str] = mapped_column(String(64))
+    created_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    reversal_operation_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("settlements.financial_operations.id", ondelete="RESTRICT"), unique=True
+    )
+    reversed_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"))
+    reversed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reversal_reason: Mapped[str | None] = mapped_column(Text)
+
+
+class ChequeDepositItem(IdMixin, Base):
+    """One cheque of a deposit slip, for its whole amount. Append-only."""
+
+    __tablename__ = "cheque_deposit_items"
+    __table_args__ = (
+        CheckConstraint("amount > 0", name="amount_positive"),
+        UniqueConstraint("deposit_id", "cheque_id", name="uq_cheque_deposit_items_deposit_cheque"),
+        {"schema": SCHEMA},
+    )
+
+    deposit_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey(f"{SCHEMA}.cheque_deposits.id", ondelete="RESTRICT"), index=True
+    )
+    cheque_id: Mapped[int] = mapped_column(BigInteger, ForeignKey(_CHEQUE_FK, ondelete="RESTRICT"), index=True)
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2))
+
+
+class ChequeCredit(IdMixin, Base):
+    """The bank credited one or more deposited cheques (a batch, as the statement shows them). One
+    CHEQUE_CREDIT operation: Cheques depositados -X per cheque and the bank +total."""
+
+    __tablename__ = "cheque_credits"
+    __table_args__ = (
+        CheckConstraint("request_fingerprint ~ '^[0-9a-f]{64}$'", name="fingerprint_format"),
+        CheckConstraint(_REVERSAL_COMPLETE, name="reversal_complete"),
+        {"schema": SCHEMA},
+    )
+
+    bank_account_id: Mapped[int] = mapped_column(BigInteger, ForeignKey(_ACCOUNT_FK, ondelete="RESTRICT"))
+    business_date: Mapped[date] = mapped_column(Date)
+    notes: Mapped[str | None] = mapped_column(Text)
+    client_request_id: Mapped[UUID] = mapped_column(Uuid, unique=True)
+    request_fingerprint: Mapped[str] = mapped_column(String(64))
+    created_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    reversal_operation_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("settlements.financial_operations.id", ondelete="RESTRICT"), unique=True
+    )
+    reversed_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"))
+    reversed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reversal_reason: Mapped[str | None] = mapped_column(Text)
+
+
+class ChequeCreditItem(IdMixin, Base):
+    """One cheque of a crediting, and the deposit it came from. Append-only."""
+
+    __tablename__ = "cheque_credit_items"
+    __table_args__ = (
+        CheckConstraint("amount > 0", name="amount_positive"),
+        UniqueConstraint("credit_id", "cheque_id", name="uq_cheque_credit_items_credit_cheque"),
+        {"schema": SCHEMA},
+    )
+
+    credit_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey(f"{SCHEMA}.cheque_credits.id", ondelete="RESTRICT"), index=True
+    )
+    cheque_id: Mapped[int] = mapped_column(BigInteger, ForeignKey(_CHEQUE_FK, ondelete="RESTRICT"), index=True)
+    deposit_item_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey(f"{SCHEMA}.cheque_deposit_items.id", ondelete="RESTRICT")
+    )
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2))
+
+
+class ChequeRejection(IdMixin, Base):
+    """The bank rejected a deposited cheque. In transit: Cheques depositados -X / Pendientes +X, the bank
+    untouched. After it was credited: the bank -X / Pendientes +X, even into an overdraft (an external
+    debit, Enzo's R4-2 policy). Either way a NEW pending collection is born, with this row as its origin."""
+
+    __tablename__ = "cheque_rejections"
+    __table_args__ = (
+        CheckConstraint(f"stage IN ({_in(REJECTION_STAGES)})", name="stage"),
+        CheckConstraint("length(btrim(reason)) > 0", name="reason_not_blank"),
+        CheckConstraint(
+            "(stage = 'AFTER_CREDIT') = (credit_item_id IS NOT NULL) AND "
+            "(stage = 'AFTER_CREDIT') = (bank_account_id IS NOT NULL)",
+            name="stage_links",
+        ),
+        CheckConstraint("request_fingerprint ~ '^[0-9a-f]{64}$'", name="fingerprint_format"),
+        CheckConstraint(_REVERSAL_COMPLETE, name="reversal_complete"),
+        # At most one rejection in effect per cheque.
+        Index(
+            "uq_cheque_rejections_live_cheque",
+            "cheque_id",
+            unique=True,
+            postgresql_where=text("reversal_operation_id IS NULL"),
+        ),
+        {"schema": SCHEMA},
+    )
+
+    cheque_id: Mapped[int] = mapped_column(BigInteger, ForeignKey(_CHEQUE_FK, ondelete="RESTRICT"), index=True)
+    stage: Mapped[str] = mapped_column(String(20))
+    deposit_item_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey(f"{SCHEMA}.cheque_deposit_items.id", ondelete="RESTRICT")
+    )
+    credit_item_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey(f"{SCHEMA}.cheque_credit_items.id", ondelete="RESTRICT")
+    )
+    bank_account_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey(_ACCOUNT_FK, ondelete="RESTRICT"))
+    business_date: Mapped[date] = mapped_column(Date)
+    reason: Mapped[str] = mapped_column(Text)
+    client_request_id: Mapped[UUID] = mapped_column(Uuid, unique=True)
+    request_fingerprint: Mapped[str] = mapped_column(String(64))
+    created_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    reversal_operation_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("settlements.financial_operations.id", ondelete="RESTRICT"), unique=True
+    )
+    reversed_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"))
+    reversed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reversal_reason: Mapped[str | None] = mapped_column(Text)
+
+
+class ChequeReturn(IdMixin, Base):
+    """A cheque of the portfolio given back to who delivered it (admin, with a reason; Enzo's D-C):
+    Cartera -X / Pendientes +X and a NEW pending collection. Never a payment to a supplier (R6)."""
+
+    __tablename__ = "cheque_returns"
+    __table_args__ = (
+        CheckConstraint("length(btrim(reason)) > 0", name="reason_not_blank"),
+        CheckConstraint("request_fingerprint ~ '^[0-9a-f]{64}$'", name="fingerprint_format"),
+        CheckConstraint(_REVERSAL_COMPLETE, name="reversal_complete"),
+        Index(
+            "uq_cheque_returns_live_cheque",
+            "cheque_id",
+            unique=True,
+            postgresql_where=text("reversal_operation_id IS NULL"),
+        ),
+        {"schema": SCHEMA},
+    )
+
+    cheque_id: Mapped[int] = mapped_column(BigInteger, ForeignKey(_CHEQUE_FK, ondelete="RESTRICT"), index=True)
+    business_date: Mapped[date] = mapped_column(Date)
+    reason: Mapped[str] = mapped_column(Text)
+    client_request_id: Mapped[UUID] = mapped_column(Uuid, unique=True)
+    request_fingerprint: Mapped[str] = mapped_column(String(64))
+    created_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    reversal_operation_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("settlements.financial_operations.id", ondelete="RESTRICT"), unique=True
+    )
+    reversed_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"))
+    reversed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reversal_reason: Mapped[str | None] = mapped_column(Text)

@@ -13,6 +13,10 @@ Guarantees, in the service and again in the database (migration 0005):
   order) before their balance is checked, so concurrent operations cannot overdraw them, and a
   retroactive operation cannot leave any past end-of-day balance negative. Requires the default
   READ COMMITTED isolation.
+- «Banco en descubierto» (R4-2): the leg on a bank of an external debit (`rules.EXTERNAL_BANK_DEBITS`: the
+  rejection of a cheque already credited) is booked even into an overdraft; the account is still locked.
+  Any other debit of the bank keeps every end-of-day balance from its date on >= 0, so it can neither
+  create an overdraft nor deepen one; incomes are never limited and reduce it.
 """
 
 import hashlib
@@ -39,6 +43,7 @@ from app.modules.settlements.ledger.models import (
 )
 from app.modules.settlements.ledger.rules import (
     DOCUMENT_TYPES,
+    EXTERNAL_BANK_DEBITS,
     REVERSAL_MIN_ROLE,
     REVERSIBLE_DOCUMENT_TYPES,
     RULES,
@@ -96,6 +101,11 @@ class AccountBalance:
     allow_negative: bool
     active: bool
     balance: Decimal
+
+    @property
+    def overdrawn(self) -> bool:
+        """«Banco en descubierto»: only a bank can be below zero, and only through an external debit."""
+        return self.kind == "BANK" and self.balance < 0
 
 
 @dataclass(frozen=True)
@@ -375,7 +385,7 @@ def _post(
     elif _reversed_by(db, reverses.id) is not None:
         raise AppError(409, "operation_already_reversed", "La operación ya fue revertida.")
     if check_funds:  # replace_operation checks the net effect of the pair instead
-        _check_funds(db, legs, accounts, business_date)
+        _check_funds(db, legs, accounts, business_date, operation_type=type)
 
     operation = FinancialOperation(
         type=type,
@@ -495,14 +505,21 @@ def _load_accounts(db: Session, legs: list[Leg]) -> dict[int, Account]:
     return accounts
 
 
-def _check_funds(db: Session, legs: list[Leg], accounts: dict[int, Account], business_date: date) -> None:
+def _check_funds(
+    db: Session,
+    legs: list[Leg],
+    accounts: dict[int, Account],
+    business_date: date,
+    *,
+    operation_type: str | None = None,
+) -> None:
     """Lock every account that cannot go negative and loses value here, then check its balances.
 
     The leg changes the end-of-day balance of `business_date` and of every later day, so the lowest of
     those balances must cover it: a retroactive withdrawal cannot leave a past day negative even if
     today's balance stays positive. Locks are taken in id order so two operations never wait on each
     other in a cycle; `NO KEY UPDATE` does not block the foreign-key checks of concurrent inserts into
-    other accounts.
+    other accounts. An external debit of a bank (`EXTERNAL_BANK_DEBITS`) locks it too, but is not limited.
     """
     # Several legs may leave the same account (one per cheque): what is checked is their sum.
     debits: dict[int, Decimal] = {}
@@ -512,6 +529,8 @@ def _check_funds(db: Session, legs: list[Leg], accounts: dict[int, Account], bus
     for account_id, amount in sorted(debits.items()):
         leg = Leg(account_id, amount)
         db.execute(select(Account.id).where(Account.id == leg.account_id).with_for_update(key_share=True))
+        if operation_type in EXTERNAL_BANK_DEBITS and accounts[account_id].kind == "BANK":
+            continue
         lowest, on = _lowest_balance_since(db, leg.account_id, business_date)
         if lowest + leg.amount < 0:
             account = accounts[leg.account_id]
@@ -784,6 +803,49 @@ def cheque_activity(db: Session, cheque_ids: Sequence[int], *, except_types: Seq
         .distinct()
     )
     return {cid for cid in rows if cid is not None}
+
+
+def cheque_entry_dates(db: Session, cheque_ids: Sequence[int], kind: str) -> dict[int, date]:
+    """Latest business date on which each cheque entered an account of `kind` (a positive leg naming it):
+    no later document of the cheque may be dated before it (R4-2)."""
+    if not cheque_ids:
+        return {}
+    rows = db.execute(
+        select(LedgerEntry.cheque_id, func.max(FinancialOperation.business_date))
+        .join(FinancialOperation, FinancialOperation.id == LedgerEntry.operation_id)
+        .join(Account, Account.id == LedgerEntry.account_id)
+        .where(LedgerEntry.cheque_id.in_(cheque_ids), Account.kind == kind, LedgerEntry.amount > 0)
+        .group_by(LedgerEntry.cheque_id)
+    )
+    return {cid: day for cid, day in rows if cid is not None}
+
+
+def document_operation(db: Session, type: str, source: SourceRef) -> FinancialOperation:
+    """The one operation of a document of the cheque cycle (unique by type and source)."""
+    operation = db.scalars(
+        select(FinancialOperation).where(
+            FinancialOperation.type == type,
+            FinancialOperation.source_type == source.type,
+            FinancialOperation.source_id == source.id,
+        )
+    ).one_or_none()
+    if operation is None:
+        raise AppError(404, "operation_not_found", "La operación no existe.")
+    return operation
+
+
+def document_operation_ids(db: Session, type: str, source_type: str, source_ids: Sequence[int]) -> dict[int, int]:
+    """Operation id per document id, for documents of the cheque cycle."""
+    if not source_ids:
+        return {}
+    rows = db.execute(
+        select(FinancialOperation.source_id, FinancialOperation.id).where(
+            FinancialOperation.type == type,
+            FinancialOperation.source_type == source_type,
+            FinancialOperation.source_id.in_(source_ids),
+        )
+    )
+    return {sid: oid for sid, oid in rows if sid is not None}
 
 
 def cheques_held(db: Session, kind: str) -> dict[int, Decimal]:

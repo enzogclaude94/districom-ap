@@ -21,6 +21,11 @@ Lock order, as everywhere: the settlement (FOR SHARE: receipts never wait for ea
 close or a load change waits for them), then the pending (FOR UPDATE: two receipts of one pending
 serialize), then, inside the ledger, the accounts. Every domain row, its ledger operation and its event
 are written in one transaction; the database refuses one without the other (migration 0010).
+
+R4-2: a pending born from a rejected or returned cheque has no settlement: it is locked alone, is in
+effect for its amount until its origin is reversed, and is collected on or after its origin's date. A
+receipt with a cheque (`cheque_receipts`) is a receipt like the others, with method CHEQUE; reversing it
+also voids that cheque, which must still be in the portfolio.
 """
 
 from dataclasses import dataclass
@@ -34,6 +39,8 @@ from sqlalchemy.orm import Session
 
 from app.core.clock import business_today
 from app.core.errors import AppError
+from app.modules.settlements.cheques import service as cheques
+from app.modules.settlements.cheques.models import ChequeRejection, ChequeReturn
 from app.modules.settlements.delivery import idempotency
 from app.modules.settlements.delivery import service as settlements
 from app.modules.settlements.delivery.models import Settlement
@@ -62,7 +69,8 @@ ZERO = Decimal("0.00")
 
 @dataclass(frozen=True)
 class Locked:
-    settlement: Settlement
+    # None for a pending born from a cheque (R4-2).
+    settlement: Settlement | None
     pending: PendingCollection
 
 
@@ -92,8 +100,10 @@ def record_receipt(db: Session, actor: User, pending_id: int, body: s.ReceiptIn)
         return settlements.Created(existing.id, created=False)
 
     settlement, pending = locked.settlement, locked.pending
-    balance = _balance(db, settlement, pending)
-    _check_date(settlement, business_date, "invalid_receipt_date", "El cobro no puede ser anterior a la rendición.")
+    balance = balance_of(db, pending)
+    check_date(
+        db, pending, business_date, "invalid_receipt_date", "El cobro no puede ser anterior al origen del pendiente."
+    )
     destination = _account(db, body.destination_account_id)
     if destination is None or not destination.active or destination.kind != DESTINATION_KIND[body.method]:
         raise AppError(
@@ -102,7 +112,7 @@ def record_receipt(db: Session, actor: User, pending_id: int, body: s.ReceiptIn)
             "El efectivo entra en una caja activa y la transferencia en un banco activo.",
             {"method": body.method, "destination_account_id": body.destination_account_id},
         )
-    _check_balance(pending.id, body.amount, balance)
+    check_balance(pending.id, body.amount, balance)
 
     operation = ledger.post_operation(
         db,
@@ -114,7 +124,7 @@ def record_receipt(db: Session, actor: User, pending_id: int, body: s.ReceiptIn)
         ],
         client_request_id=uuid5(NAMESPACE, f"receipt:{body.client_request_id}"),
         business_date=business_date,
-        description=f"Cobro del pendiente #{pending.id} de la rendición #{settlement.id}",
+        description=f"Cobro del pendiente #{pending.id}{origin_label(pending)}",
         source=ledger.SourceRef(SOURCE_TYPE, pending.id),
     ).operation
     receipt = PendingCollectionReceipt(
@@ -168,6 +178,17 @@ def reverse_receipt(
     request_id = uuid5(NAMESPACE, f"receipt-reversal:{body.client_request_id}")
     if _already_reversed(db, actor, receipt, request_id, reason, "receipt_already_reversed", "El cobro"):
         return settlements.Created(receipt.id, created=False)
+    cheque = None
+    if receipt.cheque_id is not None:
+        # The cheque goes back to who gave it: only while it is still in the portfolio (R4-2).
+        cheque = cheques._lock(db, receipt.cheque_id)
+        if ledger.cheque_positions(db, [cheque.id])[cheque.id].get("CHEQUE_PORTFOLIO", ZERO) <= 0:
+            raise AppError(
+                409,
+                "cheque_has_activity",
+                "El cheque con que se cobró ya salió de la cartera (depositado, devuelto...): revertí eso primero.",
+                {"cheque_id": cheque.id},
+            )
 
     reversal = ledger.reverse_document_operation(
         db,
@@ -178,6 +199,21 @@ def reverse_receipt(
         client_request_id=request_id,
     ).operation
     _mark_reversed(receipt, actor, reversal.id, reason)
+    if cheque is not None:
+        db.flush()  # the receipt is reversed before its cheque is voided (migration 0013)
+        cheque.voided_by = actor.id
+        cheque.voided_at = datetime.now(UTC)
+        cheque.void_reason = f"Se revirtió el cobro del pendiente #{pending_id}: {reason}"
+        cheques.record_event(
+            db,
+            actor,
+            cheque,
+            "COLLECTION_REVERSED",
+            None,
+            {"pending_id": pending_id, "receipt_id": receipt.id, "voided": True},
+            reason=reason,
+            operation_id=reversal.id,
+        )
     service.record_event(
         db, actor, locked.settlement, pending_id, "RECEIPT_REVERSED", None, None, reason=reason, receipt_id=receipt.id
     )
@@ -219,16 +255,20 @@ def resolve(db: Session, actor: User, pending_id: int, body: s.ResolutionIn) -> 
         return settlements.Created(existing.id, created=False)
 
     settlement, pending = locked.settlement, locked.pending
-    balance = _balance(db, settlement, pending)
-    _check_date(
-        settlement, business_date, "invalid_resolution_date", "La resolución no puede ser anterior a la rendición."
+    balance = balance_of(db, pending)
+    check_date(
+        db,
+        pending,
+        business_date,
+        "invalid_resolution_date",
+        "La resolución no puede ser anterior al origen del pendiente.",
     )
     employees = [employee for _, employee, _ in parts if employee is not None]
     names = dict(db.execute(select(Employee.id, Employee.full_name).where(Employee.id.in_(employees))).all())
     missing = [e for e in employees if e not in names]
     if missing:
         raise AppError(422, "employee_not_found", "El empleado no existe.", {"employee_id": missing[0]})
-    _check_balance(pending.id, body.amount, balance)
+    check_balance(pending.id, body.amount, balance)
 
     legs = [ledger.Leg(ledger.system_account_id(db, "pending_collections"), -body.amount)]
     for _, employee, amount in parts:
@@ -244,7 +284,7 @@ def resolve(db: Session, actor: User, pending_id: int, body: s.ResolutionIn) -> 
         legs=legs,
         client_request_id=uuid5(NAMESPACE, f"resolution:{body.client_request_id}"),
         business_date=business_date,
-        description=f"Resolución del pendiente #{pending.id} de la rendición #{settlement.id}: {reason}",
+        description=f"Resolución del pendiente #{pending.id}{origin_label(pending)}: {reason}",
         source=ledger.SourceRef(SOURCE_TYPE, pending.id),
     ).operation
     resolution = PendingCollectionResolution(
@@ -349,7 +389,7 @@ def change_responsible(db: Session, actor: User, pending_id: int, body: s.Respon
     if body.responsible_employee_id == before:
         db.commit()
         return
-    if body.responsible_employee_id != locked.settlement.employee_id:
+    if locked.settlement is None or body.responsible_employee_id != locked.settlement.employee_id:
         service.active_employee(db, body.responsible_employee_id)
     reason = (body.reason or "").strip() or None
     pending.responsible_employee_id = body.responsible_employee_id
@@ -375,7 +415,7 @@ def change_responsible(db: Session, actor: User, pending_id: int, body: s.Respon
         after={
             "responsible_employee_id": body.responsible_employee_id,
             "reason": reason,
-            "settlement_status": locked.settlement.status,
+            "settlement_status": locked.settlement.status if locked.settlement else None,
         },
     )
     settlements.commit(db)
@@ -384,17 +424,20 @@ def change_responsible(db: Session, actor: User, pending_id: int, body: s.Respon
 # --- internals ------------------------------------------------------------------------------------
 
 
-def _lock(db: Session, pending_id: int) -> Locked:
-    """The settlement FOR SHARE, then the pending FOR UPDATE (the lock order of every pending write)."""
+def lock(db: Session, pending_id: int) -> Locked:
+    """The settlement FOR SHARE (if the pending has one), then the pending FOR UPDATE (the lock order of
+    every pending write)."""
     found = db.get(PendingCollection, pending_id)
     if found is None:
         raise AppError(404, "pending_not_found", "El pendiente no existe.")
-    settlement = db.scalars(
-        select(Settlement)
-        .where(Settlement.id == found.settlement_id)
-        .with_for_update(read=True)
-        .execution_options(populate_existing=True)
-    ).one()
+    settlement = None
+    if found.settlement_id is not None:
+        settlement = db.scalars(
+            select(Settlement)
+            .where(Settlement.id == found.settlement_id)
+            .with_for_update(read=True)
+            .execution_options(populate_existing=True)
+        ).one()
     pending = db.scalars(
         select(PendingCollection)
         .where(PendingCollection.id == pending_id)
@@ -404,9 +447,36 @@ def _lock(db: Session, pending_id: int) -> Locked:
     return Locked(settlement, pending)
 
 
-def _balance(db: Session, settlement: Settlement, pending: PendingCollection) -> Decimal:
+_lock = lock
+
+
+def origin_label(pending: PendingCollection) -> str:
+    """How an operation's description names where the pending came from."""
+    if pending.origin_type == "CHEQUE_REJECTION":
+        return " (cheque rechazado)"
+    if pending.origin_type == "CHEQUE_RETURN":
+        return " (cheque devuelto)"
+    return f" de la rendición #{pending.settlement_id}"
+
+
+def origin_date(db: Session, pending: PendingCollection) -> date:
+    """The business date the pending was born: its settlement's, or its rejection's or return's."""
+    if pending.settlement_id is not None:
+        settlement = db.get(Settlement, pending.settlement_id)
+        assert settlement is not None  # foreign key
+        return settlement.business_date
+    origin: ChequeRejection | ChequeReturn | None
+    if pending.origin_cheque_rejection_id is not None:
+        origin = db.get(ChequeRejection, pending.origin_cheque_rejection_id)
+    else:
+        origin = db.get(ChequeReturn, pending.origin_cheque_return_id)
+    assert origin is not None  # foreign key
+    return origin.business_date
+
+
+def balance_of(db: Session, pending: PendingCollection) -> Decimal:
     """Amount in effect minus what was applied, with the pending locked: the only balance there is."""
-    in_effect = service.in_effect(db, settlement.current_close_operation_id).get(pending.id)
+    in_effect = service.amounts_in_effect(db, [pending]).get(pending.id)
     if in_effect is None:
         raise AppError(
             409,
@@ -419,7 +489,7 @@ def _balance(db: Session, settlement: Settlement, pending: PendingCollection) ->
     return in_effect.amount - applied
 
 
-def _check_balance(pending_id: int, amount: Decimal, balance: Decimal) -> None:
+def check_balance(pending_id: int, amount: Decimal, balance: Decimal) -> None:
     if amount > balance:
         raise AppError(
             409,
@@ -429,9 +499,10 @@ def _check_balance(pending_id: int, amount: Decimal, balance: Decimal) -> None:
         )
 
 
-def _check_date(settlement: Settlement, business_date: date, code: str, message: str) -> None:
-    if business_date < settlement.business_date:
-        raise AppError(422, code, message, {"settlement_business_date": settlement.business_date.isoformat()})
+def check_date(db: Session, pending: PendingCollection, business_date: date, code: str, message: str) -> None:
+    born = origin_date(db, pending)
+    if business_date < born:
+        raise AppError(422, code, message, {"origin_business_date": born.isoformat()})
     if business_date > business_today():
         raise AppError(422, "future_business_date", "La fecha no puede ser futura.")
 

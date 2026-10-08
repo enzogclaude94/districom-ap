@@ -63,11 +63,18 @@ EVENT_TYPES = (
     "RECEIPT_REVERSED",
     "RESOLVED",
     "RESOLUTION_REVERSED",
+    # R4-2: an ECHEQ a customer declared to pay it (it lowers nothing until verified), and its verification
+    # rejected. A physical cheque or a verified ECHEQ is a receipt (RECEIPT_RECORDED, method CHEQUE).
+    "ECHEQ_DECLARED",
+    "ECHEQ_DECLINED",
 )
+CHEQUE_EVENT_TYPES = ("ECHEQ_DECLARED", "ECHEQ_DECLINED")
 CLOSE_EVENT_TYPES = ("PUBLISHED", "WITHDRAWN")
 RECEIPT_EVENT_TYPES = ("RECEIPT_RECORDED", "RECEIPT_REVERSED")
 RESOLUTION_EVENT_TYPES = ("RESOLVED", "RESOLUTION_REVERSED")
-RECEIPT_METHODS = ("CASH", "TRANSFER")
+RECEIPT_METHODS = ("CASH", "TRANSFER", "CHEQUE")
+# Where a pending was born (R4-2): a settlement, the rejection of a cheque, or a cheque given back.
+ORIGIN_TYPES = ("SETTLEMENT", "CHEQUE_REJECTION", "CHEQUE_RETURN")
 RESOLUTION_TARGETS = ("COMPANY", "EMPLOYEE")
 
 _SETTLEMENT_FK = f"{SCHEMA}.settlements.id"
@@ -91,6 +98,11 @@ class PendingCollection(IdMixin, TimestampMixin, Base):
 
     While the settlement is OPEN it is corrected or voided (with a reason), never deleted; the database
     refuses any change once the settlement is CLOSED (migration 0009).
+
+    R4-2: a pending also arises from a cheque rejected by the bank or given back to the customer. It then
+    has exactly that origin (a real foreign key, never the settlement's), is in effect for its amount from
+    the operation that created it, and only changes its responsible, or is voided together with the
+    reversal of its origin (migration 0013).
     """
 
     __tablename__ = "pending_collections"
@@ -104,10 +116,27 @@ class PendingCollection(IdMixin, TimestampMixin, Base):
             "(voided_at IS NOT NULL AND voided_by IS NOT NULL AND length(btrim(coalesce(void_reason, ''))) > 0)",
             name="void_complete",
         ),
+        CheckConstraint(f"origin_type IN ({_in(ORIGIN_TYPES)})", name="origin_type"),
+        # Exactly one origin, the one its type says.
+        CheckConstraint(
+            "(origin_type = 'SETTLEMENT') = (settlement_id IS NOT NULL) AND "
+            "(origin_type = 'CHEQUE_REJECTION') = (origin_cheque_rejection_id IS NOT NULL) AND "
+            "(origin_type = 'CHEQUE_RETURN') = (origin_cheque_return_id IS NOT NULL)",
+            name="one_origin",
+        ),
         {"schema": SCHEMA},
     )
 
-    settlement_id: Mapped[int] = mapped_column(BigInteger, ForeignKey(_SETTLEMENT_FK, ondelete="RESTRICT"), index=True)
+    origin_type: Mapped[str] = mapped_column(String(20), server_default="SETTLEMENT")
+    settlement_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey(_SETTLEMENT_FK, ondelete="RESTRICT"), index=True
+    )
+    origin_cheque_rejection_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey(f"{SCHEMA}.cheque_rejections.id", ondelete="RESTRICT"), unique=True
+    )
+    origin_cheque_return_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey(f"{SCHEMA}.cheque_returns.id", ondelete="RESTRICT"), unique=True
+    )
     # Customer as text until `public.customers` exists (Enzo's R3 decision 1): then customer_id with a real FK.
     customer_name: Mapped[str] = mapped_column(String(200))
     amount: Mapped[Decimal] = mapped_column(Numeric(14, 2))
@@ -173,13 +202,16 @@ class PendingCollectionEvent(IdMixin, Base):
         ),
         CheckConstraint("event_type <> 'VOIDED' OR length(btrim(coalesce(reason, ''))) > 0", name="void_reason"),
         CheckConstraint("settlement_version >= 1", name="settlement_version_positive"),
+        CheckConstraint("(settlement_id IS NULL) = (settlement_version IS NULL)", name="settlement_pair"),
+        CheckConstraint(f"(event_type IN ({_in(CHEQUE_EVENT_TYPES)})) = (cheque_id IS NOT NULL)", name="cheque_events"),
         {"schema": SCHEMA},
     )
 
     pending_id: Mapped[int] = mapped_column(BigInteger, ForeignKey(_PENDING_FK, ondelete="RESTRICT"), index=True)
-    settlement_id: Mapped[int] = mapped_column(BigInteger, ForeignKey(_SETTLEMENT_FK, ondelete="RESTRICT"))
+    # The settlement of a pending born in one (null for a pending born from a cheque, R4-2).
+    settlement_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey(_SETTLEMENT_FK, ondelete="RESTRICT"))
     # Version of the settlement the change belongs to: v2 means "during the first correction".
-    settlement_version: Mapped[int] = mapped_column(Integer)
+    settlement_version: Mapped[int | None] = mapped_column(Integer)
     event_type: Mapped[str] = mapped_column(String(30))
     before: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     after: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
@@ -189,6 +221,8 @@ class PendingCollectionEvent(IdMixin, Base):
     )
     receipt_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey(_RECEIPT_FK, ondelete="RESTRICT"))
     resolution_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey(_RESOLUTION_FK, ondelete="RESTRICT"))
+    # The ECHEQ a customer declared to pay it (R4-2).
+    cheque_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey(f"{SCHEMA}.cheques.id", ondelete="RESTRICT"))
     created_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -206,6 +240,8 @@ class PendingCollectionReceipt(IdMixin, Base):
         CheckConstraint(f"method IN ({_in(RECEIPT_METHODS)})", name="method"),
         CheckConstraint("request_fingerprint ~ '^[0-9a-f]{64}$'", name="fingerprint_format"),
         CheckConstraint(_REVERSAL_COMPLETE, name="reversal_complete"),
+        # R4-2: a receipt with a cheque names it; it entered "Cartera de cheques" (destination).
+        CheckConstraint("(method = 'CHEQUE') = (cheque_id IS NOT NULL)", name="cheque_method"),
         {"schema": SCHEMA},
     )
 
@@ -214,6 +250,9 @@ class PendingCollectionReceipt(IdMixin, Base):
     # When the customer paid: not before the settlement, not in the future (Enzo's R3-2 D1).
     business_date: Mapped[date] = mapped_column(Date)
     method: Mapped[str] = mapped_column(String(20))
+    cheque_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey(f"{SCHEMA}.cheques.id", ondelete="RESTRICT"), unique=True
+    )
     destination_account_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey(f"{SCHEMA}.accounts.id", ondelete="RESTRICT")
     )

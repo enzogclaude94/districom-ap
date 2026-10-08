@@ -24,6 +24,8 @@ const ACCOUNTS: Account[] = [
     allow_negative: false,
     active: true,
     balance: "150000.00",
+    overdrawn: false,
+    overdrawn_label: null,
   },
   {
     id: 2,
@@ -33,8 +35,20 @@ const ACCOUNTS: Account[] = [
     allow_negative: false,
     active: true,
     balance: "0.00",
+    overdrawn: false,
+    overdrawn_label: null,
   },
-  { id: 3, code: "bank", name: "Banco", kind: "BANK", allow_negative: false, active: true, balance: "1234567.89" },
+  {
+    id: 3,
+    code: "bank",
+    name: "Banco",
+    kind: "BANK",
+    allow_negative: false,
+    active: true,
+    balance: "1234567.89",
+    overdrawn: false,
+    overdrawn_label: null,
+  },
   {
     id: 4,
     code: "opening_balance",
@@ -43,6 +57,8 @@ const ACCOUNTS: Account[] = [
     allow_negative: true,
     active: true,
     balance: "-1384567.89",
+    overdrawn: false,
+    overdrawn_label: null,
   },
   {
     id: 5,
@@ -52,6 +68,8 @@ const ACCOUNTS: Account[] = [
     allow_negative: true,
     active: true,
     balance: "0.00",
+    overdrawn: false,
+    overdrawn_label: null,
   },
   {
     id: 8,
@@ -61,6 +79,8 @@ const ACCOUNTS: Account[] = [
     allow_negative: true,
     active: true,
     balance: "-100000.00",
+    overdrawn: false,
+    overdrawn_label: null,
   },
   {
     id: 9,
@@ -70,6 +90,8 @@ const ACCOUNTS: Account[] = [
     allow_negative: true,
     active: true,
     balance: "1000.00",
+    overdrawn: false,
+    overdrawn_label: null,
   },
   {
     id: 6,
@@ -79,6 +101,8 @@ const ACCOUNTS: Account[] = [
     allow_negative: true,
     active: true,
     balance: "-70000.00",
+    overdrawn: false,
+    overdrawn_label: null,
   },
   {
     id: 7,
@@ -88,6 +112,8 @@ const ACCOUNTS: Account[] = [
     allow_negative: true,
     active: false,
     balance: "0.00",
+    overdrawn: false,
+    overdrawn_label: null,
   },
 ];
 
@@ -254,6 +280,20 @@ describe("CashBoard", () => {
     expect(screen.queryByText("Ajustes")).not.toBeInTheDocument();
     expect(screen.queryByText("Cobranzas de reparto")).not.toBeInTheDocument();
     expect(screen.queryByText(/Cuenta interna de/)).not.toBeInTheDocument();
+  });
+
+  it("marks a bank below zero as «Banco en descubierto», as the backend says", async () => {
+    const overdrawn = ACCOUNTS.map((a) =>
+      a.kind === "BANK" ? { ...a, balance: "-100000.00", overdrawn: true, overdrawn_label: "Banco en descubierto" } : a,
+    );
+    mockApi({ ...boardRoutes("viewer"), "GET /settlements/accounts": () => jsonResponse(200, overdrawn) });
+    renderWithQuery(<CashBoard />);
+    const bank = await screen.findByRole("button", { name: "Ver movimientos de Banco" });
+    expect(bank).toHaveTextContent("Banco en descubierto");
+    expect(bank).toHaveTextContent("-$ 100.000,00");
+    expect(screen.getByRole("button", { name: "Ver movimientos de Caja principal" })).not.toHaveTextContent(
+      "descubierto",
+    );
   });
 
   it("shows loading, then the error with a retry", async () => {

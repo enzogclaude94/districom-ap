@@ -2,16 +2,29 @@
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import datetime
+from decimal import Decimal
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.modules.settlements.cheques import identity, service, state, terms
+from app.core.clock import business_today
+from app.core.errors import AppError
+from app.modules.settlements.cheques import cycle, identity, service, state, terms
 from app.modules.settlements.cheques import schemas as s
-from app.modules.settlements.cheques.models import Cheque
+from app.modules.settlements.cheques.models import (
+    Cheque,
+    ChequeCredit,
+    ChequeCreditItem,
+    ChequeDeposit,
+    ChequeDepositItem,
+    ChequeRejection,
+    ChequeReturn,
+)
 from app.modules.settlements.delivery import closing
 from app.modules.settlements.delivery.models import Settlement
 from app.modules.settlements.ledger import service as ledger
+from app.modules.settlements.pending.models import PendingCollectionReceipt
 from app.platform.auth.models import User
 from app.platform.banks.models import FinancialInstitution
 from app.platform.parties.models import Employee
@@ -38,6 +51,8 @@ def items(db: Session, rows: Sequence[Cheque]) -> list[s.ChequeOut]:
             select(FinancialInstitution).where(FinancialInstitution.id.in_({c.issuer_bank_id for c in rows}))
         )
     }
+    done = cycle.outcomes(db, ids)
+    today = business_today()
     users = _names(
         db,
         User,
@@ -53,8 +68,13 @@ def items(db: Session, rows: Sequence[Cheque]) -> list[s.ChequeOut]:
     for c in rows:
         voided = c.voided_at is not None
         derived = state.derive(
-            kind=c.kind, voided=voided, verification_status=c.verification_status, position=positions[c.id]
+            kind=c.kind,
+            voided=voided,
+            verification_status=c.verification_status,
+            position=positions[c.id],
+            outcome=done.get(c.id),
         )
+        deadline = terms.presentation_deadline(c.payment_type, c.issue_date, c.payment_date)
         settlement = settlements.get(c.settlement_id) if c.settlement_id else None
         change = state.load_change(
             being_corrected=settlement is not None and closing.financial_state(settlement) == "BEING_CORRECTED",
@@ -91,12 +111,14 @@ def items(db: Session, rows: Sequence[Cheque]) -> list[s.ChequeOut]:
                 issue_date=c.issue_date,
                 payment_date=c.payment_date,
                 payable_from=payable_from,
-                presentation_deadline=terms.presentation_deadline(c.payment_type, c.issue_date, c.payment_date),
+                presentation_deadline=deadline,
+                presentation_expired=derived == "IN_PORTFOLIO" and today > deadline,
                 drawer_name=c.drawer_name,
                 drawer_tax_id=c.drawer_tax_id,
                 delivered_by_name=c.delivered_by_name,
                 origin_type=c.origin_type,
                 settlement_id=c.settlement_id,
+                origin_pending_id=c.origin_pending_id,
                 received_business_date=c.received_business_date,
                 received_by_employee_id=c.received_by_employee_id,
                 received_by_name=employees.get(c.received_by_employee_id) if c.received_by_employee_id else None,
@@ -160,6 +182,7 @@ def detail(db: Session, cheque_id: int) -> s.ChequeDetailOut:
             for row in service.closings_of(db, cheque.id)
         ],
         entry_operation_id=service.entry_operation_id(db, cheque.id),
+        documents=documents(db, cheque.id),
     )
 
 
@@ -206,3 +229,197 @@ def _names(db: Session, model: type[User] | type[Employee], ids: list[int]) -> d
     if not ids:
         return {}
     return dict(db.execute(select(model.id, model.full_name).where(model.id.in_(set(ids)))).all())
+
+
+# --- the financial cycle (R4-2) -------------------------------------------------------------------
+
+
+def documents(db: Session, cheque_id: int) -> list[s.ChequeDocumentOut]:
+    """Every document of a cheque's cycle, oldest first: deposits, creditings, rejections, returns, and the
+    receipt of the pending it paid."""
+    result: list[tuple[datetime, s.ChequeDocumentOut]] = []
+    deposits = list(
+        db.scalars(
+            select(ChequeDeposit)
+            .join(ChequeDepositItem, ChequeDepositItem.deposit_id == ChequeDeposit.id)
+            .where(ChequeDepositItem.cheque_id == cheque_id)
+        )
+    )
+    credits = list(
+        db.scalars(
+            select(ChequeCredit)
+            .join(ChequeCreditItem, ChequeCreditItem.credit_id == ChequeCredit.id)
+            .where(ChequeCreditItem.cheque_id == cheque_id)
+        )
+    )
+    rejections = list(db.scalars(select(ChequeRejection).where(ChequeRejection.cheque_id == cheque_id)))
+    returns = list(db.scalars(select(ChequeReturn).where(ChequeReturn.cheque_id == cheque_id)))
+    groups: list[tuple[str, cycle.Kind, Sequence[cycle.Document]]] = [
+        ("DEPOSIT", cycle.DEPOSIT, deposits),
+        ("CREDIT", cycle.CREDIT, credits),
+        ("REJECTION", cycle.REJECTION, rejections),
+        ("RETURN", cycle.RETURN, returns),
+    ]
+    for label, kind, docs in groups:
+        operations = ledger.document_operation_ids(db, kind.operation_type, kind.source_type, [d.id for d in docs])
+        for d in docs:
+            pending_id = cycle.origin_pending(db, d).id if isinstance(d, ChequeRejection | ChequeReturn) else None
+            result.append(
+                (
+                    d.created_at,
+                    s.ChequeDocumentOut(
+                        type=label,
+                        id=d.id,
+                        business_date=d.business_date,
+                        operation_id=operations[d.id],
+                        reversed=d.reversal_operation_id is not None,
+                        reversal_operation_id=d.reversal_operation_id,
+                        pending_id=pending_id,
+                    ),
+                )
+            )
+    for r in db.scalars(select(PendingCollectionReceipt).where(PendingCollectionReceipt.cheque_id == cheque_id)):
+        result.append(
+            (
+                r.created_at,
+                s.ChequeDocumentOut(
+                    type="PENDING_RECEIPT",
+                    id=r.id,
+                    business_date=r.business_date,
+                    operation_id=r.operation_id,
+                    reversed=r.reversal_operation_id is not None,
+                    reversal_operation_id=r.reversal_operation_id,
+                    pending_id=r.pending_id,
+                ),
+            )
+        )
+    return [doc for _, doc in sorted(result, key=lambda pair: (pair[0], pair[1].operation_id))]
+
+
+def deposit(db: Session, deposit_id: int) -> s.DepositOut:
+    doc = _get(db, ChequeDeposit, deposit_id)
+    items = list(
+        db.scalars(
+            select(ChequeDepositItem).where(ChequeDepositItem.deposit_id == doc.id).order_by(ChequeDepositItem.id)
+        )
+    )
+    users = _names(db, User, [u for u in (doc.created_by, doc.reversed_by) if u])
+    return s.DepositOut(
+        id=doc.id,
+        bank_account_id=doc.bank_account_id,
+        bank_account_name=_account_name(db, doc.bank_account_id),
+        business_date=doc.business_date,
+        slip_number=doc.slip_number,
+        notes=doc.notes,
+        total=sum((i.amount for i in items), start=service.ZERO),
+        items=_cycle_items(db, [(i.cheque_id, i.amount) for i in items]),
+        operation_id=_operation_id(db, cycle.DEPOSIT, doc.id),
+        created_by=doc.created_by,
+        created_by_name=users.get(doc.created_by, ""),
+        created_at=doc.created_at,
+        reversal=_document_reversal(doc, users),
+    )
+
+
+def credit(db: Session, credit_id: int) -> s.CreditOut:
+    doc = _get(db, ChequeCredit, credit_id)
+    items = list(
+        db.scalars(select(ChequeCreditItem).where(ChequeCreditItem.credit_id == doc.id).order_by(ChequeCreditItem.id))
+    )
+    users = _names(db, User, [u for u in (doc.created_by, doc.reversed_by) if u])
+    return s.CreditOut(
+        id=doc.id,
+        bank_account_id=doc.bank_account_id,
+        bank_account_name=_account_name(db, doc.bank_account_id),
+        business_date=doc.business_date,
+        notes=doc.notes,
+        total=sum((i.amount for i in items), start=service.ZERO),
+        items=_cycle_items(db, [(i.cheque_id, i.amount) for i in items]),
+        operation_id=_operation_id(db, cycle.CREDIT, doc.id),
+        created_by=doc.created_by,
+        created_by_name=users.get(doc.created_by, ""),
+        created_at=doc.created_at,
+        reversal=_document_reversal(doc, users),
+    )
+
+
+def rejection(db: Session, rejection_id: int) -> s.RejectionOut:
+    doc = _get(db, ChequeRejection, rejection_id)
+    users = _names(db, User, [u for u in (doc.created_by, doc.reversed_by) if u])
+    return s.RejectionOut(
+        id=doc.id,
+        cheque_id=doc.cheque_id,
+        stage=doc.stage,
+        business_date=doc.business_date,
+        reason=doc.reason,
+        bank_account_id=doc.bank_account_id,
+        pending_id=cycle.origin_pending(db, doc).id,
+        operation_id=_operation_id(db, cycle.REJECTION, doc.id),
+        created_by=doc.created_by,
+        created_by_name=users.get(doc.created_by, ""),
+        created_at=doc.created_at,
+        reversal=_document_reversal(doc, users),
+    )
+
+
+def given_back(db: Session, return_id: int) -> s.ReturnOut:
+    doc = _get(db, ChequeReturn, return_id)
+    users = _names(db, User, [u for u in (doc.created_by, doc.reversed_by) if u])
+    return s.ReturnOut(
+        id=doc.id,
+        cheque_id=doc.cheque_id,
+        business_date=doc.business_date,
+        reason=doc.reason,
+        pending_id=cycle.origin_pending(db, doc).id,
+        operation_id=_operation_id(db, cycle.RETURN, doc.id),
+        created_by=doc.created_by,
+        created_by_name=users.get(doc.created_by, ""),
+        created_at=doc.created_at,
+        reversal=_document_reversal(doc, users),
+    )
+
+
+def _get[D: (ChequeDeposit, ChequeCredit, ChequeRejection, ChequeReturn)](
+    db: Session, model: type[D], document_id: int
+) -> D:
+    doc = db.get(model, document_id)
+    if doc is None:
+        raise AppError(404, "cheque_document_not_found", "El documento no existe.")
+    return doc
+
+
+def _operation_id(db: Session, kind: cycle.Kind, document_id: int) -> int:
+    return ledger.document_operation(db, kind.operation_type, ledger.SourceRef(kind.source_type, document_id)).id
+
+
+def _account_name(db: Session, account_id: int) -> str:
+    return ledger.account_balance(db, account_id).name
+
+
+def _cycle_items(db: Session, rows: list[tuple[int, Decimal]]) -> list[s.CycleItemOut]:
+    cheques = {c.id: c for c in items(db, list(db.scalars(select(Cheque).where(Cheque.id.in_([r[0] for r in rows])))))}
+    return [
+        s.CycleItemOut(
+            cheque_id=cid,
+            amount=amount,
+            kind=cheques[cid].kind,
+            cheque_number=cheques[cid].cheque_number,
+            bank_name=cheques[cid].bank_name,
+            delivered_by_name=cheques[cid].delivered_by_name,
+            state=cheques[cid].state,
+            state_label=cheques[cid].state_label,
+        )
+        for cid, amount in rows
+    ]
+
+
+def _document_reversal(doc: cycle.Document, users: dict[int, str]) -> s.DocumentReversalOut | None:
+    if doc.reversal_operation_id is None or doc.reversed_by is None or doc.reversed_at is None:
+        return None
+    return s.DocumentReversalOut(
+        operation_id=doc.reversal_operation_id,
+        reversed_by=doc.reversed_by,
+        reversed_by_name=users.get(doc.reversed_by, ""),
+        reversed_at=doc.reversed_at,
+        reason=doc.reversal_reason or "",
+    )

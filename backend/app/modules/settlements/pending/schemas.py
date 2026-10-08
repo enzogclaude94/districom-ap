@@ -88,7 +88,15 @@ class ResponsibleIn(StrictIn):
 
 class PendingOut(BaseModel):
     id: int
-    settlement_id: int
+    # Where it was born (R4-2): a settlement, a cheque the bank rejected, or a cheque given back. Exactly one.
+    origin_type: Literal["SETTLEMENT", "CHEQUE_REJECTION", "CHEQUE_RETURN"]
+    settlement_id: int | None
+    origin_cheque_rejection_id: int | None
+    origin_cheque_return_id: int | None
+    # The cheque of the rejection or the return.
+    origin_cheque_id: int | None
+    # Receipts and resolutions are dated on or after it.
+    origin_business_date: date
     # The load: what the next close of the settlement will publish.
     customer_name: str
     amount: Money
@@ -125,10 +133,11 @@ class PendingOut(BaseModel):
 
 
 class PendingListItem(PendingOut):
-    settlement_business_date: date
-    settlement_sequence_number: int
-    driver_id: int
-    driver_name: str
+    # Null for a pending born from a cheque.
+    settlement_business_date: date | None
+    settlement_sequence_number: int | None
+    driver_id: int | None
+    driver_name: str | None
 
 
 class ReversalOut(BaseModel):
@@ -146,6 +155,8 @@ class ReceiptOut(BaseModel):
     method: str
     destination_account_id: int
     destination_name: str
+    # The cheque the customer paid with (method CHEQUE): it entered the portfolio.
+    cheque_id: int | None
     operation_id: int
     created_by: int
     created_by_name: str
@@ -187,24 +198,36 @@ class PublishedOut(BaseModel):
 class PendingEventOut(BaseModel):
     id: int
     event_type: str
-    settlement_version: int
+    settlement_version: int | None
     before: dict[str, Any] | None
     after: dict[str, Any] | None
     reason: str | None
     close_operation_id: int | None
     receipt_id: int | None
     resolution_id: int | None
+    cheque_id: int | None
     created_by: int
     created_by_name: str
     created_at: datetime
 
 
+class EcheqDeclaredOut(BaseModel):
+    """An ECHEQ a customer declared to pay the pending: it lowers nothing until it is verified (R4-2)."""
+
+    cheque_id: int
+    amount: Money
+    cheque_number: str
+    verification_status: str
+    voided: bool
+
+
 class PendingDetailOut(PendingOut):
-    settlement_business_date: date
-    settlement_sequence_number: int
-    driver_id: int
-    driver_name: str
-    settlement_financial_state: str
+    settlement_business_date: date | None
+    settlement_sequence_number: int | None
+    driver_id: int | None
+    driver_name: str | None
+    settlement_financial_state: str | None
+    echeqs: list[EcheqDeclaredOut]
     published: list[PublishedOut]
     receipts: list[ReceiptOut]
     resolutions: list[ResolutionOut]
