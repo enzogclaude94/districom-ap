@@ -345,4 +345,4 @@ Propuesta `PROPUESTA_R4_CARTERA_DE_CHEQUES.md` aprobada con ajustes por Enzo el 
 |---|---|---|
 | R4‑1 | Modelo, cartera y cheques en rendición: catálogo de bancos (`0011`, plataforma) y cheques (`0012`, settlements) | **DONE** (PR #17; `0011`/`0012` congeladas) |
 | R4‑2 | Depósito, acreditación, rechazo, devolución, pendientes por rechazo o devolución y cobro con cheque (`0013`) | **DONE** (PR #18; `0013` congelada) |
-| R4‑3 | Pantallas de cartera de cheques y E2E | En curso |
+| R4‑3 | Pantallas de cartera de cheques y E2E (sin migraciones) | En revisión de Enzo; R5 no empieza sin su aprobación |
