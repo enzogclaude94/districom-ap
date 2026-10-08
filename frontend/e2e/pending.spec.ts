@@ -206,6 +206,8 @@ test("pending collection end to end: settlement, close, partial receipt, resolut
 
   // 5–7. Global list shows it OPEN; the operator collects $60.000 in cash with the quick action.
   await page.goto("/rendiciones/pendientes");
+  // Other specs leave pendings too: search the customer so the row is on the first page.
+  await page.getByLabel("Cliente", { exact: true }).fill(customer);
   const listed = page.locator('[data-testid^="pending-item-"]').filter({ hasText: customer });
   await expect(listed).toContainText("Pendiente");
   await expect(listed).toContainText("$ 100.000,00");
@@ -292,7 +294,7 @@ test("a pending collected in full by transfer goes to the bank and is Cobrado", 
   const bank = await balance(page.request, { code: "bank" });
 
   await switchUser(page, operatorEmail, operatorPassword, "/rendiciones/pendientes");
-  await page.getByLabel("Cliente").fill(customer);
+  await page.getByLabel("Cliente", { exact: true }).fill(customer);
   const listed = page.locator('[data-testid^="pending-item-"]').filter({ hasText: customer });
   await page.getByRole("button", { name: `Registrar cobro de ${customer}` }).click();
   const dialog = page.getByRole("dialog", { name: "Registrar cobro" });
