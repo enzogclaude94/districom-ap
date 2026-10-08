@@ -128,6 +128,19 @@ class ChequeOut(BaseModel):
     presentation_deadline: date
     # In the portfolio past its deadline: it can no longer be deposited, only returned (R4-2 decision A).
     presentation_expired: bool
+    # Days left to present it, while it is in the portfolio and not expired (R4-3); else null.
+    expires_in_days: int | None = None
+    # Within `settlements.cheque_expiring_soon_days` of its deadline: «Vence en N días».
+    expiring_soon: bool = False
+    # Where its value is now, for people: «Cartera de cheques», «Depositado en Banco Nación»…
+    location_label: str | None = None
+    # The deposit in effect (DEPOSITED, CREDITED, or REJECTED after it) and the crediting in effect.
+    deposit_id: int | None = None
+    deposit_business_date: date | None = None
+    deposit_bank_account_id: int | None = None
+    deposit_bank_account_name: str | None = None
+    credit_id: int | None = None
+    credit_business_date: date | None = None
     drawer_name: str
     drawer_tax_id: str | None
     delivered_by_name: str

@@ -14,6 +14,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, Response
 
 from app.modules.settlements.cash import schemas, use_cases
+from app.modules.settlements.cheques import views as cheque_views
 from app.modules.settlements.ledger.service import AccountBalance, Movement, OperationDetail
 from app.platform.auth.access import require_module_access
 from app.platform.auth.deps import DbSession
@@ -26,7 +27,7 @@ Operator = Annotated[User, Depends(require_module_access("settlements", "operato
 Admin = Annotated[User, Depends(require_module_access("settlements", "admin"))]
 
 
-def _account_out(balance: AccountBalance) -> schemas.AccountOut:
+def _account_out(balance: AccountBalance, causes: list[schemas.OverdraftCauseOut] | None = None) -> schemas.AccountOut:
     return schemas.AccountOut(
         id=balance.account_id,
         code=balance.code,
@@ -37,7 +38,24 @@ def _account_out(balance: AccountBalance) -> schemas.AccountOut:
         balance=balance.balance,
         overdrawn=balance.overdrawn,
         overdrawn_label="Banco en descubierto" if balance.overdrawn else None,
+        overdraft_causes=causes or [],
     )
+
+
+def _with_causes(db: DbSession, balance: AccountBalance, on: date | None) -> schemas.AccountOut:
+    if not balance.overdrawn:
+        return _account_out(balance)
+    causes = [
+        schemas.OverdraftCauseOut(
+            rejection_id=r.id,
+            cheque_id=r.cheque_id,
+            operation_id=r.operation_id,
+            business_date=r.business_date,
+            amount=r.amount,
+        )
+        for r in cheque_views.overdraft_causes(db, balance.account_id, on)
+    ]
+    return _account_out(balance, causes)
 
 
 def _movement_out(movement: Movement) -> schemas.MovementOut:
@@ -66,12 +84,12 @@ def list_accounts(
     on: Annotated[date | None, Query(description="Saldo al cierre de esta fecha de negocio")] = None,
     include_inactive: bool = False,
 ) -> list[schemas.AccountOut]:
-    return [_account_out(b) for b in use_cases.balances(db, on, include_inactive)]
+    return [_with_causes(db, b, on) for b in use_cases.balances(db, on, include_inactive)]
 
 
 @router.get("/accounts/{account_id}", response_model=schemas.AccountOut)
 def get_account(account_id: int, db: DbSession, _: Viewer, on: date | None = None) -> schemas.AccountOut:
-    return _account_out(use_cases.account(db, account_id, on))
+    return _with_causes(db, use_cases.account(db, account_id, on), on)
 
 
 @router.get("/accounts/{account_id}/movements", response_model=schemas.MovementPage)

@@ -87,6 +87,16 @@ class AccountOut(BaseModel):
     # «Banco en descubierto» (R4-2): a bank below zero, only ever by a cheque rejected after its crediting.
     overdrawn: bool
     overdrawn_label: str | None
+    # What overdrew it (R4-3): the rejections after crediting in effect on this bank, newest first.
+    overdraft_causes: list["OverdraftCauseOut"] = []
+
+
+class OverdraftCauseOut(BaseModel):
+    rejection_id: int
+    cheque_id: int
+    operation_id: int
+    business_date: date
+    amount: Money
 
 
 class MovementOut(BaseModel):

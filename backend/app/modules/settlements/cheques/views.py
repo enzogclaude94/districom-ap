@@ -2,10 +2,10 @@
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import case, literal, select
 from sqlalchemy.orm import Session
 
 from app.core.clock import business_today
@@ -28,6 +28,9 @@ from app.modules.settlements.pending.models import PendingCollectionReceipt
 from app.platform.auth.models import User
 from app.platform.banks.models import FinancialInstitution
 from app.platform.parties.models import Employee
+from app.platform.settings.service import get_setting
+
+EXPIRING_SOON_KEY = "settlements.cheque_expiring_soon_days"
 
 
 def items(db: Session, rows: Sequence[Cheque]) -> list[s.ChequeOut]:
@@ -52,6 +55,13 @@ def items(db: Session, rows: Sequence[Cheque]) -> list[s.ChequeOut]:
         )
     }
     done = cycle.outcomes(db, ids)
+    deposits = cycle.deposit_items_in_effect(db, ids)
+    credits = cycle.credit_items_in_effect(db, ids)
+    account_names = {
+        account_id: _account_name(db, account_id)
+        for account_id in {slip.bank_account_id for _, slip in deposits.values()}
+    }
+    soon = expiring_soon_days(db)
     today = business_today()
     users = _names(
         db,
@@ -93,6 +103,11 @@ def items(db: Session, rows: Sequence[Cheque]) -> list[s.ChequeOut]:
         )
         bank = banks[c.issuer_bank_id]
         payable_from = terms.payable_from(c.payment_type, c.issue_date, c.payment_date)
+        expired = derived == "IN_PORTFOLIO" and today > deadline
+        days_left = (deadline - today).days if derived == "IN_PORTFOLIO" and not expired else None
+        deposit = deposits.get(c.id)
+        crediting = credits.get(c.id)
+        bank_name = account_names[deposit[1].bank_account_id] if deposit else None
         result.append(
             s.ChequeOut(
                 id=c.id,
@@ -112,7 +127,16 @@ def items(db: Session, rows: Sequence[Cheque]) -> list[s.ChequeOut]:
                 payment_date=c.payment_date,
                 payable_from=payable_from,
                 presentation_deadline=deadline,
-                presentation_expired=derived == "IN_PORTFOLIO" and today > deadline,
+                presentation_expired=expired,
+                expires_in_days=days_left,
+                expiring_soon=days_left is not None and days_left <= soon,
+                location_label=_location(derived, bank_name),
+                deposit_id=deposit[1].id if deposit else None,
+                deposit_business_date=deposit[1].business_date if deposit else None,
+                deposit_bank_account_id=deposit[1].bank_account_id if deposit else None,
+                deposit_bank_account_name=bank_name,
+                credit_id=crediting[1].id if crediting else None,
+                credit_business_date=crediting[1].business_date if crediting else None,
                 drawer_name=c.drawer_name,
                 drawer_tax_id=c.drawer_tax_id,
                 delivered_by_name=c.delivered_by_name,
@@ -149,6 +173,52 @@ def items(db: Session, rows: Sequence[Cheque]) -> list[s.ChequeOut]:
             )
         )
     return result
+
+
+def expiring_soon_days(db: Session) -> int:
+    return int(get_setting(db, EXPIRING_SOON_KEY))
+
+
+def _location(derived: str, bank_name: str | None) -> str | None:
+    """Where the value of the cheque is now. Nothing once it left (credited money is the bank's balance)."""
+    if derived == "IN_PORTFOLIO":
+        return "Cartera de cheques"
+    if derived == "DEPOSITED":
+        return f"Cheques depositados en {bank_name}" if bank_name else "Cheques depositados"
+    if derived == "CREDITED":
+        return f"Acreditado en {bank_name}" if bank_name else "Acreditado"
+    return None
+
+
+@dataclass(frozen=True)
+class OverdraftCause:
+    id: int
+    cheque_id: int
+    operation_id: int
+    business_date: date
+    amount: Decimal
+
+
+def overdraft_causes(db: Session, bank_account_id: int, on: date | None = None) -> list[OverdraftCause]:
+    """The rejections after crediting in effect that debited this bank up to `on`, newest first: the only
+    operations that may overdraw it (R4-2), shown next to «Banco en descubierto»."""
+    query = (
+        select(ChequeRejection, Cheque.amount)
+        .join(Cheque, Cheque.id == ChequeRejection.cheque_id)
+        .where(
+            ChequeRejection.bank_account_id == bank_account_id,
+            ChequeRejection.stage == "AFTER_CREDIT",
+            ChequeRejection.reversal_operation_id.is_(None),
+        )
+        .order_by(ChequeRejection.business_date.desc(), ChequeRejection.id.desc())
+    )
+    if on is not None:
+        query = query.where(ChequeRejection.business_date <= on)
+    rows = db.execute(query).all()
+    operations = ledger.document_operation_ids(
+        db, cycle.REJECTION.operation_type, cycle.REJECTION.source_type, [r.id for r, _ in rows]
+    )
+    return [OverdraftCause(r.id, r.cheque_id, operations[r.id], r.business_date, amount) for r, amount in rows]
 
 
 def detail(db: Session, cheque_id: int) -> s.ChequeDetailOut:
@@ -193,21 +263,69 @@ class Filters:
     origin_type: str | None = None
     # Only the cheques the ledger has in "Cartera de cheques" right now.
     in_portfolio: bool = False
+    state: str | None = None
+    issuer_bank_id: int | None = None
+    # Payable today (its payment date, or issue date for a common one, has arrived), or not yet.
+    payable: bool | None = None
+    # In the portfolio and past its presentation deadline: can no longer be deposited.
+    expired: bool = False
+    # In the portfolio, not expired, within `settlements.cheque_expiring_soon_days` of its deadline.
+    expiring_soon: bool = False
 
 
 def page(db: Session, filters: Filters, *, limit: int, offset: int) -> s.ChequePage:
-    query = select(Cheque)
+    """Most recent first. The filters on dates are SQL; the one on the derived state reads where each
+    candidate is (ledger) and what happened to it (documents), then pages the matching ids."""
+    query = select(Cheque.id)
     if filters.settlement_id is not None:
         query = query.where(Cheque.settlement_id == filters.settlement_id)
     if filters.kind is not None:
         query = query.where(Cheque.kind == filters.kind)
     if filters.origin_type is not None:
         query = query.where(Cheque.origin_type == filters.origin_type)
-    if filters.in_portfolio:
-        query = query.where(Cheque.id.in_(list(ledger.cheques_held(db, "CHEQUE_PORTFOLIO"))))
-    total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
-    rows = list(db.scalars(query.order_by(Cheque.id.desc()).limit(limit).offset(offset)))
-    return s.ChequePage(items=items(db, rows), total=total)
+    if filters.issuer_bank_id is not None:
+        query = query.where(Cheque.issuer_bank_id == filters.issuer_bank_id)
+    today = business_today()
+    payable_from = case((Cheque.payment_type == "DEFERRED", Cheque.payment_date), else_=Cheque.issue_date)
+    deadline = payable_from + literal(terms.PRESENTATION_DAYS)
+    if filters.payable is not None:
+        query = query.where(payable_from <= today if filters.payable else payable_from > today)
+    held: dict[int, Decimal] | None = None
+    if filters.in_portfolio or filters.expired or filters.expiring_soon or filters.state == "IN_PORTFOLIO":
+        held = ledger.cheques_held(db, "CHEQUE_PORTFOLIO")
+        query = query.where(Cheque.id.in_(list(held)))
+    if filters.expired:
+        query = query.where(deadline < today)
+    if filters.expiring_soon:
+        query = query.where(deadline >= today, deadline <= _plus(today, expiring_soon_days(db)))
+    ids = list(db.scalars(query.order_by(Cheque.id.desc())))
+    if filters.state is not None and filters.state != "IN_PORTFOLIO":
+        ids = [cid for cid, derived in _states(db, ids).items() if derived == filters.state]
+    rows = {c.id: c for c in db.scalars(select(Cheque).where(Cheque.id.in_(ids[offset : offset + limit])))}
+    return s.ChequePage(items=items(db, [rows[cid] for cid in ids[offset : offset + limit]]), total=len(ids))
+
+
+def _plus(day: date, days: int) -> date:
+    return date.fromordinal(day.toordinal() + days)
+
+
+def _states(db: Session, ids: list[int]) -> dict[int, str]:
+    """The derived state of each cheque, in the order given, without building the whole response."""
+    if not ids:
+        return {}
+    rows = {c.id: c for c in db.scalars(select(Cheque).where(Cheque.id.in_(ids)))}
+    positions = ledger.cheque_positions(db, ids)
+    done = cycle.outcomes(db, ids)
+    return {
+        cid: state.derive(
+            kind=rows[cid].kind,
+            voided=rows[cid].voided_at is not None,
+            verification_status=rows[cid].verification_status,
+            position=positions[cid],
+            outcome=done.get(cid),
+        )
+        for cid in ids
+    }
 
 
 def summary(db: Session) -> s.PortfolioSummaryOut:
