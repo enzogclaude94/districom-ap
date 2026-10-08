@@ -180,6 +180,13 @@ function boardRoutes(role: "viewer" | "operator" | "admin", extra: Record<string
     "GET /auth/me": () => jsonResponse(200, me(role)),
     "GET /settlements/accounts": () => jsonResponse(200, ACCOUNTS),
     "GET /settlements/accounts/1/movements": () => jsonResponse(200, { items: [MOVEMENT], total: 1 }),
+    "GET /settlements/cheques/summary": () =>
+      jsonResponse(200, {
+        portfolio_count: 3,
+        portfolio_amount: "450000.00",
+        in_transit_count: 1,
+        in_transit_amount: "80000.00",
+      }),
     ...extra,
   };
 }
@@ -294,6 +301,48 @@ describe("CashBoard", () => {
     expect(screen.getByRole("button", { name: "Ver movimientos de Caja principal" })).not.toHaveTextContent(
       "descubierto",
     );
+  });
+
+  it("shows cheques under «Valores — no disponibles para gastar», never added to the money", async () => {
+    mockApi(boardRoutes("viewer"));
+    renderWithQuery(<CashBoard />);
+    expect(await screen.findByRole("heading", { name: "Valores — no disponibles para gastar" })).toBeInTheDocument();
+    const portfolio = await screen.findByTestId("values-portfolio");
+    expect(portfolio).toHaveTextContent("Cartera de cheques$ 450.000,00");
+    expect(portfolio).toHaveTextContent("3 cheques");
+    expect(portfolio).toHaveAttribute("href", "/rendiciones/cheques?state=IN_PORTFOLIO");
+    const transit = screen.getByTestId("values-in-transit");
+    expect(transit).toHaveTextContent("Cheques depositados$ 80.000,00");
+    expect(transit).toHaveTextContent("1 cheque");
+    expect(transit).toHaveAttribute("href", "/rendiciones/cheques?state=DEPOSITED");
+    expect(screen.getByRole("button", { name: "Ver movimientos de Banco" })).toHaveTextContent("$ 1.234.567,89");
+  });
+
+  it("explains a bank overdraft from a rejected cheque, with links and no adjustment offered", async () => {
+    const overdrawn = ACCOUNTS.map((a) =>
+      a.kind === "BANK"
+        ? {
+            ...a,
+            balance: "-100000.00",
+            overdrawn: true,
+            overdrawn_label: "Banco en descubierto",
+            overdraft_causes: [
+              { rejection_id: 4, cheque_id: 21, operation_id: 900, business_date: "2026-10-06", amount: "100000.00" },
+            ],
+          }
+        : a,
+    );
+    mockApi({ ...boardRoutes("operator"), "GET /settlements/accounts": () => jsonResponse(200, overdrawn) });
+    renderWithQuery(<CashBoard />);
+    const box = await screen.findByTestId("overdraft-3");
+    expect(box).toHaveTextContent("Banco en descubierto: Banco-$ 100.000,00");
+    expect(box).toHaveTextContent("Rechazo del 06/10/2026 por $ 100.000,00");
+    expect(within(box).getByRole("link", { name: "Ver cheque" })).toHaveAttribute("href", "/rendiciones/cheques/21");
+    expect(within(box).getByRole("link", { name: "Ver movimiento" })).toHaveAttribute(
+      "href",
+      "/rendiciones/cajas/operaciones/900",
+    );
+    expect(within(box).queryByRole("button")).not.toBeInTheDocument();
   });
 
   it("shows loading, then the error with a retry", async () => {
