@@ -19,8 +19,8 @@ const me = (role: Role) => ({
 });
 
 const CATEGORIES: ExpenseCategory[] = [
-  { id: 1, name: "Gomería", active: false },
-  { id: 2, name: "Peajes", active: true },
+  { id: 1, name: "Gomería", active: false, code: null },
+  { id: 2, name: "Peajes", active: true, code: null },
 ];
 
 function mockApi(role: Role, routes: Record<string, Handler> = {}) {

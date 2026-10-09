@@ -475,6 +475,9 @@ describe("settlement board and load", () => {
       id: 12,
       category_id: 1,
       category_name: "Peajes",
+      category_code: null,
+      fuel: null,
+      legacy_fuel_without_detail: false,
       amount: "2000.00",
       description: null,
       created_by: 9,
@@ -795,5 +798,134 @@ describe("reopen and history", () => {
       "Reverso del cierre de la versión 1",
       "Nuevo cierre (versión 2)",
     ]);
+  });
+});
+
+describe("fuel in a settlement expense (R5-2)", () => {
+  const FUEL_CATEGORY = { id: 3, name: "Combustible", active: true, code: "FUEL" };
+  const VEHICLES = [
+    {
+      id: 21,
+      plate: "AB123CD",
+      plate_display: "AB 123 CD",
+      description: "Camión norte",
+      active: true,
+      created_at: "2026-10-01T10:00:00Z",
+      created_by_name: "Admin",
+      updated_at: "2026-10-01T10:00:00Z",
+      updated_by_name: "Admin",
+    },
+  ];
+  const fuelExpense = (changes: Record<string, unknown> = {}) => ({
+    id: 31,
+    category_id: 3,
+    category_name: "Combustible",
+    category_code: "FUEL",
+    amount: "56392.59",
+    description: null,
+    fuel: {
+      id: 41,
+      vehicle_id: 22,
+      vehicle_plate: "AC 456 DE",
+      vehicle_description: "Camión viejo",
+      vehicle_active: false,
+      employee_id: 4,
+      employee_name: "Pedro Gómez",
+      liters: "45.678",
+      price_per_liter: "1234.5678",
+      odometer_km: 120500,
+      created_by_name: "Oscar Operador",
+      updated_at: "2026-10-04T12:00:00Z",
+      updated_by_name: "Oscar Operador",
+    },
+    legacy_fuel_without_detail: false,
+    created_by: 9,
+    created_by_name: "Oscar Operador",
+    created_at: "2026-10-04T12:00:00Z",
+    voided: false,
+    voided_by: null,
+    voided_by_name: null,
+    voided_at: null,
+    void_reason: null,
+    ...changes,
+  });
+
+  const fuelRoutes = (current: Settlement, extra: Record<string, Handler> = {}) =>
+    detailRoutes("operator", current, {
+      "GET /settlements/expense-categories": () =>
+        jsonResponse(200, [{ id: 1, name: "Peajes", active: true, code: null }, FUEL_CATEGORY]),
+      "GET /vehicles": () => jsonResponse(200, VEHICLES),
+      ...extra,
+    });
+
+  it("estimates liters × price live, preselects the driver and sends no amount", async () => {
+    const spy = mockApi(
+      fuelRoutes(settlement(), { "POST /settlements/deliveries/7/expenses": () => jsonResponse(201, settlement()) }),
+    );
+    renderWithQuery(<SettlementDetail settlementId={7} />);
+    await userEvent.click(await screen.findByRole("button", { name: "Registrar gasto" }));
+    const dialog = screen.getByRole("dialog");
+    await userEvent.selectOptions(within(dialog).getByLabelText("Categoría"), "3");
+    expect(within(dialog).queryByLabelText("Importe")).not.toBeInTheDocument();
+    await waitFor(() => expect(within(dialog).getByLabelText("Quién cargó")).toHaveValue("4"));
+    expect(within(dialog).getByRole("option", { name: "AB 123 CD · Camión norte" })).toBeInTheDocument();
+    expect(calls(spy, "GET", "/vehicles?include_inactive")).toHaveLength(0); // only active vehicles for a new load
+    await userEvent.selectOptions(within(dialog).getByLabelText("Vehículo"), "21");
+    await userEvent.type(within(dialog).getByLabelText("Litros"), "45,678");
+    await userEvent.type(within(dialog).getByLabelText("Precio por litro"), "1.234,5678");
+    expect(within(dialog).getByText(/Total estimado \$ 56\.392,59/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/El importe oficial lo calcula el sistema/)).toBeInTheDocument();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Registrar gasto" }));
+    await waitFor(() => expect(bodies(spy, "/settlements/deliveries/7/expenses")).toHaveLength(1));
+    const [body] = bodies(spy, "/settlements/deliveries/7/expenses");
+    expect(body).toMatchObject({
+      category_id: 3,
+      fuel: { vehicle_id: 21, employee_id: 4, liters: "45.678", price_per_liter: "1234.5678", odometer_km: null },
+    });
+    expect(body).not.toHaveProperty("amount");
+  });
+
+  it("asks for vehicle, liters and price before sending", async () => {
+    const spy = mockApi(fuelRoutes(settlement()));
+    renderWithQuery(<SettlementDetail settlementId={7} />);
+    await userEvent.click(await screen.findByRole("button", { name: "Registrar gasto" }));
+    const dialog = screen.getByRole("dialog");
+    await userEvent.selectOptions(within(dialog).getByLabelText("Categoría"), "3");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Registrar gasto" }));
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("Elegí el vehículo.");
+    await userEvent.selectOptions(within(dialog).getByLabelText("Vehículo"), "21");
+    await userEvent.type(within(dialog).getByLabelText("Litros"), "1,0001");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Registrar gasto" }));
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("hasta 3 decimales");
+    expect(bodies(spy, "/settlements/deliveries/7/expenses")).toHaveLength(0);
+  });
+
+  it("shows the load, keeps a deactivated vehicle on it and corrects only what changed", async () => {
+    const current = settlement({ expenses: [fuelExpense()] as Settlement["expenses"] });
+    const spy = mockApi(
+      fuelRoutes(current, { "PATCH /settlements/deliveries/7/expenses/31": () => jsonResponse(200, current) }),
+    );
+    renderWithQuery(<SettlementDetail settlementId={7} />);
+    const row = (await screen.findByText(/AC 456 DE/)).closest("tr")!;
+    expect(row).toHaveTextContent("AC 456 DE (desactivado) · 45,678 l × $ 1.234,5678 · Pedro Gómez · 120.500 km");
+    await userEvent.click(within(row).getByRole("button", { name: "Corregir carga" }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByLabelText("Vehículo")).toHaveValue("22");
+    const liters = within(dialog).getByLabelText("Litros");
+    await userEvent.clear(liters);
+    await userEvent.type(liters, "40");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Guardar" }));
+    await waitFor(() => expect(calls(spy, "PATCH", "/settlements/deliveries/7/expenses/31")).toHaveLength(1));
+    const [[, init]] = calls(spy, "PATCH", "/settlements/deliveries/7/expenses/31");
+    expect(JSON.parse(String(init?.body))).toEqual({ fuel: { liters: "40.000" } });
+  });
+
+  it("marks a legacy fuel expense and offers to load its detail", async () => {
+    const legacy = fuelExpense({ fuel: null, legacy_fuel_without_detail: true, amount: "20000.00" });
+    mockApi(fuelRoutes(settlement({ expenses: [legacy] as Settlement["expenses"] })));
+    renderWithQuery(<SettlementDetail settlementId={7} />);
+    const row = (await screen.findByText("Sin detalle (histórico)")).closest("tr")!;
+    await userEvent.click(within(row).getByRole("button", { name: "Cargar detalle" }));
+    expect(screen.getByRole("dialog")).toHaveTextContent("el importe pasa a calcularse");
   });
 });

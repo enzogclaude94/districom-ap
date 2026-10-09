@@ -58,6 +58,7 @@ TRUNCATED_TABLES = (
     "settlements.settlement_transfers",
     "settlements.cash_additions",
     "settlements.cash_count_lines",
+    "settlements.fuel_loads",
     "settlements.expenses",
     "settlements.expense_categories",
     "settlements.settlements",
@@ -129,6 +130,13 @@ def db(migrated_db: None) -> Iterator[Session]:
             text(
                 "SELECT setval(pg_get_serial_sequence('financial_institutions', 'id'), "
                 "(SELECT coalesce(max(id), 0) + 1 FROM financial_institutions), false)"
+            )
+        )
+        # The FUEL category migration 0015 seeds (a fresh database has no «Combustible» to reuse).
+        conn.execute(
+            text(
+                "INSERT INTO settlements.expense_categories (name, name_key, active, code) "
+                "VALUES ('Combustible', 'combustible', true, 'FUEL')"
             )
         )
         conn.execute(

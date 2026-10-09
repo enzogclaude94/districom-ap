@@ -552,8 +552,10 @@ def test_expense_categories_are_edited_by_an_admin(as_role, opened, category) ->
     duplicate = admin.post(f"{BASE}/expense-categories", json={"name": "  peajes "})
     assert (duplicate.status_code, duplicate.json()["code"]) == (409, "expense_category_name_taken")
     assert admin.patch(f"{BASE}/expense-categories/{tolls}", json={"active": False}).json()["active"] is False
-    assert admin.get(f"{BASE}/expense-categories").json() == []
-    assert [c["name"] for c in admin.get(f"{BASE}/expense-categories?include_inactive=true").json()] == ["Peajes"]
+    # Combustible (FUEL) is seeded by migration 0015 and stays active.
+    assert [c["name"] for c in admin.get(f"{BASE}/expense-categories").json()] == ["Combustible"]
+    every = admin.get(f"{BASE}/expense-categories?include_inactive=true").json()
+    assert sorted(c["name"] for c in every) == ["Combustible", "Peajes"]
     response = post(as_role("operator"), f"/deliveries/{opened}/expenses", category_id=tolls, amount="10")
     assert response.json()["code"] == "invalid_expense_category"
 

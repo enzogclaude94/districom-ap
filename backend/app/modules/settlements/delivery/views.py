@@ -20,6 +20,7 @@ from app.modules.settlements.delivery import schemas as s
 from app.modules.settlements.delivery.models import (
     DifferenceAllocation,
     ExpenseCategory,
+    FuelLoad,
     Settlement,
     SettlementClosing,
     SettlementDifference,
@@ -30,6 +31,8 @@ from app.modules.settlements.pending import service as pending_service
 from app.modules.settlements.pending import views as pending_views
 from app.platform.auth.models import User
 from app.platform.parties.models import Employee
+from app.platform.vehicles import plates
+from app.platform.vehicles.models import Vehicle
 
 
 def settlement(db: Session, settlement_id: int) -> s.SettlementOut:
@@ -39,6 +42,7 @@ def settlement(db: Session, settlement_id: int) -> s.SettlementOut:
     sent = transfers.of(db, row.id)
     events = transfers.events_of(db, [t.id for t in sent])
     spent = expenses.of(db, row.id)
+    loads = expenses.loads_of(db, [e.id for e in spent])
     totals = summary.totals(db, [row.id])[row.id]
     difference = closing.current_difference(db, row)
     allocated = closing.allocations_of(db, [difference.id] if difference else [])
@@ -54,11 +58,19 @@ def settlement(db: Session, settlement_id: int) -> s.SettlementOut:
         + [t.status_changed_by for t in sent]
         + [e.changed_by for es in events.values() for e in es]
         + [e.created_by for e in spent]
-        + [e.voided_by for e in spent if e.voided_by],
+        + [e.voided_by for e in spent if e.voided_by]
+        + [u for load in loads.values() for u in (load.created_by, load.updated_by)],
     )
     accounts = {a.account_id: a.name for a in ledger.account_balances(db, include_inactive=True)}
-    categories = {c.id: c.name for c in db.scalars(select(ExpenseCategory))}
+    categories = {c.id: c for c in db.scalars(select(ExpenseCategory))}
     employee = db.get(Employee, row.employee_id)
+    fuel_vehicles = {
+        v.id: v for v in db.scalars(select(Vehicle).where(Vehicle.id.in_({x.vehicle_id for x in loads.values()})))
+    }
+    fuel_employees = {
+        e.id: e.full_name
+        for e in db.scalars(select(Employee).where(Employee.id.in_({x.employee_id for x in loads.values()})))
+    }
 
     return s.SettlementOut(
         id=row.id,
@@ -141,9 +153,12 @@ def settlement(db: Session, settlement_id: int) -> s.SettlementOut:
             s.ExpenseOut(
                 id=e.id,
                 category_id=e.category_id,
-                category_name=categories[e.category_id],
+                category_name=categories[e.category_id].name,
+                category_code=categories[e.category_id].code,
                 amount=e.amount,
                 description=e.description,
+                fuel=_fuel(loads[e.id], fuel_vehicles, fuel_employees, users) if e.id in loads else None,
+                legacy_fuel_without_detail=e.legacy_fuel_without_detail,
                 created_by=e.created_by,
                 created_by_name=users[e.created_by],
                 created_at=e.created_at,
@@ -311,7 +326,26 @@ def denomination_list(db: Session, include_inactive: bool) -> list[s.Denominatio
 
 
 def category(row: ExpenseCategory) -> s.ExpenseCategoryOut:
-    return s.ExpenseCategoryOut(id=row.id, name=row.name, active=row.active)
+    return s.ExpenseCategoryOut(id=row.id, name=row.name, active=row.active, code=row.code)
+
+
+def _fuel(load: FuelLoad, vehicles: dict[int, Vehicle], employees: dict[int, str], users: dict[int, str]) -> s.FuelOut:
+    vehicle = vehicles[load.vehicle_id]
+    return s.FuelOut(
+        id=load.id,
+        vehicle_id=load.vehicle_id,
+        vehicle_plate=plates.display(vehicle.plate),
+        vehicle_description=vehicle.description,
+        vehicle_active=vehicle.active,
+        employee_id=load.employee_id,
+        employee_name=employees.get(load.employee_id, ""),
+        liters=load.liters,
+        price_per_liter=load.price_per_liter,
+        odometer_km=load.odometer_km,
+        created_by_name=users[load.created_by],
+        updated_at=load.updated_at,
+        updated_by_name=users[load.updated_by],
+    )
 
 
 def _summary(totals: summary.Totals, accounts: dict[int, str]) -> s.Summary:

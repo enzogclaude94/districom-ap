@@ -700,7 +700,7 @@ def _void_expense(client: TestClient, ids: dict[str, int], d: dict[str, int], to
 
 
 def _recategorize_expense(client: TestClient, ids: dict[str, int], d: dict[str, int], tolls: int) -> None:
-    other = client.post(f"{BASE}/expense-categories", json={"name": "Combustible"}).json()["id"]
+    other = client.post(f"{BASE}/expense-categories", json={"name": "Lavadero"}).json()["id"]
     response = client.patch(f"{BASE}/deliveries/{d['settlement']}/expenses/{d['expense']}", json={"category_id": other})
     assert response.status_code == 200, response.text
 

@@ -116,12 +116,34 @@ export interface Transfer {
   events: TransferEvent[];
 }
 
+/** Fuel load of a FUEL expense (R5-2). The expense's amount is liters × price per liter, from the backend. */
+export interface FuelLoad {
+  id: number;
+  vehicle_id: number;
+  vehicle_plate: string;
+  vehicle_description: string;
+  vehicle_active: boolean;
+  employee_id: number;
+  employee_name: string;
+  liters: string;
+  price_per_liter: string;
+  odometer_km: number | null;
+  created_by_name: string;
+  updated_at: string;
+  updated_by_name: string;
+}
+
 export interface Expense {
   id: number;
   category_id: number;
   category_name: string;
+  /** "FUEL" for fuel, null for an ordinary category. */
+  category_code: string | null;
   amount: string;
   description: string | null;
+  fuel: FuelLoad | null;
+  /** A fuel expense loaded before R5-2, without detail. */
+  legacy_fuel_without_detail: boolean;
   created_by: number;
   created_by_name: string;
   created_at: string;
@@ -280,7 +302,11 @@ export interface ExpenseCategory {
   id: number;
   name: string;
   active: boolean;
+  /** Categories with behavior ("FUEL"); null for the ordinary ones. Assigned by the system only. */
+  code: string | null;
 }
+
+export const FUEL_CODE = "FUEL";
 
 export interface AllocationInput {
   target: "EMPLOYEE" | "COMPANY";

@@ -62,6 +62,7 @@ from app.modules.settlements.delivery.models import (
     CashCountLine,
     DifferenceAllocation,
     Expense,
+    FuelLoad,
     Settlement,
     SettlementClosing,
     SettlementDifference,
@@ -213,6 +214,23 @@ def preview_token(db: Session, plan: Plan) -> str:
             Expense.settlement_id == sid, Expense.voided_at.is_(None)
         )
     )
+    fueled = db.execute(
+        select(
+            FuelLoad.expense_id,
+            FuelLoad.vehicle_id,
+            FuelLoad.employee_id,
+            FuelLoad.liters,
+            FuelLoad.price_per_liter,
+            FuelLoad.odometer_km,
+            Expense.amount,
+        )
+        .join(Expense, Expense.id == FuelLoad.expense_id)
+        .where(Expense.settlement_id == sid, Expense.voided_at.is_(None))
+    )
+    fuel_rows = sorted(
+        [eid, vehicle, employee, str(liters), str(price), odometer, service.money(amount)]
+        for eid, vehicle, employee, liters, price, odometer, amount in fueled
+    )
     totals = plan.totals
     payload: dict[str, Any] = {
         "settlement": sid,
@@ -233,6 +251,8 @@ def preview_token(db: Session, plan: Plan) -> str:
         "difference": service.money(plan.difference),
         "legs": sorted([kind, ref, service.money(amount)] for (kind, ref), amount in plan.legs.items()),
     }
+    if fuel_rows:  # R5-2: who loaded which vehicle, how many liters at what price; absent when none
+        payload["fuel"] = fuel_rows
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode()).hexdigest()
 

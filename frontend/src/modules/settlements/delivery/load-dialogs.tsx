@@ -6,8 +6,18 @@ import { formatMoney } from "@/lib/format";
 import type { Account } from "@/modules/settlements/cash/api";
 import { parseAmount } from "@/modules/settlements/cash/amount";
 
-import { deliveryPath, type ExpenseCategory, type Settlement, type Transfer, type TransferStatus } from "./api";
+import {
+  deliveryPath,
+  FUEL_CODE,
+  type Expense,
+  type ExpenseCategory,
+  type Settlement,
+  type Transfer,
+  type TransferStatus,
+} from "./api";
 import { ActionDialog, AmountField, SelectField, TextField } from "./form";
+import { formatQuantity, parseDecimal } from "./fuel";
+import { FuelFields, fuelBody, fuelForm, fuelProblem, type FuelForm } from "./fuel-fields";
 import { TRANSFER_STATUS_LABELS } from "./labels";
 import { useDeliveryAction } from "./use-delivery-action";
 
@@ -194,7 +204,10 @@ export function ExpenseDialog({ settlement, categories, onClose }: Base & { cate
   const [category, setCategory] = useState<number | null>(null);
   const [amount, setAmount] = useState("");
   const [description, setDescription] = useState("");
+  const [load, setLoad] = useState<FuelForm>(() => fuelForm(settlement.employee_id));
   const action = useDeliveryAction(`expense:${settlement.id}`, onClose);
+  const isFuel = active.find((c) => c.id === category)?.code === FUEL_CODE;
+  const name = active.find((c) => c.id === category)?.name ?? "";
   return (
     <ActionDialog
       title="Registrar gasto"
@@ -202,17 +215,27 @@ export function ExpenseDialog({ settlement, categories, onClose }: Base & { cate
       submitLabel="Registrar gasto"
       action={action}
       onClose={onClose}
-      validate={() => (category === null ? "Elegí la categoría." : !parseAmount(amount) ? "Ingresá el importe." : null)}
+      validate={() =>
+        category === null
+          ? "Elegí la categoría."
+          : isFuel
+            ? fuelProblem(load)
+            : !parseAmount(amount)
+              ? "Ingresá el importe."
+              : null
+      }
       build={(requestId) => ({
         method: "POST",
         path: deliveryPath(settlement.id, "/expenses"),
         body: {
           client_request_id: requestId,
           category_id: category,
-          amount: parseAmount(amount),
+          ...(isFuel ? { fuel: fuelBody(load) } : { amount: parseAmount(amount) }),
           description: description.trim() || null,
         },
-        summary: `Gasto de ${formatMoney(parseAmount(amount)!)} (${active.find((c) => c.id === category)?.name ?? ""})`,
+        summary: isFuel
+          ? `Combustible: ${formatQuantity(parseDecimal(load.liters, 3)!)} l (${name})`
+          : `Gasto de ${formatMoney(parseAmount(amount)!)} (${name})`,
       })}
     >
       <SelectField
@@ -222,8 +245,42 @@ export function ExpenseDialog({ settlement, categories, onClose }: Base & { cate
         placeholder="Elegí una categoría…"
         options={active}
       />
-      <AmountField value={amount} onChange={setAmount} />
+      {isFuel ? <FuelFields form={load} onChange={setLoad} /> : <AmountField value={amount} onChange={setAmount} />}
       <TextField label="Descripción (opcional)" value={description} onChange={setDescription} multiline />
+    </ActionDialog>
+  );
+}
+
+/**
+ * Correct the load of a fuel expense while the settlement is open; the amount follows. A fuel expense
+ * loaded before R5-2 without detail gets it here, which ends its legacy exception.
+ */
+export function FuelCorrectionDialog({ settlement, expense, onClose }: Base & { expense: Expense }) {
+  const [load, setLoad] = useState<FuelForm>(() => fuelForm(settlement.employee_id, expense.fuel));
+  const action = useDeliveryAction(`fuel:${settlement.id}:${expense.id}`, onClose);
+  const legacy = expense.fuel === null;
+  return (
+    <ActionDialog
+      title={legacy ? "Cargar detalle de combustible" : "Corregir carga de combustible"}
+      description={
+        legacy
+          ? "Este gasto se registró antes del detalle de combustible. Para cambiar su importe cargá vehículo, litros y precio por litro: el importe pasa a calcularse."
+          : "El importe del gasto se vuelve a calcular con los litros y el precio por litro."
+      }
+      submitLabel="Guardar"
+      action={action}
+      onClose={onClose}
+      validate={() =>
+        fuelProblem(load) ?? (Object.keys(fuelBody(load, expense.fuel)).length ? null : "No cambiaste nada.")
+      }
+      build={() => ({
+        method: "PATCH",
+        path: deliveryPath(settlement.id, `/expenses/${expense.id}`),
+        body: { fuel: fuelBody(load, expense.fuel) },
+        summary: `Carga de combustible: ${formatQuantity(parseDecimal(load.liters, 3)!)} l`,
+      })}
+    >
+      <FuelFields form={load} onChange={setLoad} current={expense.fuel} />
     </ActionDialog>
   );
 }
