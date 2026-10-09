@@ -55,8 +55,8 @@ from sqlalchemy.orm import Session
 from app.core.errors import AppError
 from app.modules.settlements.cheques import service as cheques
 from app.modules.settlements.cheques.models import Cheque
+from app.modules.settlements.delivery import expenses, service, summary
 from app.modules.settlements.delivery import schemas as s
-from app.modules.settlements.delivery import service, summary
 from app.modules.settlements.delivery.models import (
     CashAddition,
     CashCountLine,
@@ -347,6 +347,7 @@ def close(db: Session, actor: User, settlement_id: int, body: s.CloseIn) -> serv
 
     pending_collections.publish(db, actor, settlement, pendings, operation.id, settlement.current_close_operation_id)
     cheques.publish(db, actor, settlement, locked_cheques, operation.id, settlement.current_close_operation_id)
+    expenses.publish_fuel(db, settlement, operation.id)
     now = datetime.now(UTC)
     superseded = db.execute(
         update(SettlementDifference)

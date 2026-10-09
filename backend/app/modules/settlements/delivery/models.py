@@ -451,3 +451,40 @@ class DifferenceAllocation(IdMixin, Base):
     reason: Mapped[str | None] = mapped_column(Text)
     decided_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"))
     decided_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SettlementClosingFuelLoad(IdMixin, Base):
+    """What one close of a settlement published for one fuel load (R5-4). Append-only.
+
+    As with pendings (R3 decision 3) and cheques, the load is what the next close will publish and is
+    edited in place during a correction; the fuel **in effect** is the row of the settlement's close in
+    effect (`settlements.current_close_operation_id`). During a correction a load keeps its published
+    liters, price, amount, vehicle and employee until the new close; a load added during it is not in
+    effect yet; a load voided during it stays in effect until then. The rows of a close are exactly the
+    loads of its settlement's expenses in effect when it was published (deferred trigger, migration 0017).
+    """
+
+    __tablename__ = "settlement_closing_fuel_loads"
+    __table_args__ = (
+        CheckConstraint("liters > 0", name="liters_positive"),
+        CheckConstraint("price_per_liter > 0", name="price_positive"),
+        CheckConstraint("amount > 0", name="amount_positive"),
+        UniqueConstraint("close_operation_id", "fuel_load_id", name="uq_settlement_closing_fuel_loads_close_load"),
+        {"schema": SCHEMA},
+    )
+
+    close_operation_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("settlements.financial_operations.id", ondelete="RESTRICT"), index=True
+    )
+    settlement_id: Mapped[int] = mapped_column(BigInteger, ForeignKey(_SETTLEMENT_FK, ondelete="RESTRICT"), index=True)
+    settlement_version: Mapped[int] = mapped_column(Integer)
+    fuel_load_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey(f"{SCHEMA}.fuel_loads.id", ondelete="RESTRICT"), index=True
+    )
+    expense_id: Mapped[int] = mapped_column(BigInteger, ForeignKey(f"{SCHEMA}.expenses.id", ondelete="RESTRICT"))
+    vehicle_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("vehicles.id", ondelete="RESTRICT"), index=True)
+    employee_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("employees.id", ondelete="RESTRICT"), index=True)
+    liters: Mapped[Decimal] = mapped_column(Numeric(10, 3))
+    price_per_liter: Mapped[Decimal] = mapped_column(Numeric(14, 4))
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
