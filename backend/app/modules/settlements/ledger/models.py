@@ -50,6 +50,11 @@ ACCOUNT_KINDS = (
     # ("Cheques depositados"). Assets, never available money; every leg in them names its cheque.
     "CHEQUE_PORTFOLIO",
     "CHEQUES_IN_TRANSIT",
+    # R6: where a payment to a third party went (Enzo's R6 decision D1). Technical classifiers, never accounts
+    # payable, debt, valued inventory nor accrued purchases; an expense paid to a third party uses EXPENSE.
+    "MERCHANDISE_PAYMENTS",
+    "THIRD_PARTY_REFUNDS",
+    "OTHER_PAYMENTS",
 )
 # Accounts whose every leg is one cheque (`ledger_entries.cheque_id`), and only those.
 CHEQUE_KINDS = ("CHEQUE_PORTFOLIO", "CHEQUES_IN_TRANSIT")
@@ -64,6 +69,9 @@ TECHNICAL_KINDS = (
     "UNCOLLECTIBLE",
     "CHEQUE_PORTFOLIO",
     "CHEQUES_IN_TRANSIT",
+    "MERCHANDISE_PAYMENTS",
+    "THIRD_PARTY_REFUNDS",
+    "OTHER_PAYMENTS",
 )
 
 OPERATION_TYPES = (
@@ -90,6 +98,8 @@ OPERATION_TYPES = (
     "CHEQUE_RETURN",
     # R5-3: an expense paid directly from a cash box or the bank; its document is the expense.
     "DIRECT_EXPENSE",
+    # R6-1: a payment made to a third party; its document is the payment.
+    "PAYMENT",
 )
 CHEQUE_DOCUMENT_TYPES = ("CHEQUE_DEPOSIT", "CHEQUE_CREDIT", "CHEQUE_REJECTION", "CHEQUE_RETURN")
 # Operations whose description is the mandatory reason.
@@ -188,6 +198,14 @@ class FinancialOperation(IdMixin, Base):
             "source_id",
             unique=True,
             postgresql_where=text("type = 'DIRECT_EXPENSE'"),
+        ),
+        # A payment has exactly one operation (R6-1).
+        Index(
+            "uq_financial_operations_payment",
+            "source_type",
+            "source_id",
+            unique=True,
+            postgresql_where=text("type = 'PAYMENT'"),
         ),
         {"schema": SCHEMA},
     )

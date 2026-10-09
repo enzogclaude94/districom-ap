@@ -72,6 +72,16 @@ def test_fingerprint_changes_with_the_command(change: dict[str, object]) -> None
         ("PENDING_WRITE_OFF", ["PENDING_COLLECTIONS", "EMPLOYEE"], [-1, 1], True),
         ("PENDING_WRITE_OFF", ["PENDING_COLLECTIONS", "UNCOLLECTIBLE"], [1, -1], False),
         ("PENDING_WRITE_OFF", ["PENDING_COLLECTIONS", "CASH_BOX"], [-1, 1], False),
+        # R6-1: items leave cash boxes and banks, exactly one counter-leg of a payment concept enters.
+        ("PAYMENT", ["CASH_BOX", "MERCHANDISE_PAYMENTS"], [-1, 1], True),
+        ("PAYMENT", ["CASH_BOX", "BANK", "EXPENSE"], [-1, -1, 1], True),
+        ("PAYMENT", ["CASH_BOX", "CASH_BOX", "THIRD_PARTY_REFUNDS"], [-1, -1, 1], True),
+        ("PAYMENT", ["BANK", "OTHER_PAYMENTS"], [-1, 1], True),
+        ("PAYMENT", ["CASH_BOX", "MERCHANDISE_PAYMENTS", "EXPENSE"], [-1, 1, 1], False),
+        ("PAYMENT", ["CASH_BOX", "BANK"], [-1, 1], False),
+        ("PAYMENT", ["CASH_BOX", "MERCHANDISE_PAYMENTS"], [1, -1], False),
+        ("PAYMENT", ["CHEQUE_PORTFOLIO", "MERCHANDISE_PAYMENTS"], [-1, 1], False),
+        ("PAYMENT", ["CASH_BOX", "UNCOLLECTIBLE"], [-1, 1], False),
     ],
 )
 def test_leg_shapes(type: str, kinds: list[str], signs: list[int], ok: bool) -> None:
@@ -99,4 +109,5 @@ def test_adjustments_and_partner_movements_need_admin() -> None:
         "CHEQUE_CREDIT",
         "CHEQUE_REJECTION",
         "DIRECT_EXPENSE",
+        "PAYMENT",
     }

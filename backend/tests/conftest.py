@@ -28,11 +28,14 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 # Tables emptied after each test that uses the database.
 TRUNCATED_TABLES = (
     "vehicles",
+    "third_parties",
     "users",
     "user_sessions",
     "audit_events",
     "app_settings",
     "user_module_roles",
+    "settlements.payment_items",
+    "settlements.payments",
     "settlements.cheque_credit_items",
     "settlements.cheque_credits",
     "settlements.cheque_deposit_items",
@@ -79,6 +82,9 @@ SEEDED_ACCOUNTS = (
     "uncollectible",
     "cheque_portfolio",
     "cheques_in_transit",
+    "merchandise_payments",
+    "third_party_refunds",
+    "other_payments",
 )
 
 

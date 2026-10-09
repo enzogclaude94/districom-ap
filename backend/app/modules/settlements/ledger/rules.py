@@ -7,6 +7,8 @@ without being admin or a "deposit" that moves money between two cash boxes.
 from dataclasses import dataclass
 
 CASH_AND_BANK = frozenset({"CASH_BOX", "BANK"})
+# Where a payment to a third party goes, by concept (R6, Enzo's decision D1).
+PAYMENT_COUNTERPARTS = frozenset({"MERCHANDISE_PAYMENTS", "EXPENSE", "THIRD_PARTY_REFUNDS", "OTHER_PAYMENTS"})
 
 
 @dataclass(frozen=True)
@@ -18,6 +20,8 @@ class OperationRule:
     counterpart: str | None = None
     # Required sign per kind: +1 value enters, -1 value leaves.
     signs: tuple[tuple[str, int], ...] = ()
+    # Kinds of which, together, there must be exactly one leg (a counterpart that depends on the document).
+    counterpart_one_of: frozenset[str] = frozenset()
 
 
 RULES: dict[str, OperationRule] = {
@@ -130,6 +134,24 @@ RULES: dict[str, OperationRule] = {
     "DIRECT_EXPENSE": OperationRule(
         "operator", CASH_AND_BANK | {"EXPENSE"}, "EXPENSE", (("CASH_BOX", -1), ("BANK", -1), ("EXPENSE", 1))
     ),
+    # A payment made to a third party (R6-1): each item leaves its cash box or bank account; ONE counter-leg
+    # for the whole amount enters the technical account of its concept (merchandise, expense, refund, other).
+    # Its document is the payment, which builds the legs; the database checks them against it. An ordinary
+    # debit: the bank never goes into an overdraft for it (not an EXTERNAL_BANK_DEBIT).
+    "PAYMENT": OperationRule(
+        "operator",
+        CASH_AND_BANK | PAYMENT_COUNTERPARTS,
+        None,
+        (
+            ("CASH_BOX", -1),
+            ("BANK", -1),
+            ("MERCHANDISE_PAYMENTS", 1),
+            ("EXPENSE", 1),
+            ("THIRD_PARTY_REFUNDS", 1),
+            ("OTHER_PAYMENTS", 1),
+        ),
+        PAYMENT_COUNTERPARTS,
+    ),
 }
 CHEQUE_CYCLE_TYPES = frozenset({"CHEQUE_DEPOSIT", "CHEQUE_CREDIT", "CHEQUE_REJECTION", "CHEQUE_RETURN"})
 # Operations that belong to a source document: only that document's flow corrects them, never Cajas.
@@ -141,12 +163,13 @@ DOCUMENT_TYPES = frozenset(
         "CHEQUE_OPENING_BALANCE",
         "CHEQUE_OWNER_CONTRIBUTION",
         "DIRECT_EXPENSE",
+        "PAYMENT",
     }
     | CHEQUE_CYCLE_TYPES
 )
 # Document operations undone with `reverse_document_operation` (a settlement close is replaced instead).
 REVERSIBLE_DOCUMENT_TYPES = frozenset(
-    {"PENDING_COLLECTION", "PENDING_WRITE_OFF", "DIRECT_EXPENSE"} | CHEQUE_CYCLE_TYPES
+    {"PENDING_COLLECTION", "PENDING_WRITE_OFF", "DIRECT_EXPENSE", "PAYMENT"} | CHEQUE_CYCLE_TYPES
 )
 # «Banco en descubierto» (Enzo's R4-2 policy): the only debits a bank account books even if they create or
 # deepen an overdraft. A rejection of a cheque already credited is an external event, not a decision of the
@@ -162,6 +185,8 @@ def leg_shape_error(rule: OperationRule, kinds: list[str], signs: list[int]) -> 
     if any(kind not in rule.kinds for kind in kinds):
         return "Una de las cuentas no corresponde a este tipo de operación."
     if rule.counterpart is not None and kinds.count(rule.counterpart) != 1:
+        return "La operación debe tener exactamente un movimiento en la cuenta de contrapartida."
+    if rule.counterpart_one_of and sum(kind in rule.counterpart_one_of for kind in kinds) != 1:
         return "La operación debe tener exactamente un movimiento en la cuenta de contrapartida."
     required = dict(rule.signs)
     for kind, sign in zip(kinds, signs, strict=True):
