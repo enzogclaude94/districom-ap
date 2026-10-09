@@ -217,16 +217,28 @@ class TransferStatusEvent(IdMixin, Base):
     changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+FUEL = "FUEL"
+
+
 class ExpenseCategory(IdMixin, TimestampMixin, Base):
-    """Expense category, edited by an admin. Deactivated, never deleted."""
+    """Expense category, edited by an admin. Deactivated, never deleted.
+
+    `code` marks the few categories with behavior (R5-2: FUEL asks for a fuel load). The system recognizes
+    them by code, never by name, so an admin may rename them. Only a migration assigns a code; it never
+    changes (trigger) and the API neither takes nor edits it. Ordinary categories have none.
+    """
 
     __tablename__ = "expense_categories"
-    __table_args__ = ({"schema": SCHEMA},)
+    __table_args__ = (
+        CheckConstraint("code ~ '^[A-Z][A-Z0-9_]{0,39}$'", name="code_format"),
+        {"schema": SCHEMA},
+    )
 
     name: Mapped[str] = mapped_column(String(100))
     # Lower case, no accents, single spaces: "Peajes" and "peajes " are the same category.
     name_key: Mapped[str] = mapped_column(String(100), unique=True)
     active: Mapped[bool] = mapped_column(Boolean, server_default="true")
+    code: Mapped[str | None] = mapped_column(String(40), unique=True)
 
 
 class Expense(IdMixin, TimestampMixin, Base):
@@ -237,6 +249,7 @@ class Expense(IdMixin, TimestampMixin, Base):
         CheckConstraint("amount > 0", name="amount_positive"),
         CheckConstraint(_VOID_CHECK, name="void_complete"),
         CheckConstraint("request_fingerprint ~ '^[0-9a-f]{64}$'", name="fingerprint_format"),
+        CheckConstraint("origin IN ('SETTLEMENT')", name="origin"),
         Index("ix_expenses_category_id", "category_id"),
         {"schema": SCHEMA},
     )
@@ -253,6 +266,40 @@ class Expense(IdMixin, TimestampMixin, Base):
     voided_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"))
     voided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     void_reason: Mapped[str | None] = mapped_column(Text)
+    # Where the expense was paid from. R5-2 has only SETTLEMENT (out of a driver's collections); R5-3 adds
+    # the direct expense from a cash box or the bank.
+    origin: Mapped[str] = mapped_column(String(20), server_default="SETTLEMENT")
+    # True only for a FUEL expense that existed before migration 0015 and so has no fuel load. Only that
+    # migration sets it; the database refuses it on a new row and refuses false -> true (Enzo, R5-2). It
+    # goes back to false when the expense gets its load.
+    legacy_fuel_without_detail: Mapped[bool] = mapped_column(Boolean, server_default="false")
+
+
+class FuelLoad(IdMixin, TimestampMixin, Base):
+    """Operational detail of a FUEL expense, 1:1 (R5-2). The money is the expense's: its amount is
+    round(liters x price per liter, 2), half up, computed by the backend and checked by the database; the
+    load keeps no total of its own and no ledger legs. It is never deleted and has no state of its own: it
+    is voided when its expense is."""
+
+    __tablename__ = "fuel_loads"
+    __table_args__ = (
+        CheckConstraint("liters > 0", name="liters_positive"),
+        CheckConstraint("price_per_liter > 0", name="price_positive"),
+        CheckConstraint("odometer_km IS NULL OR odometer_km >= 0", name="odometer_not_negative"),
+        {"schema": SCHEMA},
+    )
+
+    expense_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey(f"{SCHEMA}.expenses.id", ondelete="RESTRICT"), unique=True
+    )
+    vehicle_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("vehicles.id", ondelete="RESTRICT"), index=True)
+    # Who loaded the fuel: by default the settlement's driver. Not who typed it (`created_by`).
+    employee_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("employees.id", ondelete="RESTRICT"), index=True)
+    liters: Mapped[Decimal] = mapped_column(Numeric(10, 3))
+    price_per_liter: Mapped[Decimal] = mapped_column(Numeric(14, 4))
+    odometer_km: Mapped[int | None] = mapped_column(Integer)
+    created_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"))
+    updated_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"))
 
 
 class SettlementClosing(IdMixin, Base):

@@ -199,25 +199,75 @@ class TransferOut(BaseModel):
     events: list[TransferEventOut]
 
 
+Liters = Annotated[Decimal, Field(gt=0, max_digits=10, decimal_places=3)]
+PricePerLiter = Annotated[Decimal, Field(gt=0, max_digits=14, decimal_places=4)]
+Odometer = Annotated[int, Field(ge=0, le=2_147_483_647)]
+
+
+class FuelIn(StrictIn):
+    """Fuel load of a FUEL expense (R5-2). There is no amount: the backend computes it."""
+
+    vehicle_id: int
+    # Who loaded the fuel; the settlement's driver when absent.
+    employee_id: int | None = None
+    liters: Liters
+    price_per_liter: PricePerLiter
+    odometer_km: Odometer | None = None
+
+
+class FuelPatch(StrictIn):
+    """Fields of the load to change; the amount follows liters x price per liter."""
+
+    vehicle_id: int | None = None
+    employee_id: int | None = None
+    liters: Liters | None = None
+    price_per_liter: PricePerLiter | None = None
+    odometer_km: Odometer | None = None
+
+
 class ExpenseIn(StrictIn):
     client_request_id: UUID
     category_id: int
-    amount: Amount
+    # Required for every category but FUEL, whose amount is computed from `fuel` (`fuel_amount_is_computed`).
+    amount: Amount | None = None
     description: Text500 | None = None
+    fuel: FuelIn | None = None
 
 
 class ExpensePatch(StrictIn):
     category_id: int | None = None
     amount: Amount | None = None
     description: Text500 | None = None
+    fuel: FuelPatch | None = None
+
+
+class FuelOut(BaseModel):
+    id: int
+    vehicle_id: int
+    vehicle_plate: str
+    vehicle_description: str
+    vehicle_active: bool
+    employee_id: int
+    employee_name: str
+    liters: Decimal
+    price_per_liter: Decimal
+    odometer_km: int | None
+    created_by_name: str
+    updated_at: datetime
+    updated_by_name: str
 
 
 class ExpenseOut(BaseModel):
     id: int
     category_id: int
     category_name: str
+    # FUEL for a fuel expense, null for an ordinary category.
+    category_code: str | None = None
     amount: Money
     description: str | None
+    fuel: FuelOut | None = None
+    # A fuel expense loaded before R5-2, without its detail: shown as such, never created again.
+    legacy_fuel_without_detail: bool = False
     created_by: int
     created_by_name: str
     created_at: datetime
@@ -421,6 +471,8 @@ class ExpenseCategoryOut(BaseModel):
     id: int
     name: str
     active: bool
+    # Categories with behavior (FUEL); null for the ordinary ones. Never accepted as input.
+    code: str | None = None
 
 
 class DenominationIn(StrictIn):
