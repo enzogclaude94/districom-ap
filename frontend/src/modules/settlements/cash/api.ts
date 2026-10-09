@@ -15,7 +15,10 @@ export type AccountKind =
   | "PENDING_COLLECTIONS"
   | "UNCOLLECTIBLE"
   | "CHEQUE_PORTFOLIO"
-  | "CHEQUES_IN_TRANSIT";
+  | "CHEQUES_IN_TRANSIT"
+  | "MERCHANDISE_PAYMENTS"
+  | "THIRD_PARTY_REFUNDS"
+  | "OTHER_PAYMENTS";
 
 export type OperationType =
   | "OPENING_BALANCE"
@@ -35,6 +38,7 @@ export type OperationType =
   | "CHEQUE_REJECTION"
   | "CHEQUE_RETURN"
   | "DIRECT_EXPENSE"
+  | "PAYMENT"
   | "REVERSAL";
 
 export interface Account {

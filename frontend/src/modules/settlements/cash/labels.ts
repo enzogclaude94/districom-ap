@@ -18,10 +18,11 @@ export const OPERATION_LABELS: Record<OperationType, string> = {
   CHEQUE_REJECTION: "Cheque rechazado",
   CHEQUE_RETURN: "Devolución de cheque",
   DIRECT_EXPENSE: "Gasto directo",
+  PAYMENT: "Pago a tercero",
   REVERSAL: "Reverso",
 };
 
-/** Operations that belong to a document (a settlement, a pending, a cheque, an expense): corrected from it, never here. */
+/** Operations that belong to a document (a settlement, a pending, a cheque, an expense, a payment): corrected from it, never here. */
 export const DOCUMENT_OPERATION_TYPES: readonly OperationType[] = [
   "SETTLEMENT_CLOSE",
   "PENDING_COLLECTION",
@@ -33,6 +34,7 @@ export const DOCUMENT_OPERATION_TYPES: readonly OperationType[] = [
   "CHEQUE_REJECTION",
   "CHEQUE_RETURN",
   "DIRECT_EXPENSE",
+  "PAYMENT",
 ];
 
 export const ACCOUNT_KIND_LABELS: Record<AccountKind, string> = {
@@ -49,6 +51,9 @@ export const ACCOUNT_KIND_LABELS: Record<AccountKind, string> = {
   UNCOLLECTIBLE: "Incobrables",
   CHEQUE_PORTFOLIO: "Valores: cartera de cheques",
   CHEQUES_IN_TRANSIT: "Valores: cheques depositados",
+  MERCHANDISE_PAYMENTS: "Pagos realizados",
+  THIRD_PARTY_REFUNDS: "Pagos realizados",
+  OTHER_PAYMENTS: "Pagos realizados",
 };
 
 /** Accounts that hold money or partner contributions. Technical counterparts never show as available money. */
@@ -63,6 +68,7 @@ const SOURCE_LABELS: Record<string, string> = {
   cheque_rejection: "Rechazo de cheque",
   cheque_return: "Devolución de cheque",
   expense: "Gasto directo",
+  payment: "Pago",
 };
 
 /** Where an operation came from: entered by hand on this screen, or a document such as a settlement. */
@@ -82,6 +88,7 @@ const DOCUMENT_SCREENS: Record<string, string> = {
   cheque_rejection: "/rendiciones/cheques/documentos/cheque-rejections",
   cheque_return: "/rendiciones/cheques/documentos/cheque-returns",
   expense: "/rendiciones/cajas/gastos",
+  payment: "/rendiciones/pagos",
 };
 
 export function sourceHref(sourceType: string | null, sourceId: number | null): string | null {

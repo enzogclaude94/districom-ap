@@ -60,7 +60,7 @@ export function cashErrorView(
     case "operation_owned_by_document":
       return {
         message:
-          "Esta operación pertenece a un documento (una rendición, un pendiente, un cheque o un gasto directo): se corrige desde ese documento, no desde Cajas.",
+          "Esta operación pertenece a un documento (una rendición, un pendiente, un cheque, un gasto directo o un pago): se corrige desde ese documento, no desde Cajas.",
       };
     case "cannot_reverse_reversal":
       return { message: "Un reverso no se puede revertir. Si hace falta, registrá una operación nueva." };

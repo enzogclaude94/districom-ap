@@ -238,6 +238,12 @@ export function OperationDetail({ operationId }: { operationId: number }) {
               <SourceLink sourceType={operation.source_type} sourceId={operation.source_id} />: se revierte desde el
               gasto.
             </>
+          ) : operation.type === "PAYMENT" ? (
+            <>
+              Esta operación pertenece al{" "}
+              <SourceLink sourceType={operation.source_type} sourceId={operation.source_id} />: se revierte desde el
+              pago.
+            </>
           ) : (
             <>
               Esta operación pertenece al{" "}
