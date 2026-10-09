@@ -347,4 +347,13 @@ Propuesta `PROPUESTA_R4_CARTERA_DE_CHEQUES.md` aprobada con ajustes por Enzo el 
 | R4‑2 | Depósito, acreditación, rechazo, devolución, pendientes por rechazo o devolución y cobro con cheque (`0013`) | **DONE** (PR #18; `0013` congelada) |
 | R4‑3 | Pantallas de cartera de cheques y E2E (sin migraciones) | **DONE** (PR #19) |
 
-R4 aprobada por Enzo el 2026-10-09; las deudas conocidas del informe final no bloquean el cierre. R5 (combustible, vehículos y gastos directos): decisiones iniciales R5‑D1…D4 en `ROADMAP.md`; propuesta en revisión, sin implementación hasta su aprobación.
+R4 aprobada por Enzo el 2026-10-09; las deudas conocidas del informe final no bloquean el cierre. R5 (combustible, vehículos y gastos directos): propuesta aprobada por Enzo el 2026-10-09 con sus decisiones 1–4 (`ROADMAP.md`); autorizó solo R5‑1.
+
+## 18. Rendiciones — R5 (combustible, vehículos y gastos directos) · IN_PROGRESS
+
+| PR | Contenido | Estado |
+|---|---|---|
+| R5‑1 | Vehículos de plataforma: `public.vehicles` (`0014`), API, pantalla «Vehículos», auditoría | En revisión |
+| R5‑2 | Categoría `FUEL` y `fuel_loads` en la rendición (`0015`) | Espera aprobación de R5‑1 |
+| R5‑3 | Gasto directo desde Caja/Banco (`0016`) | No autorizada |
+| R5‑4 | Historial de combustible y E2E | No autorizada |

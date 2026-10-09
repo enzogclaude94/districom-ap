@@ -42,7 +42,7 @@ DistriCom es una plataforma modular (ADR 006). Este roadmap tiene tres carriles:
 | R2 | Rendición de reparto básica | **DONE** (aprobada por Enzo el 2026-10-05; PRs #10–#12 mergeados) | R1 |
 | R3 | Pendientes de cobro | **DONE** (2026-10-07; R3‑1, R3‑2 y R3‑3 aprobados y mergeados, PRs #13, #14 y #16) | R2 |
 | R4 | Cartera de cheques | **DONE** (aprobada por Enzo el 2026-10-09; PRs #17, #18 y #19) | R2 · R3 |
-| R5 | Combustible y vehículos | PLANNED | R2 |
+| R5 | Combustible y vehículos | IN_PROGRESS (R5‑1 en revisión) | R2 |
 | R6 | Pagos a proveedores y terceros | PLANNED | R1 · R4 |
 | R7 | Boca de expendio | PLANNED | R2–R5 |
 | R8 | Cuenta interna de empleados y liquidación semanal | PLANNED | R1 · R2 |
@@ -199,7 +199,15 @@ Modelo conceptual en `DATA_MODEL.md §13`; decisiones en ADR 007. Cada fase crea
 - R5‑D2: odómetro opcional, ≥ 0, conservado; sin bloquear lecturas menores a una anterior (más adelante, alertas).
 - R5‑D3: se cargan litros y precio por litro; el backend calcula `importe = litros × precio`, redondeado a centavos. No hay total manual.
 - R5‑D4: vehículos como maestro de plataforma (`public.vehicles`), patente normalizada y única; inactivo no se elige para cargas nuevas pero su historia sigue visible; nunca se borran.
-- Estado: propuesta `PROPUESTA_R5_COMBUSTIBLE_VEHICULOS_Y_GASTOS_DIRECTOS.md` entregada el 2026-10-09 (cuatro PR: R5‑1 vehículos, R5‑2 combustible en rendición, R5‑3 gasto directo, R5‑4 historial y E2E); no implementar hasta su aprobación.
+- Propuesta `PROPUESTA_R5_COMBUSTIBLE_VEHICULOS_Y_GASTOS_DIRECTOS.md` **aprobada** por Enzo el 2026-10-09 con sus decisiones 1–4: gasto generalizado con origen rendición o directo; categoría `FUEL` con detalle `fuel_loads` 1:1; importe = `round(litros × precio, 2, HALF_UP)` guardado solo en `expenses.amount` (litros `numeric(10,3)`, precio `numeric(14,4)`); odómetro opcional; empleado obligatorio en combustible (en rendición, por defecto el repartidor; en gasto directo, elección explícita de un empleado activo; distinto de `created_by`); `DIRECT_EXPENSE` con fecha pasada o de hoy, nunca futura, fondos validados desde `business_date` y **sin** la excepción de `CHEQUE_REJECTION`; corrección por reverso + gasto nuevo; sin DELETE; historia derivada. `expense_categories.code` nullable, único e inmutable; `FUEL` puede desactivarse. Gastos `FUEL` históricos sin detalle solo con la marca explícita `legacy_fuel_without_detail` (nunca una exención por fechas).
+- Vehículos (decisión 2): maestro de plataforma administrado por el **admin de plataforma**, modelo mínimo (sin marca, modelo ni año), patente normalizada y única por `plate_key`, formato visual calculado, identidad = id, nunca se borran.
+
+| PR | Contenido | Estado |
+|---|---|---|
+| R5‑1 | Vehículos de plataforma (`0014`, plataforma): API, pantalla, auditoría | En revisión |
+| R5‑2 | `expense_categories.code`, `FUEL` y `fuel_loads` en la rendición | No autorizada |
+| R5‑3 | Gasto directo desde Caja/Banco (`DIRECT_EXPENSE`) | No autorizada |
+| R5‑4 | Historial de combustible y E2E | No autorizada |
 
 ### R6 — Pagos a proveedores y terceros
 **Alcance:** terceros; pagos realizados con uno o varios medios (efectivo de una caja, transferencia, cheques de cartera), cuya suma es el total.

@@ -4,6 +4,14 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Added — Vehículos de plataforma (R5‑1)
+- **R5 aprobada:** propuesta de combustible, vehículos y gastos directos aprobada por Enzo el 2026-10-09 con sus decisiones 1–4; solo R5‑1 autorizada.
+- **`public.vehicles`** (migración `0014`, `platform: vehicles master`): patente normalizada (mayúsculas, sin espacios, puntos ni guiones; `A–Z`/`0–9`, 5 a 10 caracteres), única por `plate_key`; descripción obligatoria; activo/inactivo; autor y último editor. Sin marca, modelo ni año. La base rechaza borrar un vehículo y cambiar su autor o su alta.
+- **API** `GET /api/v1/vehicles` (`include_inactive`), `GET /{id}` con la historia de cambios, `POST` y `PATCH /{id}`. Leer: todo usuario autenticado. Escribir: solo el admin de plataforma (un admin u operador de Rendiciones recibe 403). Sin DELETE. `plate_display` (`AB 123 CD`, `ABC 123`) se calcula, no se guarda. Duplicado o corrección hacia una patente ajena: 409 `vehicle_plate_taken` con el vehículo que la tiene, también cuando dos altas compiten a la vez (lo decide la clave única). `service.active()` (422 `invalid_vehicle`) es lo que usará R5‑2 para no aceptar un vehículo inactivo en registros nuevos.
+- **Auditoría:** `platform.vehicle.created`, `.plate_changed`, `.description_changed`, `.activated`, `.deactivated`, cada una con usuario, antes, después e instante. Un PATCH que no cambia nada no registra nada.
+- **Pantalla `/vehiculos`** (navegación de plataforma, junto a Configuración, visible para todos): lista de activos o todos, patente con formato visual, estado, historia de cada vehículo; solo el admin de plataforma ve «Nuevo vehículo», «Corregir» y «Desactivar/Activar».
+- **Tests:** 17 de integración (alta, normalización, duplicado, carrera de dos altas, descripción, patente inválida, corrección de descripción y de patente, conflicto, desactivar/reactivar, inactivo legible, DELETE rechazado por la base, permisos de operator, admin de Rendiciones y admin de plataforma, auditoría), 17 unitarios de patentes, migración `0014` abajo/arriba; 6 de frontend; E2E de administración y consulta.
+
 ### Added — Pantallas de la cartera de cheques (R4‑3)
 - **R4 DONE:** aprobada por Enzo el 2026-10-09; PR #19 mergeado.
 - **R4‑2 DONE:** aprobada por Enzo el 2026-10-08 tras verificar la regla de Banco en descubierto; PR #18 mergeado; `0013` congelada. R4‑3 no agrega migraciones.
