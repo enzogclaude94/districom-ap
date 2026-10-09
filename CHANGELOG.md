@@ -5,6 +5,7 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 ## [Unreleased]
 
 ### Added — Combustible en rendición (R5‑2)
+- **R5‑2 DONE:** aprobada por Enzo el 2026-10-09 con sus desvíos documentados; PR #23 mergeado; `0015` congelada. R5‑3 autorizada.
 - **Migración `0015`** (`settlements: fuel loads, FUEL category and legacy flag`): `expense_categories.code` (único, inmutable, ningún endpoint lo asigna); la categoría `FUEL` reutiliza «Combustible» si existía (mismo id, nombre, estado e historia) o se crea; `expenses.origin` (`SETTLEMENT`); `expenses.legacy_fuel_without_detail`, que la migración pone en true solo en los gastos de combustible ya existentes; tabla `settlements.fuel_loads` 1:1 con el gasto (vehículo, quién cargó, litros, precio por litro, odómetro opcional).
 - **Importe calculado:** litros × precio por litro, redondeado al centavo (HALF_UP), guardado solo en `expenses.amount`. Un gasto de combustible no acepta importe manual (`fuel_amount_is_computed`) y exige su detalle (`fuel_detail_required`); otra categoría no acepta detalle (`fuel_detail_not_allowed`); cambiar entre combustible y otra categoría da `fuel_category_change`.
 - **Base de datos:** triggers que exigen carga en todo gasto FUEL vigente salvo legacy, importe exacto, rendición abierta, vehículo y empleado activos al cargarlos o cambiarlos, sin DELETE, código inmutable y legacy solo true→false (un INSERT con true o un UPDATE false→true fallan).
