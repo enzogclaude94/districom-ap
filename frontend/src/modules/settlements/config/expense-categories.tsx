@@ -16,7 +16,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { authApi, currentUserQueryKey, moduleRole, roleAtLeast } from "@/lib/api/auth";
 import { ApiError } from "@/lib/api/client";
 import { cn } from "@/lib/cn";
-import { deliveryApi, deliveryQueryKey, type ExpenseCategory } from "@/modules/settlements/delivery/api";
+import { deliveryApi, deliveryQueryKey, FUEL_CODE, type ExpenseCategory } from "@/modules/settlements/delivery/api";
 import { FormError } from "@/modules/settlements/delivery/form";
 
 const categoriesKey = [...deliveryQueryKey, "categories"] as const;
@@ -119,7 +119,13 @@ export function ExpenseCategories() {
   const toggle = useMutation({
     mutationFn: (category: ExpenseCategory) => deliveryApi.updateCategory(category.id, { active: !category.active }),
     onSuccess: (category) =>
-      done(category.active ? `«${category.name}» está activa otra vez.` : `«${category.name}» quedó desactivada.`),
+      done(
+        category.active
+          ? `«${category.name}» está activa otra vez.`
+          : category.code === FUEL_CODE
+            ? `«${category.name}» quedó desactivada: no se pueden registrar cargas de combustible nuevas. Las ya cargadas se conservan.`
+            : `«${category.name}» quedó desactivada.`,
+      ),
   });
 
   const submit = (event: FormEvent) => {
@@ -201,7 +207,18 @@ export function ExpenseCategories() {
             <TableBody>
               {list.data.map((category) => (
                 <TableRow key={category.id}>
-                  <TableCell className={cn(!category.active && "text-muted-foreground")}>{category.name}</TableCell>
+                  <TableCell className={cn(!category.active && "text-muted-foreground")}>
+                    {category.name}
+                    {category.code === FUEL_CODE && (
+                      <Badge
+                        tone="info"
+                        className="ml-2"
+                        title="Pide vehículo, litros y precio por litro; el importe se calcula"
+                      >
+                        Combustible
+                      </Badge>
+                    )}
+                  </TableCell>
                   <TableCell>
                     {category.active ? <Badge tone="success">Activa</Badge> : <Badge>Desactivada</Badge>}
                   </TableCell>

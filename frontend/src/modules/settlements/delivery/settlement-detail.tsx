@@ -22,6 +22,7 @@ import { SettlementPendings } from "@/modules/settlements/pending/settlement-pen
 import {
   deliveryApi,
   deliveryQueryKey,
+  FUEL_CODE,
   settlementQueryKey,
   type Addition,
   type Expense,
@@ -32,6 +33,7 @@ import {
 } from "./api";
 import { CloseDialog } from "./close-dialog";
 import { CountDialog } from "./count-dialog";
+import { formatQuantity } from "./fuel";
 import { HistoryTab } from "./history-tab";
 import {
   FINANCIAL_STATE_LABELS,
@@ -45,6 +47,7 @@ import {
   AdditionDialog,
   EditSettlementDialog,
   ExpenseDialog,
+  FuelCorrectionDialog,
   TransferDecisionDialog,
   TransferDialog,
   VoidDialog,
@@ -58,6 +61,7 @@ type Open =
   | { kind: "count" | "addition" | "transfer" | "expense" | "edit" | "close" | "reopen" }
   | { kind: "void-addition"; addition: Addition }
   | { kind: "void-expense"; expense: Expense }
+  | { kind: "fuel"; expense: Expense }
   | { kind: "decide"; transfer: Transfer; to: TransferStatus | "CORRECT" }
   | null;
 
@@ -385,7 +389,23 @@ function Load({
             <TableBody>
               {settlement.expenses.map((expense) => (
                 <TableRow key={expense.id} className={cn(expense.voided && "text-muted-foreground")}>
-                  <TableCell>{expense.category_name}</TableCell>
+                  <TableCell>
+                    {expense.category_name}
+                    {expense.fuel && (
+                      <span className="block text-xs text-muted-foreground tabular-nums">
+                        {expense.fuel.vehicle_plate}
+                        {!expense.fuel.vehicle_active && " (desactivado)"} · {formatQuantity(expense.fuel.liters)} l × ${" "}
+                        {formatQuantity(expense.fuel.price_per_liter)} · {expense.fuel.employee_name}
+                        {expense.fuel.odometer_km != null &&
+                          ` · ${formatQuantity(String(expense.fuel.odometer_km))} km`}
+                      </span>
+                    )}
+                    {expense.legacy_fuel_without_detail && (
+                      <Badge className="mt-1" title="Cargado antes del detalle de combustible">
+                        Sin detalle (histórico)
+                      </Badge>
+                    )}
+                  </TableCell>
                   <TableCell className={cn("text-right tabular-nums", expense.voided && "line-through")}>
                     {formatMoney(expense.amount)}
                   </TableCell>
@@ -402,6 +422,11 @@ function Load({
                     )}
                   </TableCell>
                   <TableCell>
+                    {editable && !expense.voided && expense.category_code === FUEL_CODE && (
+                      <Button variant="ghost" size="sm" onClick={() => open({ kind: "fuel", expense })}>
+                        {expense.fuel ? "Corregir carga" : "Cargar detalle"}
+                      </Button>
+                    )}
                     {editable && !expense.voided && (
                       <Button variant="ghost" size="sm" onClick={() => open({ kind: "void-expense", expense })}>
                         Anular
@@ -646,6 +671,9 @@ export function SettlementDetail({ settlementId }: { settlementId: number }) {
       {dialog?.kind === "transfer" && <TransferDialog settlement={settlement} banks={banks} onClose={close} />}
       {dialog?.kind === "expense" && (
         <ExpenseDialog settlement={settlement} categories={categories.data ?? []} onClose={close} />
+      )}
+      {dialog?.kind === "fuel" && (
+        <FuelCorrectionDialog settlement={settlement} expense={dialog.expense} onClose={close} />
       )}
       {dialog?.kind === "edit" && <EditSettlementDialog settlement={settlement} onClose={close} />}
       {dialog?.kind === "void-addition" && (
