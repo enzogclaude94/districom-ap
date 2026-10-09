@@ -1,13 +1,11 @@
 """The fuel each close publishes (R5-4, migration 0017): written by the close itself, append-only, exactly the
-loads of the settlement in effect, and rebuilt by the migration for settlements closed before it."""
+loads of the settlement in effect. The migration's backfill is in `test_fuel_history_migration.py`."""
 
 import pytest
-from alembic import command
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
-from tests.conftest import alembic_config
 from tests.modules.settlements.fuel_support import BASE, add_fuel, fuel, fuel_category, last_expense, vehicle
 from tests.modules.settlements.test_settlement_close_api import close, create, reopen
 
@@ -126,19 +124,3 @@ def test_a_close_publishes_exactly_its_loads_in_effect(db: Session, closed) -> N
         p=closed["pedro"],
     )
     assert "published fuel loads differ" in message
-
-
-def test_the_migration_rebuilds_the_closes_in_effect(as_role, db: Session, closed) -> None:  # type: ignore[no-untyped-def]
-    """Settlements closed before 0017 get what their close in effect published; an open one gets nothing."""
-    operator = as_role("operator")
-    create(operator, closed["pedro"], "1000")
-    before = _snapshot(db)
-    db.commit()
-    db.close()
-    cfg = alembic_config()
-    command.downgrade(cfg, "0016")
-    command.upgrade(cfg, "head")
-    after = _snapshot(db)
-    assert after == before
-    page = operator.get(f"{BASE}/fuel-loads").json()
-    assert ([r["state"] for r in page["items"]], page["summary"]["liters"]) == (["VOIDED", "PUBLISHED"], "10.000")

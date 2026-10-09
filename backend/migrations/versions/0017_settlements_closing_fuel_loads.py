@@ -96,9 +96,32 @@ CREATE CONSTRAINT TRIGGER trg_settlement_closing_fuel_loads_match
     FOR EACH ROW EXECUTE FUNCTION settlements.check_close_fuel_loads();
 """
 
-# The closes in effect before this migration: the loads of the expenses that existed when the close was
-# published and were not voided before it. A closed settlement cannot have changed since; a settlement being
-# corrected may have, and its rows take the load as it is now (no earlier fuel snapshot exists to read).
+# Fail safe (Enzo, R5-4): the snapshot of a close is only derivable while its loads cannot have changed since.
+# A CLOSED settlement is frozen, so its loads today are exactly what its close in effect published. A settlement
+# being corrected (OPEN with a close in effect) may have had those loads edited in place, and nothing reliable
+# keeps the published values (the audit trail is not a source of truth), so the migration refuses to run
+# rather than freeze values that were never published. Deploy condition: finish every such correction (its new
+# close) before upgrading. The check runs before any change, inside the migration's transaction.
+CORRECTIONS_WITH_FUEL = """
+SELECT s.id
+FROM settlements.settlements s
+JOIN settlements.settlement_closings c ON c.operation_id = s.current_close_operation_id
+WHERE s.status = 'OPEN'
+  AND EXISTS (
+      SELECT 1 FROM settlements.expenses e JOIN settlements.fuel_loads l ON l.expense_id = e.id
+      WHERE e.settlement_id = s.id AND e.created_at <= c.closed_at
+        AND (e.voided_at IS NULL OR e.voided_at > c.closed_at))
+ORDER BY s.id
+"""
+
+BLOCKED = (
+    "No se puede migrar R5-4 mientras existan rendiciones con combustible en corrección. "
+    "Finalice el nuevo cierre antes de actualizar. Rendiciones: {ids}."
+)
+
+# The closes in effect of CLOSED settlements (the only ones left once the barrier passes): the loads of the
+# expenses that existed when the close was published and were not voided before it. Inserted after the
+# triggers below, so every row is checked and, at commit, each close must match its settlement's loads exactly.
 BACKFILL = """
 INSERT INTO settlements.settlement_closing_fuel_loads
     (close_operation_id, settlement_id, settlement_version, fuel_load_id, expense_id, vehicle_id, employee_id,
@@ -109,11 +132,14 @@ FROM settlements.settlements s
 JOIN settlements.settlement_closings c ON c.operation_id = s.current_close_operation_id
 JOIN settlements.expenses e ON e.settlement_id = s.id
 JOIN settlements.fuel_loads l ON l.expense_id = e.id
-WHERE e.created_at <= c.closed_at AND (e.voided_at IS NULL OR e.voided_at > c.closed_at)
+WHERE s.status = 'CLOSED' AND e.created_at <= c.closed_at AND (e.voided_at IS NULL OR e.voided_at > c.closed_at)
 """
 
 
 def upgrade() -> None:
+    blocked = op.get_bind().execute(sa.text(CORRECTIONS_WITH_FUEL)).scalars().all()
+    if blocked:
+        raise RuntimeError(BLOCKED.format(ids=", ".join(str(i) for i in blocked)))
     op.create_table(
         "settlement_closing_fuel_loads",
         sa.Column("close_operation_id", sa.BigInteger(), nullable=False),
@@ -206,9 +232,9 @@ def upgrade() -> None:
         unique=False,
         schema="settlements",
     )
-    op.execute(BACKFILL)
     op.execute(HISTORY)
     op.execute(CLOSE_MATCHES_LOADS)
+    op.execute(BACKFILL)
 
 
 def downgrade() -> None:
