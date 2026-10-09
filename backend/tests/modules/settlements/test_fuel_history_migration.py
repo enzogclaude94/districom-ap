@@ -8,6 +8,7 @@ from collections.abc import Iterator
 import pytest
 from alembic import command
 from alembic.runtime.migration import MigrationContext
+from alembic.script import ScriptDirectory
 from fastapi.testclient import TestClient
 from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
@@ -59,9 +60,11 @@ def back_at_head(db: Session) -> Iterator[None]:
     """Whatever a test leaves, the next one finds the schema at head (a blocked upgrade leaves 0016)."""
     yield
     db.rollback()
-    if _revision(db) != "0017":
+    if _revision(db) != ScriptDirectory.from_config(alembic_config()).get_current_head():
         with db.get_bind().begin() as conn:  # type: ignore[union-attr]
-            conn.execute(text(f"TRUNCATE {', '.join(TRUNCATED_TABLES)} RESTART IDENTITY CASCADE"))
+            # Tables of later migrations do not exist yet below head.
+            present = [t for t in TRUNCATED_TABLES if conn.execute(text("SELECT to_regclass(:t)"), {"t": t}).scalar()]
+            conn.execute(text(f"TRUNCATE {', '.join(present)} RESTART IDENTITY CASCADE"))
         command.upgrade(alembic_config(), "head")
 
 
