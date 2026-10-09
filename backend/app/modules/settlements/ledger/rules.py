@@ -124,6 +124,12 @@ RULES: dict[str, OperationRule] = {
         "PENDING_COLLECTIONS",
         (("CHEQUE_PORTFOLIO", -1), ("PENDING_COLLECTIONS", 1)),
     ),
+    # An expense paid directly from one cash box or the bank (R5-3): the account -X, «Gastos operativos» +X.
+    # Its document is the expense, which builds the two legs; the database checks them against it. An
+    # ordinary debit: the bank never goes into an overdraft for it (not an EXTERNAL_BANK_DEBIT).
+    "DIRECT_EXPENSE": OperationRule(
+        "operator", CASH_AND_BANK | {"EXPENSE"}, "EXPENSE", (("CASH_BOX", -1), ("BANK", -1), ("EXPENSE", 1))
+    ),
 }
 CHEQUE_CYCLE_TYPES = frozenset({"CHEQUE_DEPOSIT", "CHEQUE_CREDIT", "CHEQUE_REJECTION", "CHEQUE_RETURN"})
 # Operations that belong to a source document: only that document's flow corrects them, never Cajas.
@@ -134,11 +140,14 @@ DOCUMENT_TYPES = frozenset(
         "PENDING_WRITE_OFF",
         "CHEQUE_OPENING_BALANCE",
         "CHEQUE_OWNER_CONTRIBUTION",
+        "DIRECT_EXPENSE",
     }
     | CHEQUE_CYCLE_TYPES
 )
 # Document operations undone with `reverse_document_operation` (a settlement close is replaced instead).
-REVERSIBLE_DOCUMENT_TYPES = frozenset({"PENDING_COLLECTION", "PENDING_WRITE_OFF"} | CHEQUE_CYCLE_TYPES)
+REVERSIBLE_DOCUMENT_TYPES = frozenset(
+    {"PENDING_COLLECTION", "PENDING_WRITE_OFF", "DIRECT_EXPENSE"} | CHEQUE_CYCLE_TYPES
+)
 # «Banco en descubierto» (Enzo's R4-2 policy): the only debits a bank account books even if they create or
 # deepen an overdraft. A rejection of a cheque already credited is an external event, not a decision of the
 # company. Every other debit of a bank (withdrawal, transfer out, a reversal...) keeps every end-of-day

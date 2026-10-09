@@ -242,19 +242,34 @@ class ExpenseCategory(IdMixin, TimestampMixin, Base):
 
 
 class Expense(IdMixin, TimestampMixin, Base):
-    """An expense the driver paid out of the collected money. Edited while OPEN, voided with a reason."""
+    """An expense. SETTLEMENT: the driver paid it out of the collected money; edited while the settlement is
+    OPEN, voided with a reason. DIRECT (R5-3): paid from a cash box or the bank by its own DIRECT_EXPENSE
+    operation; its money never changes, it is reversed (`expenses/direct.py`). Each origin has exactly its
+    own columns (check `origin_fields`)."""
 
     __tablename__ = "expenses"
     __table_args__ = (
         CheckConstraint("amount > 0", name="amount_positive"),
         CheckConstraint(_VOID_CHECK, name="void_complete"),
         CheckConstraint("request_fingerprint ~ '^[0-9a-f]{64}$'", name="fingerprint_format"),
-        CheckConstraint("origin IN ('SETTLEMENT')", name="origin"),
+        CheckConstraint("origin IN ('SETTLEMENT', 'DIRECT')", name="origin"),
+        CheckConstraint(
+            "(origin = 'SETTLEMENT' AND settlement_id IS NOT NULL AND paid_from_account_id IS NULL "
+            "AND business_date IS NULL AND operation_id IS NULL AND reversal_operation_id IS NULL) OR "
+            "(origin = 'DIRECT' AND settlement_id IS NULL AND paid_from_account_id IS NOT NULL "
+            "AND business_date IS NOT NULL AND NOT legacy_fuel_without_detail)",
+            name="origin_fields",
+        ),
+        CheckConstraint(
+            "origin <> 'DIRECT' OR ((reversal_operation_id IS NULL) = (voided_at IS NULL))", name="direct_reversal"
+        ),
         Index("ix_expenses_category_id", "category_id"),
         {"schema": SCHEMA},
     )
 
-    settlement_id: Mapped[int] = mapped_column(BigInteger, ForeignKey(_SETTLEMENT_FK, ondelete="RESTRICT"), index=True)
+    settlement_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey(_SETTLEMENT_FK, ondelete="RESTRICT"), index=True
+    )
     category_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey(f"{SCHEMA}.expense_categories.id", ondelete="RESTRICT")
     )
@@ -266,9 +281,20 @@ class Expense(IdMixin, TimestampMixin, Base):
     voided_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"))
     voided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     void_reason: Mapped[str | None] = mapped_column(Text)
-    # Where the expense was paid from. R5-2 has only SETTLEMENT (out of a driver's collections); R5-3 adds
-    # the direct expense from a cash box or the bank.
+    # Where the expense was paid from: SETTLEMENT (out of a driver's collections) or DIRECT (R5-3).
     origin: Mapped[str] = mapped_column(String(20), server_default="SETTLEMENT")
+    # DIRECT only: the one account it was paid from (a cash box or the bank), its business date, its
+    # DIRECT_EXPENSE operation and, once reversed, the reversal of that operation.
+    paid_from_account_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey(f"{SCHEMA}.accounts.id", ondelete="RESTRICT"), index=True
+    )
+    business_date: Mapped[date | None] = mapped_column(Date, index=True)
+    operation_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("settlements.financial_operations.id", ondelete="RESTRICT"), unique=True
+    )
+    reversal_operation_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("settlements.financial_operations.id", ondelete="RESTRICT"), unique=True
+    )
     # True only for a FUEL expense that existed before migration 0015 and so has no fuel load. Only that
     # migration sets it; the database refuses it on a new row and refuses false -> true (Enzo, R5-2). It
     # goes back to false when the expense gets its load.

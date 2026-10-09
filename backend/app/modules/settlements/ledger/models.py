@@ -88,6 +88,8 @@ OPERATION_TYPES = (
     "CHEQUE_CREDIT",
     "CHEQUE_REJECTION",
     "CHEQUE_RETURN",
+    # R5-3: an expense paid directly from a cash box or the bank; its document is the expense.
+    "DIRECT_EXPENSE",
 )
 CHEQUE_DOCUMENT_TYPES = ("CHEQUE_DEPOSIT", "CHEQUE_CREDIT", "CHEQUE_REJECTION", "CHEQUE_RETURN")
 # Operations whose description is the mandatory reason.
@@ -178,6 +180,14 @@ class FinancialOperation(IdMixin, Base):
             "source_id",
             unique=True,
             postgresql_where=text(f"type IN ({_in(CHEQUE_DOCUMENT_TYPES)})"),
+        ),
+        # A direct expense has exactly one operation (R5-3).
+        Index(
+            "uq_financial_operations_direct_expense",
+            "source_type",
+            "source_id",
+            unique=True,
+            postgresql_where=text("type = 'DIRECT_EXPENSE'"),
         ),
         {"schema": SCHEMA},
     )
