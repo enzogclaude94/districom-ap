@@ -10,6 +10,7 @@ from app.platform.banks import models as banks_models
 from app.platform.parties import models as parties_models
 from app.platform.settings import models as settings_models
 from app.platform.sources import models as sources_models
+from app.platform.vehicles import models as vehicles_models
 
 __all__ = [
     "audit_models",
@@ -22,4 +23,5 @@ __all__ = [
     "settlements_ledger_models",
     "settlements_pending_models",
     "sources_models",
+    "vehicles_models",
 ]

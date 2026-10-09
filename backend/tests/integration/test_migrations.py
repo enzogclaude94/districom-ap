@@ -14,6 +14,7 @@ EXPECTED_TABLES = {
     "employee_functions",
     "user_module_roles",
     "financial_institutions",
+    "vehicles",
 }
 
 
@@ -201,3 +202,18 @@ def test_account_name_key_backfill() -> None:
         with engine.begin() as conn:
             conn.execute(text("DELETE FROM settlements.accounts WHERE kind = 'OWNER_EQUITY'"))
         engine.dispose()
+
+
+def test_platform_vehicles_migration_goes_down_and_up() -> None:
+    """R5-1 [22]: 0014 only adds `public.vehicles` (and its guards); going back to 0013 removes exactly that."""
+    cfg = alembic_config()
+    url = cfg.get_main_option("sqlalchemy.url")
+    assert url
+
+    command.upgrade(cfg, "head")
+    assert "vehicles" in _tables(url)
+    command.downgrade(cfg, "0013")
+    assert "vehicles" not in _tables(url)
+    assert _tables(url) >= EXPECTED_TABLES - {"vehicles"}
+    command.upgrade(cfg, "head")
+    assert "vehicles" in _tables(url)
