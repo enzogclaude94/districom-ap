@@ -8,6 +8,11 @@ import argparse
 import getpass
 import logging
 import sys
+from collections.abc import Generator, Iterator
+from contextlib import contextmanager
+from typing import cast
+
+from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.logging import configure_logging
@@ -19,15 +24,26 @@ from app.platform.auth.service import create_user
 logger = logging.getLogger("app.cli")
 
 
+@contextmanager
+def _session() -> Iterator[Session]:
+    """A session closed when the command ends, also on an error: a session left to the garbage collector
+    keeps its transaction (and its locks) open."""
+    sessions = cast(Generator[Session], get_db())  # get_db is a generator function
+    try:
+        yield next(sessions)
+    finally:
+        sessions.close()
+
+
 def _create_user(args: argparse.Namespace) -> int:
     password = getpass.getpass("Contraseña: ") if sys.stdin.isatty() else sys.stdin.readline().rstrip("\n")
-    db = next(get_db())
-    try:
-        user = create_user(db, args.email, args.name, password, args.role)
-    except ValueError as exc:
-        logger.error("create_user_failed", extra={"reason": str(exc)})
-        return 1
-    logger.info("user_created", extra={"user_id": user.id, "role": user.role})
+    with _session() as db:
+        try:
+            user = create_user(db, args.email, args.name, password, args.role)
+        except ValueError as exc:
+            logger.error("create_user_failed", extra={"reason": str(exc)})
+            return 1
+        logger.info("user_created", extra={"user_id": user.id, "role": user.role})
     return 0
 
 
@@ -39,23 +55,25 @@ def _installed_module_keys() -> list[str]:
 
 
 def _grant(args: argparse.Namespace) -> int:
-    db = next(get_db())
-    try:
-        grant = grant_module_role(db, args.email, args.module, args.role)
-    except ModuleRoleError as exc:
-        logger.error("grant_module_role_failed", extra={"reason": str(exc)})
-        return 1
-    logger.info("module_role_granted", extra={"user_id": grant.user_id, "module_key": args.module, "role": grant.role})
+    with _session() as db:
+        try:
+            grant = grant_module_role(db, args.email, args.module, args.role)
+        except ModuleRoleError as exc:
+            logger.error("grant_module_role_failed", extra={"reason": str(exc)})
+            return 1
+        logger.info(
+            "module_role_granted", extra={"user_id": grant.user_id, "module_key": args.module, "role": grant.role}
+        )
     return 0
 
 
 def _revoke(args: argparse.Namespace) -> int:
-    db = next(get_db())
-    try:
-        revoked = revoke_module_role(db, args.email, args.module)
-    except ModuleRoleError as exc:
-        logger.error("revoke_module_role_failed", extra={"reason": str(exc)})
-        return 1
+    with _session() as db:
+        try:
+            revoked = revoke_module_role(db, args.email, args.module)
+        except ModuleRoleError as exc:
+            logger.error("revoke_module_role_failed", extra={"reason": str(exc)})
+            return 1
     logger.info("module_role_revoked" if revoked else "module_role_absent", extra={"module_key": args.module})
     return 0
 
