@@ -57,6 +57,7 @@ SETTLEMENTS_TABLES = {
     "cheque_rejections",
     "cheque_returns",
     "fuel_loads",
+    "settlement_closing_fuel_loads",
 }
 
 

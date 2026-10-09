@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, History, Plus, Truck } from "lucide-react";
+import Link from "next/link";
 import { useId, useState, type FormEvent } from "react";
 
 import { EmptyState } from "@/components/common/empty-state";
@@ -16,9 +17,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { authApi, currentUserQueryKey } from "@/lib/api/auth";
 import { ApiError } from "@/lib/api/client";
-import { vehiclesApi, vehiclesQueryKey, type Vehicle, type VehicleEvent } from "@/lib/api/vehicles";
+import { vehiclesApi, vehiclesQueryKey, type Vehicle } from "@/lib/api/vehicles";
 import { cn } from "@/lib/cn";
-import { formatDateTime } from "@/lib/format";
+
+import { vehicleHref } from "./vehicle-detail";
+import { VehicleHistory } from "./vehicle-history";
 
 const STATUS_FILTERS = [
   { value: "active", label: "Activos" },
@@ -136,28 +139,6 @@ function VehicleDialog({
   );
 }
 
-const EVENT_LABELS: Record<string, string> = {
-  created: "Alta",
-  plate_changed: "Patente corregida",
-  description_changed: "Descripción corregida",
-  activated: "Activado",
-  deactivated: "Desactivado",
-};
-
-function change(event: VehicleEvent): string {
-  const field = (side: Record<string, unknown> | null, key: string) => String(side?.[key] ?? "—");
-  switch (event.event_type) {
-    case "created":
-      return `${field(event.after, "plate")} · ${field(event.after, "description")}`;
-    case "plate_changed":
-      return `${field(event.before, "plate")} → ${field(event.after, "plate")}`;
-    case "description_changed":
-      return `«${field(event.before, "description")}» → «${field(event.after, "description")}»`;
-    default:
-      return "";
-  }
-}
-
 function HistoryDialog({ vehicle, onClose }: { vehicle: Vehicle; onClose: () => void }) {
   const detail = useQuery({ queryKey: [...vehiclesQueryKey, vehicle.id], queryFn: () => vehiclesApi.get(vehicle.id) });
   return (
@@ -167,17 +148,7 @@ function HistoryDialog({ vehicle, onClose }: { vehicle: Vehicle; onClose: () => 
       ) : detail.isError ? (
         <ErrorState error={detail.error} onRetry={() => void detail.refetch()} />
       ) : (
-        <ol className="space-y-3 text-sm">
-          {detail.data.history.map((event) => (
-            <li key={event.id} className="border-l-2 border-border pl-3">
-              <p className="font-medium">{EVENT_LABELS[event.event_type] ?? event.event_type}</p>
-              {change(event) && <p className="break-words">{change(event)}</p>}
-              <p className="text-xs text-muted-foreground">
-                {formatDateTime(event.occurred_at)} · {event.user_name ?? "Sistema"}
-              </p>
-            </li>
-          ))}
-        </ol>
+        <VehicleHistory history={detail.data.history} />
       )}
     </Dialog>
   );
@@ -293,6 +264,13 @@ export function VehicleList() {
                       {vehicle.active ? <Badge tone="success">Activo</Badge> : <Badge>Desactivado</Badge>}
                     </TableCell>
                     <TableCell className="text-right whitespace-nowrap">
+                      <Link
+                        href={vehicleHref(vehicle.id)}
+                        className="px-2 text-sm text-primary hover:underline"
+                        aria-label={`Ficha de ${vehicle.plate_display}`}
+                      >
+                        Ficha
+                      </Link>
                       <Button
                         variant="ghost"
                         size="sm"

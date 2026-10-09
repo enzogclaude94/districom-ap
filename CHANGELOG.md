@@ -4,6 +4,12 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Added — Historial consolidado de combustible (R5‑4)
+- **Migración `0017`** (`settlements: fuel loads published by each close`): `settlement_closing_fuel_loads`, la foto append-only de las cargas que publica cada cierre, verificada al commit contra las cargas de la rendición; backfill de los cierres vigentes de rendiciones cerradas, con una barrera fail safe: si hay una rendición en corrección con combustible del cierre vigente, la migración aborta sin cambiar nada («Finalice el nuevo cierre antes de actualizar»). Así una rendición reabierta conserva su combustible vigente hasta el nuevo cierre. No es una tabla agregada ni una segunda contabilidad.
+- **API** `GET /api/v1/settlements/fuel-loads` (una fila por carga real de rendición o gasto directo, con estado En rendición abierta / Publicado / En corrección / Anulado / Revertido; filtros por vehículo, empleado, fechas de negocio, origen y estado; paginado; resumen de litros, gasto y precio promedio ponderado del combustible vigente) y `GET /fuel-loads/employees`.
+- **Pantallas:** «Combustible» (`/rendiciones/combustible`) habilitado en el menú: resumen arriba, filtros, tabla en escritorio y tarjetas en el teléfono, origen enlazado a la rendición o al gasto directo, nota de lo que propone una corrección, dos vacíos distintos. Ficha del vehículo (`/vehiculos/{id}`) con «Cambios del maestro» y, para usuarios de Rendiciones, «Cargas de combustible» y «Ver historial completo de combustible». Sin km/l, consumo ni exportación.
+- **Tests:** 23 de API (los pedidos por Enzo), 5 de invariantes, 6 de migración (incluida la barrera), 13 de frontend, E2E de 20 pasos en escritorio y móvil.
+
 ### Added — Gastos directos desde Caja/Banco (R5‑3)
 - **R5‑3 DONE:** aprobada por Enzo el 2026-10-09 con sus desvíos documentados; PR #25 mergeado; `0016` congelada. R5‑4 autorizada.
 - **Migración `0016`** (`settlements: direct expenses from a cash box or the bank`): `expenses.origin` suma `DIRECT`; `settlement_id` pasa a nulo; `paid_from_account_id`, `business_date`, `operation_id` y `reversal_operation_id`, con CHECK por origen. Los gastos existentes quedan `SETTLEMENT` sin ningún otro cambio. Operación nueva `DIRECT_EXPENSE` (cuenta pagadora −X, Gastos operativos +X), operación de documento: Cajas no la revierte.

@@ -207,7 +207,7 @@ Modelo conceptual en `DATA_MODEL.md §13`; decisiones en ADR 007. Cada fase crea
 | R5‑1 | Vehículos de plataforma (`0014`, plataforma): API, pantalla, auditoría | **DONE** (PR #21, aprobada por Enzo el 2026-10-09; `0014` congelada; pantalla `/vehiculos` como entrada propia del bloque de plataforma) |
 | R5‑2 | `expense_categories.code`, `FUEL`, `legacy_fuel_without_detail` y `fuel_loads` en la rendición (`0015`) | **DONE** (PR #23, aprobada por Enzo el 2026-10-09 con sus desvíos documentados; `0015` congelada) |
 | R5‑3 | Gasto directo desde Caja/Banco (`DIRECT_EXPENSE`, `0016`) | **DONE** (PR #25, aprobada por Enzo el 2026-10-09 con sus desvíos documentados; `0016` congelada) |
-| R5‑4 | Historial consolidado de combustible (`/rendiciones/combustible`, ficha del vehículo) y E2E | IN_PROGRESS (autorizada el 2026-10-09; sin km/l) |
+| R5‑4 | Historial consolidado de combustible (`/rendiciones/combustible`, ficha del vehículo) y E2E | EN REVISIÓN (`0017`: foto del combustible por cierre; sin km/l) |
 
 ### R6 — Pagos a proveedores y terceros
 **Alcance:** terceros; pagos realizados con uno o varios medios (efectivo de una caja, transferencia, cheques de cartera), cuya suma es el total.

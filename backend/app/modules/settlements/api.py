@@ -15,6 +15,7 @@ from app.modules.settlements.cash.router import router as cash_router
 from app.modules.settlements.cheques.router import router as cheques_router
 from app.modules.settlements.delivery.router import router as delivery_router
 from app.modules.settlements.expenses.router import router as expenses_router
+from app.modules.settlements.fuel_history.router import router as fuel_history_router
 from app.modules.settlements.pending.router import router as pending_router
 from app.platform.auth.access import module_role, require_module_access
 from app.platform.auth.models import User
@@ -42,3 +43,4 @@ router.include_router(delivery_router)
 router.include_router(pending_router)
 router.include_router(cheques_router)
 router.include_router(expenses_router)
+router.include_router(fuel_history_router)

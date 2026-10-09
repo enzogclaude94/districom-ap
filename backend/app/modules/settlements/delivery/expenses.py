@@ -16,7 +16,14 @@ from sqlalchemy.orm import Session
 from app.core.errors import AppError
 from app.modules.settlements.delivery import fuel, idempotency, service
 from app.modules.settlements.delivery import schemas as s
-from app.modules.settlements.delivery.models import FUEL, Expense, ExpenseCategory, FuelLoad
+from app.modules.settlements.delivery.models import (
+    FUEL,
+    Expense,
+    ExpenseCategory,
+    FuelLoad,
+    Settlement,
+    SettlementClosingFuelLoad,
+)
 from app.platform.audit.service import record_change
 from app.platform.auth.models import User
 
@@ -301,6 +308,32 @@ def _apply_fuel(
 
 def load_of(db: Session, expense_id: int) -> FuelLoad | None:
     return db.scalars(select(FuelLoad).where(FuelLoad.expense_id == expense_id)).one_or_none()
+
+
+def publish_fuel(db: Session, settlement: Settlement, close_operation_id: int) -> None:
+    """Freeze what the new close publishes per fuel load (R5-4): the loads of the expenses in effect, with
+    their liters, price, amount, vehicle and employee. Until the next close this is the fuel in effect."""
+    rows = db.execute(
+        select(FuelLoad, Expense.amount)
+        .join(Expense, Expense.id == FuelLoad.expense_id)
+        .where(Expense.settlement_id == settlement.id, Expense.voided_at.is_(None))
+        .order_by(FuelLoad.id)
+    ).all()
+    db.add_all(
+        SettlementClosingFuelLoad(
+            close_operation_id=close_operation_id,
+            settlement_id=settlement.id,
+            settlement_version=settlement.version,
+            fuel_load_id=load.id,
+            expense_id=load.expense_id,
+            vehicle_id=load.vehicle_id,
+            employee_id=load.employee_id,
+            liters=load.liters,
+            price_per_liter=load.price_per_liter,
+            amount=amount,
+        )
+        for load, amount in rows
+    )
 
 
 def loads_of(db: Session, expense_ids: list[int]) -> dict[int, FuelLoad]:

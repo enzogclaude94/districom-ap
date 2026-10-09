@@ -24,6 +24,14 @@ cd frontend && pnpm test
 cd frontend && pnpm e2e
 ```
 
+## R5‑4 (Rendiciones: historial consolidado de combustible)
+Los números entre corchetes en los docstrings son los 23 tests de API pedidos por Enzo.
+- `test_fuel_history_api.py`: rendición abierta listada y fuera del resumen; cerrada y directo vigente suman; anulada y directo revertido no suman; filtros por vehículo (también inactivo), empleado (también inactivo), fechas de negocio, origen y estado; paginación y orden; totales y precio promedio ponderado (1.250,500 l por $1.875.000 = $1.499,40); cero litros sin división; legacy sin carga sin fila; rendición reabierta con el resumen del cierre vigente, corrección (cambio, anulación, carga nueva, cambio de vehículo) sin efecto hasta el nuevo cierre; permisos.
+- `test_fuel_history_db_invariants.py` (SQL directo): el cierre congela sus cargas vigentes; un nuevo cierre agrega su foto y conserva la anterior; sin UPDATE ni DELETE; carga y cierre de esa rendición; al commit, exactamente sus cargas.
+- `test_fuel_history_migration.py` (baja a `0016` y sube): rendición cerrada con combustible y varias cerradas (una cerrada dos veces) con su foto igual al cierre efectivo; abierta nunca cerrada y en corrección sin combustible del cierre, sin foto; en corrección con combustible (editado o anulado) la migración falla con el mensaje para el operador, sigue en `0016` y sin la tabla; cerrada la corrección, sube y la foto es la del nuevo cierre; bajar y subir sigue verde.
+- `frontend/tests/fuel-history.test.tsx`: tabla, resumen y promedio del backend, «—» sin litros, estados, enlaces por origen, nota de corrección, vehículo y empleado inactivos, filtros enviados al backend, filtro inicial por vehículo, paginación, vacío inicial y vacío por filtros, tarjetas móviles; ficha del vehículo con «Cambios del maestro» separado y oculta sin Rendiciones. `frontend/tests/settlements.test.tsx`: «Combustible» habilitado en el menú.
+- `frontend/e2e/fuel-history.spec.ts`: los 20 pasos del pedido (rendición abierta → cierre → directo → reverso → reapertura → corrección → nuevo cierre → filtro → ficha), en escritorio y en el teléfono sin scroll horizontal.
+
 ## R5‑3 (Rendiciones: gastos directos desde Caja/Banco)
 - `test_direct_expenses_api.py`: gasto normal y de combustible desde Caja y desde Banco con sus patas exactas; cuenta técnica, de empleado, de socio, inactiva o de gastos rechazada; categoría inactiva; fecha futura; fecha pasada válida y sin fondos desde esa fecha; Banco en descubierto que no se profundiza; atomicidad; reverso (fecha original, segundo reverso, reintento idempotente, gasto nuevo después); corrección descriptiva y campos financieros rechazados; idempotencia; permisos; listado y detalle.
 - `test_direct_expenses_db_invariants.py` (SQL directo): las invariantes 1–20 del pedido de Enzo.
