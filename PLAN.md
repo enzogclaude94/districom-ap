@@ -349,11 +349,13 @@ Propuesta `PROPUESTA_R4_CARTERA_DE_CHEQUES.md` aprobada con ajustes por Enzo el 
 
 R4 aprobada por Enzo el 2026-10-09; las deudas conocidas del informe final no bloquean el cierre. R5 (combustible, vehículos y gastos directos): propuesta aprobada por Enzo el 2026-10-09 con sus decisiones 1–4 (`ROADMAP.md`); autorizó R5‑1 y, al aprobarla (2026-10-09), R5‑2; al aprobar R5‑2 (2026-10-09), R5‑3; al aprobar R5‑3 (2026-10-09), R5‑4.
 
-## 18. Rendiciones — R5 (combustible, vehículos y gastos directos) · IN_PROGRESS
+## 18. Rendiciones — R5 (combustible, vehículos y gastos directos) · DONE
 
 | PR | Contenido | Estado |
 |---|---|---|
 | R5‑1 | Vehículos de plataforma: `public.vehicles` (`0014`), API, pantalla «Vehículos», auditoría | **DONE** (PR #21; `0014` congelada) |
 | R5‑2 | Categoría `FUEL` y `fuel_loads` en la rendición (`0015`) | **DONE** (PR #23; `0015` congelada) |
 | R5‑3 | Gasto directo desde Caja/Banco (`0016`) | **DONE** (PR #25; `0016` congelada) |
-| R5‑4 | Historial consolidado de combustible y E2E (`0017`) | EN REVISIÓN |
+| R5‑4 | Historial consolidado de combustible y E2E (`0017`) | **DONE** (PR #27; `0017` congelada) |
+
+R5 aprobada por Enzo el 2026-10-09 (R5‑4 con la barrera fail safe de `0017`). R6 (pagos y terceros): propuesta aprobada con precisiones el 2026-10-09 (`ROADMAP.md`); R6‑1 (terceros + pagos con efectivo y transferencia) IN_PROGRESS; R6‑2 requiere su aprobación.
