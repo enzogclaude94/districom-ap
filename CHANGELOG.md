@@ -4,6 +4,13 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Added — Combustible en rendición (R5‑2)
+- **Migración `0015`** (`settlements: fuel loads, FUEL category and legacy flag`): `expense_categories.code` (único, inmutable, ningún endpoint lo asigna); la categoría `FUEL` reutiliza «Combustible» si existía (mismo id, nombre, estado e historia) o se crea; `expenses.origin` (`SETTLEMENT`); `expenses.legacy_fuel_without_detail`, que la migración pone en true solo en los gastos de combustible ya existentes; tabla `settlements.fuel_loads` 1:1 con el gasto (vehículo, quién cargó, litros, precio por litro, odómetro opcional).
+- **Importe calculado:** litros × precio por litro, redondeado al centavo (HALF_UP), guardado solo en `expenses.amount`. Un gasto de combustible no acepta importe manual (`fuel_amount_is_computed`) y exige su detalle (`fuel_detail_required`); otra categoría no acepta detalle (`fuel_detail_not_allowed`); cambiar entre combustible y otra categoría da `fuel_category_change`.
+- **Base de datos:** triggers que exigen carga en todo gasto FUEL vigente salvo legacy, importe exacto, rendición abierta, vehículo y empleado activos al cargarlos o cambiarlos, sin DELETE, código inmutable y legacy solo true→false (un INSERT con true o un UPDATE false→true fallan).
+- **Cierre:** sin operación nueva; el token de la vista previa incluye cada carga, así que corregir litros, precio, vehículo, empleado u odómetro después de la vista previa da `settlement_preview_stale`. Reabrir no toca el ledger y la carga vuelve a ser editable.
+- **Pantalla:** al elegir «Combustible» el gasto pide vehículo (solo activos), quién cargó (el repartidor por defecto), litros, precio y odómetro, y muestra el total estimado; el importe oficial lo calcula el sistema. «Corregir carga» y «Cargar detalle» (gastos históricos sin detalle, marcados «Sin detalle (histórico)»). En Configuración, la categoría muestra la etiqueta «Combustible».
+
 ### Added — Vehículos de plataforma (R5‑1)
 - **R5‑1 DONE:** aprobada por Enzo el 2026-10-09; PR #21 mergeado; `0014` congelada. R5‑2 autorizada.
 - **R5 aprobada:** propuesta de combustible, vehículos y gastos directos aprobada por Enzo el 2026-10-09 con sus decisiones 1–4; solo R5‑1 autorizada.

@@ -42,7 +42,7 @@ DistriCom es una plataforma modular (ADR 006). Este roadmap tiene tres carriles:
 | R2 | Rendición de reparto básica | **DONE** (aprobada por Enzo el 2026-10-05; PRs #10–#12 mergeados) | R1 |
 | R3 | Pendientes de cobro | **DONE** (2026-10-07; R3‑1, R3‑2 y R3‑3 aprobados y mergeados, PRs #13, #14 y #16) | R2 |
 | R4 | Cartera de cheques | **DONE** (aprobada por Enzo el 2026-10-09; PRs #17, #18 y #19) | R2 · R3 |
-| R5 | Combustible y vehículos | IN_PROGRESS (R5‑1 DONE; R5‑2 en curso) | R2 |
+| R5 | Combustible y vehículos | IN_PROGRESS (R5‑1 DONE; R5‑2 en revisión) | R2 |
 | R6 | Pagos a proveedores y terceros | PLANNED | R1 · R4 |
 | R7 | Boca de expendio | PLANNED | R2–R5 |
 | R8 | Cuenta interna de empleados y liquidación semanal | PLANNED | R1 · R2 |
@@ -205,7 +205,7 @@ Modelo conceptual en `DATA_MODEL.md §13`; decisiones en ADR 007. Cada fase crea
 | PR | Contenido | Estado |
 |---|---|---|
 | R5‑1 | Vehículos de plataforma (`0014`, plataforma): API, pantalla, auditoría | **DONE** (PR #21, aprobada por Enzo el 2026-10-09; `0014` congelada; pantalla `/vehiculos` como entrada propia del bloque de plataforma) |
-| R5‑2 | `expense_categories.code`, `FUEL`, `legacy_fuel_without_detail` y `fuel_loads` en la rendición (`0015`) | IN_PROGRESS (autorizada el 2026-10-09) |
+| R5‑2 | `expense_categories.code`, `FUEL`, `legacy_fuel_without_detail` y `fuel_loads` en la rendición (`0015`) | En revisión (autorizada el 2026-10-09; migración `0015`) |
 | R5‑3 | Gasto directo desde Caja/Banco (`DIRECT_EXPENSE`) | No autorizada |
 | R5‑4 | Historial de combustible y E2E | No autorizada |
 

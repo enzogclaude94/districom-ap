@@ -354,6 +354,6 @@ R4 aprobada por Enzo el 2026-10-09; las deudas conocidas del informe final no bl
 | PR | Contenido | Estado |
 |---|---|---|
 | R5‑1 | Vehículos de plataforma: `public.vehicles` (`0014`), API, pantalla «Vehículos», auditoría | **DONE** (PR #21; `0014` congelada) |
-| R5‑2 | Categoría `FUEL` y `fuel_loads` en la rendición (`0015`) | IN_PROGRESS |
+| R5‑2 | Categoría `FUEL` y `fuel_loads` en la rendición (`0015`) | En revisión |
 | R5‑3 | Gasto directo desde Caja/Banco (`0016`) | No autorizada |
 | R5‑4 | Historial de combustible y E2E | No autorizada |
