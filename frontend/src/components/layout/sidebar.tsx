@@ -1,7 +1,7 @@
 "use client";
 
 import type { LucideIcon } from "lucide-react";
-import { IdCard, Settings, Truck } from "lucide-react";
+import { Handshake, IdCard, Settings, Truck } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -11,6 +11,7 @@ import { cn } from "@/lib/cn";
 
 /** Platform pages, shown under every module's navigation. */
 const PLATFORM_NAV: NavSection[] = [
+  { label: "Terceros", icon: Handshake, href: "/terceros" },
   { label: "Vehículos", icon: Truck, href: "/vehiculos" },
   { label: "Configuración", icon: Settings, href: "/configuracion" },
 ];
