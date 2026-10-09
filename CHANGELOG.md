@@ -5,6 +5,7 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 ## [Unreleased]
 
 ### Added — Gastos directos desde Caja/Banco (R5‑3)
+- **R5‑3 DONE:** aprobada por Enzo el 2026-10-09 con sus desvíos documentados; PR #25 mergeado; `0016` congelada. R5‑4 autorizada.
 - **Migración `0016`** (`settlements: direct expenses from a cash box or the bank`): `expenses.origin` suma `DIRECT`; `settlement_id` pasa a nulo; `paid_from_account_id`, `business_date`, `operation_id` y `reversal_operation_id`, con CHECK por origen. Los gastos existentes quedan `SETTLEMENT` sin ningún otro cambio. Operación nueva `DIRECT_EXPENSE` (cuenta pagadora −X, Gastos operativos +X), operación de documento: Cajas no la revierte.
 - **Reglas:** cuenta pagadora solo Caja o Banco activos (`invalid_payment_account`); fecha de hoy o pasada, nunca futura, con fondos validados desde esa fecha; el Banco no tiene la excepción de los rechazos de cheque, así que un gasto nunca crea ni profundiza un descubierto; categoría activa; combustible sin importe manual, con vehículo activo y empleado elegido explícitamente (`fuel_employee_required`), importe calculado con el mismo `delivery/fuel.py`.
 - **Inmutable:** importe, categoría, cuenta, fecha, vehículo, empleado, litros, precio, origen y operación. Se corrige con «Revertir gasto» (admin, motivo, fecha original) y un gasto nuevo. La corrección descriptiva (admin, motivo) cambia solo la descripción y el odómetro, auditada, sin ledger.
