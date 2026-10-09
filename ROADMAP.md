@@ -41,7 +41,7 @@ DistriCom es una plataforma modular (ADR 006). Este roadmap tiene tres carriles:
 | R1 | Ledger y cajas | **DONE** (aprobada por Enzo el 2026-10-04; PRs #7–#9 mergeados) | R0 |
 | R2 | Rendición de reparto básica | **DONE** (aprobada por Enzo el 2026-10-05; PRs #10–#12 mergeados) | R1 |
 | R3 | Pendientes de cobro | **DONE** (2026-10-07; R3‑1, R3‑2 y R3‑3 aprobados y mergeados, PRs #13, #14 y #16) | R2 |
-| R4 | Cartera de cheques | IN_REVIEW (R4‑1 y R4‑2 DONE, PRs #17 y #18; R4‑3 en revisión de Enzo) | R2 · R3 |
+| R4 | Cartera de cheques | **DONE** (aprobada por Enzo el 2026-10-09; PRs #17, #18 y #19) | R2 · R3 |
 | R5 | Combustible y vehículos | PLANNED | R2 |
 | R6 | Pagos a proveedores y terceros | PLANNED | R1 · R4 |
 | R7 | Boca de expendio | PLANNED | R2–R5 |
@@ -189,10 +189,17 @@ Modelo conceptual en `DATA_MODEL.md §13`; decisiones en ADR 007. Cada fase crea
 |---|---|---|
 | R4‑1 | Catálogo de bancos (`0011`), cheques físicos y ECHEQ, identidad y duplicados, fechas por tipo, eventos, estados derivados, verificación, Cartera y Cheques depositados, `ledger_entries.cheque_id`, cheques en la rendición y en su cierre (`0012`), snapshot y token, saldo inicial y aporte de socio, API y tests | **DONE** (aprobada por Enzo el 2026-10-07 con catálogo BCRA oficial y plazos como reglas del instrumento; PR #17 mergeado; `0011`/`0012` congeladas) |
 | R4‑2 | Depósito, acreditación, rechazo (con la excepción de Banco en descubierto), devolución, nuevo pendiente por rechazo o devolución, cobrar un pendiente con cheque (`0013`) | **DONE** (aprobada por Enzo el 2026-10-08 tras verificar la regla de descubierto en la base; PR #18 mergeado; `0013` congelada) |
-| R4‑3 | Pantallas: cartera global con filtros, Valores en Cajas, detalle e historia, cheques en la rendición, depósito, acreditación, rechazo, Banco en descubierto, devolución, cobro con cheque, reversos, vencimientos y E2E | En revisión (autorizado por Enzo el 2026-10-08; sin migraciones) |
+| R4‑3 | Pantallas: cartera global con filtros, Valores en Cajas, detalle e historia, cheques en la rendición, depósito, acreditación, rechazo, Banco en descubierto, devolución, cobro con cheque, reversos, vencimientos y E2E | **DONE** (PR #19, aprobada por Enzo el 2026-10-09; sin migraciones) |
 
 ### R5 — Combustible y vehículos
 **Alcance:** vehículos; carga de combustible como detalle de un gasto (camión, empleado, litros, precio por litro), desde rendición o desde caja; historial de combustible.
+
+**Decisiones iniciales (Enzo, 2026-10-09), antes de la propuesta:**
+- R5‑D1: gasto desde Caja/Banco **general** (Caja o Banco −X, Gastos +X), no solo combustible. Combustible es una categoría con detalle especializado. Un solo concepto de gasto, originado en una rendición o directo desde Caja/Banco; sin segunda tabla de categorías ni cuenta paralela.
+- R5‑D2: odómetro opcional, ≥ 0, conservado; sin bloquear lecturas menores a una anterior (más adelante, alertas).
+- R5‑D3: se cargan litros y precio por litro; el backend calcula `importe = litros × precio`, redondeado a centavos. No hay total manual.
+- R5‑D4: vehículos como maestro de plataforma (`public.vehicles`), patente normalizada y única; inactivo no se elige para cargas nuevas pero su historia sigue visible; nunca se borran.
+- Estado: propuesta `PROPUESTA_R5_COMBUSTIBLE_VEHICULOS_Y_GASTOS_DIRECTOS.md` entregada el 2026-10-09 (cuatro PR: R5‑1 vehículos, R5‑2 combustible en rendición, R5‑3 gasto directo, R5‑4 historial y E2E); no implementar hasta su aprobación.
 
 ### R6 — Pagos a proveedores y terceros
 **Alcance:** terceros; pagos realizados con uno o varios medios (efectivo de una caja, transferencia, cheques de cartera), cuya suma es el total.

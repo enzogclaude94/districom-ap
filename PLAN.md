@@ -337,7 +337,7 @@ Propuesta `PROPUESTA_R3_PENDIENTES_DE_COBRO.md` aprobada por Enzo el 2026-10-05,
 
 **R3 DONE** (2026-10-07).
 
-## 17. Rendiciones — R4 (cartera de cheques)
+## 17. Rendiciones — R4 (cartera de cheques) · DONE
 
 Propuesta `PROPUESTA_R4_CARTERA_DE_CHEQUES.md` aprobada con ajustes por Enzo el 2026-10-07 (decisiones D‑A…D‑K, en `ROADMAP.md`); autorizó R4‑1, R4‑2 y, al aprobar R4‑2 (2026-10-08), R4‑3. Cada PR espera su aprobación antes del siguiente.
 
@@ -345,4 +345,6 @@ Propuesta `PROPUESTA_R4_CARTERA_DE_CHEQUES.md` aprobada con ajustes por Enzo el 
 |---|---|---|
 | R4‑1 | Modelo, cartera y cheques en rendición: catálogo de bancos (`0011`, plataforma) y cheques (`0012`, settlements) | **DONE** (PR #17; `0011`/`0012` congeladas) |
 | R4‑2 | Depósito, acreditación, rechazo, devolución, pendientes por rechazo o devolución y cobro con cheque (`0013`) | **DONE** (PR #18; `0013` congelada) |
-| R4‑3 | Pantallas de cartera de cheques y E2E (sin migraciones) | En revisión de Enzo; R5 no empieza sin su aprobación |
+| R4‑3 | Pantallas de cartera de cheques y E2E (sin migraciones) | **DONE** (PR #19) |
+
+R4 aprobada por Enzo el 2026-10-09; las deudas conocidas del informe final no bloquean el cierre. R5 (combustible, vehículos y gastos directos): decisiones iniciales R5‑D1…D4 en `ROADMAP.md`; propuesta en revisión, sin implementación hasta su aprobación.

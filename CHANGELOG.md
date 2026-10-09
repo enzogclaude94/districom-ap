@@ -5,6 +5,7 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 ## [Unreleased]
 
 ### Added — Pantallas de la cartera de cheques (R4‑3)
+- **R4 DONE:** aprobada por Enzo el 2026-10-09; PR #19 mergeado.
 - **R4‑2 DONE:** aprobada por Enzo el 2026-10-08 tras verificar la regla de Banco en descubierto; PR #18 mergeado; `0013` congelada. R4‑3 no agrega migraciones.
 - **`/rendiciones/cheques`:** cartera global con tipo, tipo de pago, banco, número, importe, librador, quién lo entregó, origen, emisión, pagadero desde, presentar hasta, estado y ubicación. Filtros por estado, tipo, banco, origen, pagadero, vencidos y vencen pronto; el estado derivado y la paginación los resuelve el backend (`GET /cheques` con `state`, `issuer_bank_id`, `payable`, `expired`, `expiring_soon`). En el teléfono, una tarjeta por cheque.
 - **Vencen pronto:** setting `settlements.cheque_expiring_soon_days` (default 7). `ChequeOut` suma `expires_in_days`, `expiring_soon`, `location_label` y el depósito y la acreditación vigentes. Un cheque vencido muestra «Vencido» y no se puede seleccionar para depositar; uno no pagadero dice «Disponible para depósito desde…». No hay renovación.
