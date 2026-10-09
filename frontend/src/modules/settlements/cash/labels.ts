@@ -17,10 +17,11 @@ export const OPERATION_LABELS: Record<OperationType, string> = {
   CHEQUE_CREDIT: "Acreditación de cheques",
   CHEQUE_REJECTION: "Cheque rechazado",
   CHEQUE_RETURN: "Devolución de cheque",
+  DIRECT_EXPENSE: "Gasto directo",
   REVERSAL: "Reverso",
 };
 
-/** Operations that belong to a document (a settlement, a pending collection): corrected from it, never here. */
+/** Operations that belong to a document (a settlement, a pending, a cheque, an expense): corrected from it, never here. */
 export const DOCUMENT_OPERATION_TYPES: readonly OperationType[] = [
   "SETTLEMENT_CLOSE",
   "PENDING_COLLECTION",
@@ -31,6 +32,7 @@ export const DOCUMENT_OPERATION_TYPES: readonly OperationType[] = [
   "CHEQUE_CREDIT",
   "CHEQUE_REJECTION",
   "CHEQUE_RETURN",
+  "DIRECT_EXPENSE",
 ];
 
 export const ACCOUNT_KIND_LABELS: Record<AccountKind, string> = {
@@ -60,6 +62,7 @@ const SOURCE_LABELS: Record<string, string> = {
   cheque_credit: "Acreditación de cheques",
   cheque_rejection: "Rechazo de cheque",
   cheque_return: "Devolución de cheque",
+  expense: "Gasto directo",
 };
 
 /** Where an operation came from: entered by hand on this screen, or a document such as a settlement. */
@@ -78,6 +81,7 @@ const DOCUMENT_SCREENS: Record<string, string> = {
   cheque_credit: "/rendiciones/cheques/documentos/cheque-credits",
   cheque_rejection: "/rendiciones/cheques/documentos/cheque-rejections",
   cheque_return: "/rendiciones/cheques/documentos/cheque-returns",
+  expense: "/rendiciones/cajas/gastos",
 };
 
 export function sourceHref(sourceType: string | null, sourceId: number | null): string | null {

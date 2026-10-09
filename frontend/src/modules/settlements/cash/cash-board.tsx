@@ -1,7 +1,16 @@
 "use client";
 
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { AlertTriangle, ArrowLeftRight, CheckCircle2, Landmark, Plus, ShieldCheck, Wallet } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowLeftRight,
+  CheckCircle2,
+  Landmark,
+  Plus,
+  Receipt,
+  ShieldCheck,
+  Wallet,
+} from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 
@@ -16,6 +25,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { authApi, currentUserQueryKey, moduleRole, roleAtLeast } from "@/lib/api/auth";
 import { cashApi, cashQueryKey, type Account, type Operation } from "@/modules/settlements/cash/api";
 import { chequeApi, chequeSummaryKey } from "@/modules/settlements/cheques/api";
+import { DirectExpenseDialog } from "@/modules/settlements/expenses/direct-expense-dialog";
+import { expenseHref } from "@/modules/settlements/expenses/api";
 import { cn } from "@/lib/cn";
 import { formatDate, formatDateTime, formatMoney } from "@/lib/format";
 
@@ -27,9 +38,9 @@ import { listPending } from "./pending-operations";
 
 const PAGE_SIZE = 20;
 
-type Dialog = CashAction | "owner-account" | null;
+type Dialog = CashAction | "owner-account" | "expense" | null;
 
-type Notice = { text: string; operationId?: number } | null;
+type Notice = { text: string; operationId?: number; expenseId?: number } | null;
 
 /** Partner accounts carry contributions with the ledger sign (value leaves the partner): shown as "aportado". */
 function contributed(balance: string) {
@@ -388,6 +399,10 @@ export function CashBoard() {
                 <Wallet aria-hidden />
                 Extraer del banco
               </Button>
+              <Button variant="secondary" onClick={() => setDialog("expense")}>
+                <Receipt aria-hidden />
+                Registrar gasto
+              </Button>
             </div>
           )
         }
@@ -437,6 +452,11 @@ export function CashBoard() {
         >
           <CheckCircle2 className="size-4 text-primary" aria-hidden />
           <span className="font-medium">{notice.text}</span>
+          {notice.expenseId !== undefined && (
+            <Link href={expenseHref(notice.expenseId)} className="text-primary hover:underline">
+              Ver gasto
+            </Link>
+          )}
           {notice.operationId !== undefined && (
             <Link
               href={`/rendiciones/cajas/operaciones/${notice.operationId}`}
@@ -466,9 +486,14 @@ export function CashBoard() {
       ) : (
         <>
           <section aria-labelledby="money-title" className="space-y-3">
-            <h2 id="money-title" className="text-sm font-semibold text-muted-foreground">
-              Cajas y banco
-            </h2>
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <h2 id="money-title" className="text-sm font-semibold text-muted-foreground">
+                Cajas y banco
+              </h2>
+              <Link href="/rendiciones/cajas/gastos" className="text-sm text-primary hover:underline">
+                Ver gastos directos
+              </Link>
+            </div>
             {money.length === 0 ? (
               <EmptyState title="No hay cajas" description="No se encontraron cajas ni cuentas bancarias." />
             ) : (
@@ -518,7 +543,19 @@ export function CashBoard() {
         </>
       )}
 
-      {dialog === "owner-account" ? (
+      {dialog === "expense" ? (
+        <DirectExpenseDialog
+          accounts={all}
+          onClose={() => setDialog(null)}
+          onDone={(expense) =>
+            setNotice({
+              text: `Gasto registrado: ${expense.category_name} por ${formatMoney(expense.amount)} desde ${expense.paid_from_account_name ?? ""}.`,
+              expenseId: expense.id,
+              operationId: expense.operation_id ?? undefined,
+            })
+          }
+        />
+      ) : dialog === "owner-account" ? (
         <OwnerAccountDialog
           accounts={all}
           onClose={() => setDialog(null)}

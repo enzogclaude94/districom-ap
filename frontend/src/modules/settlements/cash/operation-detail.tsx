@@ -232,6 +232,12 @@ export function OperationDetail({ operationId }: { operationId: number }) {
         <div className="rounded-md border border-border bg-muted px-4 py-3 text-sm">
           {operation.type === "SETTLEMENT_CLOSE" ? (
             `Esta operación pertenece a la ${sourceLabel(operation.source_type, operation.source_id)}: se corrige reabriendo la rendición, y al confirmar el nuevo cierre se registra su reverso.`
+          ) : operation.type === "DIRECT_EXPENSE" ? (
+            <>
+              Esta operación pertenece al{" "}
+              <SourceLink sourceType={operation.source_type} sourceId={operation.source_id} />: se revierte desde el
+              gasto.
+            </>
           ) : (
             <>
               Esta operación pertenece al{" "}

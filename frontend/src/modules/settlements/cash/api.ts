@@ -34,6 +34,7 @@ export type OperationType =
   | "CHEQUE_CREDIT"
   | "CHEQUE_REJECTION"
   | "CHEQUE_RETURN"
+  | "DIRECT_EXPENSE"
   | "REVERSAL";
 
 export interface Account {

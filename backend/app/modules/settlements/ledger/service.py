@@ -183,7 +183,8 @@ def reverse_operation(
         raise AppError(
             409,
             "operation_owned_by_document",
-            "Esta operación pertenece a un documento (una rendición o un pendiente de cobro): se corrige desde él.",
+            "Esta operación pertenece a un documento (una rendición, un pendiente, un cheque o un gasto): "
+            "se corrige desde él.",
             {"source_type": original.source_type, "source_id": original.source_id},
         )
     return _post(

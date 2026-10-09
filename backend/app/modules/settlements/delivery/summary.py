@@ -126,8 +126,9 @@ def totals(db: Session, settlement_ids: Sequence[int]) -> dict[int, Totals]:
         .where(Expense.settlement_id.in_(ids), Expense.voided_at.is_(None))
         .group_by(Expense.settlement_id)
     )
-    for sid, amount in expenses:
-        result[sid].expenses = amount
+    for expense_settlement_id, amount in expenses:
+        if expense_settlement_id is not None:  # always: filtered by settlement
+            result[expense_settlement_id].expenses = amount
     pending = db.execute(
         select(PendingCollection.settlement_id, func.sum(PendingCollection.amount))
         .where(PendingCollection.settlement_id.in_(ids), PendingCollection.voided_at.is_(None))

@@ -157,7 +157,7 @@ def settlement(db: Session, settlement_id: int) -> s.SettlementOut:
                 category_code=categories[e.category_id].code,
                 amount=e.amount,
                 description=e.description,
-                fuel=_fuel(loads[e.id], fuel_vehicles, fuel_employees, users) if e.id in loads else None,
+                fuel=fuel_out(loads[e.id], fuel_vehicles, fuel_employees, users) if e.id in loads else None,
                 legacy_fuel_without_detail=e.legacy_fuel_without_detail,
                 created_by=e.created_by,
                 created_by_name=users[e.created_by],
@@ -329,7 +329,9 @@ def category(row: ExpenseCategory) -> s.ExpenseCategoryOut:
     return s.ExpenseCategoryOut(id=row.id, name=row.name, active=row.active, code=row.code)
 
 
-def _fuel(load: FuelLoad, vehicles: dict[int, Vehicle], employees: dict[int, str], users: dict[int, str]) -> s.FuelOut:
+def fuel_out(
+    load: FuelLoad, vehicles: dict[int, Vehicle], employees: dict[int, str], users: dict[int, str]
+) -> s.FuelOut:
     vehicle = vehicles[load.vehicle_id]
     return s.FuelOut(
         id=load.id,
