@@ -143,6 +143,8 @@ def db(migrated_db: None) -> Iterator[Session]:
             text("DELETE FROM settlements.accounts WHERE code IS NULL OR code <> ALL(:codes)"),
             {"codes": list(SEEDED_ACCOUNTS)},
         )
+        # A test may deactivate a seeded account (R5-3: an inactive cash box never pays).
+        conn.execute(text("UPDATE settlements.accounts SET active = true WHERE NOT active"))
         # Not truncated: an employee's internal account references it, and TRUNCATE ... CASCADE would
         # empty the seeded accounts too.
         for table in ("employee_functions", "employees"):
