@@ -18,6 +18,7 @@ from fastapi import APIRouter, Depends, Query, Response
 
 from app.modules.settlements.cheques import collections, cycle, service, views
 from app.modules.settlements.cheques import schemas as cs
+from app.modules.settlements.cheques.state import State
 from app.modules.settlements.delivery import schemas as s
 from app.modules.settlements.delivery import views as delivery_views
 from app.modules.settlements.delivery.service import Created
@@ -119,10 +120,25 @@ def list_cheques(
     kind: Literal["PHYSICAL", "ECHEQ"] | None = None,
     origin_type: Literal["SETTLEMENT", "OPENING_BALANCE", "OWNER_CONTRIBUTION", "PENDING_RECEIPT"] | None = None,
     in_portfolio: bool = False,
+    state: State | None = None,
+    issuer_bank_id: int | None = None,
+    payable: bool | None = None,
+    expired: bool = False,
+    expiring_soon: bool = False,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> cs.ChequePage:
-    filters = views.Filters(settlement_id=settlement_id, kind=kind, origin_type=origin_type, in_portfolio=in_portfolio)
+    filters = views.Filters(
+        settlement_id=settlement_id,
+        kind=kind,
+        origin_type=origin_type,
+        in_portfolio=in_portfolio,
+        state=state,
+        issuer_bank_id=issuer_bank_id,
+        payable=payable,
+        expired=expired,
+        expiring_soon=expiring_soon,
+    )
     return views.page(db, filters, limit=limit, offset=offset)
 
 

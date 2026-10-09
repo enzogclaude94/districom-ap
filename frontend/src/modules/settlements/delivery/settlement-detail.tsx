@@ -16,6 +16,7 @@ import { authApi, currentUserQueryKey, moduleRole, roleAtLeast } from "@/lib/api
 import { cn } from "@/lib/cn";
 import { formatDate, formatDateTime, formatMoney } from "@/lib/format";
 import { cashApi, cashQueryKey } from "@/modules/settlements/cash/api";
+import { SettlementCheques } from "@/modules/settlements/cheques/settlement-cheques";
 import { SettlementPendings } from "@/modules/settlements/pending/settlement-pendings";
 
 import {
@@ -413,6 +414,8 @@ function Load({
           </Table>
         )}
       </Section>
+
+      <SettlementCheques settlement={settlement} editable={editable} isAdmin={isAdmin} />
 
       <SettlementPendings settlement={settlement} editable={editable} employees={employees} />
     </div>

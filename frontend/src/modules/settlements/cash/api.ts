@@ -47,6 +47,16 @@ export interface Account {
   /** «Banco en descubierto» (R4-2): a bank below zero, only ever by a cheque rejected after its crediting. */
   overdrawn: boolean;
   overdrawn_label: string | null;
+  /** What overdrew it (R4-3): the rejections after crediting in effect on this bank, newest first. */
+  overdraft_causes?: OverdraftCause[];
+}
+
+export interface OverdraftCause {
+  rejection_id: number;
+  cheque_id: number;
+  operation_id: number;
+  business_date: string;
+  amount: string;
 }
 
 export interface Movement {

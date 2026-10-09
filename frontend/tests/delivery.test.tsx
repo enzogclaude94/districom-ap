@@ -144,6 +144,7 @@ function settlement(changes: Partial<Settlement> = {}): Settlement {
     count_lines: [],
     additions: [],
     transfers: [],
+    cheques: [],
     expenses: [],
     summary: summary(),
     financial_state: "NOT_CLOSED",

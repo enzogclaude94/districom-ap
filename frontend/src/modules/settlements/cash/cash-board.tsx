@@ -15,6 +15,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { authApi, currentUserQueryKey, moduleRole, roleAtLeast } from "@/lib/api/auth";
 import { cashApi, cashQueryKey, type Account, type Operation } from "@/modules/settlements/cash/api";
+import { chequeApi, chequeSummaryKey } from "@/modules/settlements/cheques/api";
 import { cn } from "@/lib/cn";
 import { formatDate, formatDateTime, formatMoney } from "@/lib/format";
 
@@ -231,6 +232,113 @@ function AdminActions({ open }: { open: (dialog: Dialog) => void }) {
   );
 }
 
+/**
+ * «Banco en descubierto»: a real financial state (a cheque the bank rejected after crediting it), never an
+ * error. Shown with its negative balance and the rejections that caused it; nothing is adjusted for it.
+ */
+function Overdrafts({ accounts }: { accounts: Account[] }) {
+  const overdrawn = accounts.filter((account) => account.overdrawn);
+  if (overdrawn.length === 0) return null;
+  return (
+    <section aria-label="Bancos en descubierto" className="space-y-2">
+      {overdrawn.map((account) => (
+        <div
+          key={account.id}
+          className="rounded-md border border-danger/30 bg-danger-soft px-4 py-3 text-sm"
+          data-testid={`overdraft-${account.id}`}
+        >
+          <p className="flex flex-wrap items-center gap-2 font-medium text-danger">
+            <AlertTriangle className="size-4" aria-hidden />
+            {account.overdrawn_label ?? "Banco en descubierto"}: {account.name}
+            <span className="tabular-nums">{formatMoney(account.balance)}</span>
+          </p>
+          <p className="mt-1 text-foreground">
+            Un cheque acreditado fue rechazado por el banco y debitado. Los ingresos lo reducen; ninguna extracción o
+            pago puede agrandarlo.
+          </p>
+          {(account.overdraft_causes ?? []).length > 0 && (
+            <ul className="mt-1 space-y-0.5">
+              {(account.overdraft_causes ?? []).map((cause) => (
+                <li key={cause.rejection_id} className="flex flex-wrap gap-2">
+                  <span className="tabular-nums">
+                    Rechazo del {formatDate(cause.business_date)} por {formatMoney(cause.amount)}
+                  </span>
+                  <Link href={`/rendiciones/cheques/${cause.cheque_id}`} className="text-primary hover:underline">
+                    Ver cheque
+                  </Link>
+                  <Link
+                    href={`/rendiciones/cajas/operaciones/${cause.operation_id}`}
+                    className="text-primary hover:underline"
+                  >
+                    Ver movimiento
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ))}
+    </section>
+  );
+}
+
+/** «Valores»: cheques are assets but not money to spend, so they never add to the boxes or the bank. */
+function Values() {
+  const summary = useQuery({ queryKey: chequeSummaryKey, queryFn: chequeApi.summary });
+  return (
+    <section
+      aria-labelledby="values-title"
+      className="space-y-3 rounded-lg border border-dashed border-border bg-muted/40 p-4"
+    >
+      <div>
+        <h2 id="values-title" className="text-sm font-semibold">
+          Valores — no disponibles para gastar
+        </h2>
+        <p className="text-xs text-muted-foreground">
+          Cheques recibidos. No se suman al efectivo ni al banco hasta que el banco los acredita.
+        </p>
+      </div>
+      {summary.isPending ? (
+        <Skeleton className="h-16 w-full" />
+      ) : summary.isError ? (
+        <ErrorState error={summary.error} onRetry={() => void summary.refetch()} />
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2">
+          {[
+            {
+              title: "Cartera de cheques",
+              amount: summary.data.portfolio_amount,
+              count: summary.data.portfolio_count,
+              href: "/rendiciones/cheques?state=IN_PORTFOLIO",
+              testid: "values-portfolio",
+            },
+            {
+              title: "Cheques depositados",
+              amount: summary.data.in_transit_amount,
+              count: summary.data.in_transit_count,
+              href: "/rendiciones/cheques?state=DEPOSITED",
+              testid: "values-in-transit",
+            },
+          ].map((value) => (
+            <Link
+              key={value.title}
+              href={value.href}
+              className="rounded-md border border-border bg-surface p-3 hover:border-primary/50"
+              data-testid={value.testid}
+            >
+              <p className="text-sm font-medium">{value.title}</p>
+              <p className="font-display text-xl font-semibold tabular-nums">{formatMoney(value.amount)}</p>
+              <p className="text-xs text-muted-foreground">
+                {value.count} {value.count === 1 ? "cheque" : "cheques"} · Ver lista
+              </p>
+            </Link>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 /** `/rendiciones/cajas`: balances of cash boxes, bank and partner accounts, their movements and the R1 actions. */
 export function CashBoard() {
   const me = useQuery({ queryKey: currentUserQueryKey, queryFn: authApi.me });
@@ -376,6 +484,10 @@ export function CashBoard() {
               </div>
             )}
           </section>
+
+          <Overdrafts accounts={money} />
+
+          <Values />
 
           <section aria-labelledby="partners-title" className="space-y-3">
             <h2 id="partners-title" className="text-sm font-semibold text-muted-foreground">

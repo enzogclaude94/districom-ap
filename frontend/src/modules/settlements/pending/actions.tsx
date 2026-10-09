@@ -2,16 +2,27 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, Plus, Trash2 } from "lucide-react";
-import { useId, useState, type FormEvent } from "react";
+import Link from "next/link";
+import { useId, useState, type FormEvent, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ApiError } from "@/lib/api/client";
 import { formatDate, formatMoney, todayIso } from "@/lib/format";
 import { parseAmount } from "@/modules/settlements/cash/amount";
 import { cashApi, cashQueryKey, type Account } from "@/modules/settlements/cash/api";
+import { chequeHref } from "@/modules/settlements/cheques/api";
+import { chequeErrorView } from "@/modules/settlements/cheques/errors";
+import {
+  InstrumentFields,
+  draftBody,
+  draftProblem,
+  emptyDraft,
+  type InstrumentDraft,
+} from "@/modules/settlements/cheques/instrument-fields";
 import { deliveryApi, deliveryQueryKey, type Person } from "@/modules/settlements/delivery/api";
 import {
   ActionDialog,
@@ -28,9 +39,11 @@ import {
   pendingApi,
   pendingDetailKey,
   pendingPath,
+  type DeclaredEcheq,
   type PendingDetail,
   type Receipt,
   type ReceiptMethod,
+  type RecordedMethod,
   type Resolution,
 } from "./api";
 import { pendingErrorView } from "./errors";
@@ -112,7 +125,7 @@ function ReceiptForm({
   onClose: () => void;
 }) {
   const [amount, setAmount] = useState("");
-  const [method, setMethod] = useState<ReceiptMethod>("CASH");
+  const [method, setMethod] = useState<RecordedMethod>("CASH");
   const [destination, setDestination] = useState<number | null>(null);
   const [businessDate, setBusinessDate] = useState(todayIso);
   const [problem, setProblem] = useState<string | null>(null);
@@ -120,13 +133,41 @@ function ReceiptForm({
   const action = usePendingAction(`receipt:${pending.id}`, onClose);
   const pendingRequest = action.mutation.isPending;
   const error = action.mutation.error ? pendingErrorView(action.mutation.error) : null;
-  const destinations = accounts.filter((a) => a.active && a.kind === DESTINATION_KIND[method]);
+  const destinations =
+    method === "CHEQUE" ? [] : accounts.filter((a) => a.active && a.kind === DESTINATION_KIND[method]);
   const chosen = destinations.find((a) => a.id === destination) ?? null;
   const parsed = parseAmount(amount);
   const balance = pending.balance ?? "0.00";
   const owes = pending.state === "OPEN" || pending.state === "PARTIAL";
 
   if (action.stored) return <PendingAttempt action={action} onClose={onClose} errorView={errorView} where={WHERE} />;
+
+  const methodChoice = (
+    <div className="space-y-1.5" role="radiogroup" aria-label="Medio">
+      <p className="text-sm font-medium">Medio</p>
+      <div className="flex flex-wrap gap-4">
+        {(["CASH", "TRANSFER", "CHEQUE"] as RecordedMethod[]).map((value) => (
+          <label key={value} className="flex items-center gap-2 text-sm">
+            <input
+              type="radio"
+              name="receipt-method"
+              checked={method === value}
+              onChange={() => {
+                setMethod(value);
+                setDestination(null);
+              }}
+            />
+            {METHOD_LABELS[value]}
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+
+  // Once chosen, the cheque form stays until closed: it shows its own result after the pending is collected.
+  if (method === "CHEQUE") {
+    return <ChequeReceiptForm pending={pending} methodChoice={methodChoice} onClose={onClose} />;
+  }
 
   const review = (event: FormEvent) => {
     event.preventDefault();
@@ -240,25 +281,7 @@ function ReceiptForm({
             Cobrar saldo completo
           </Button>
         </div>
-        <div className="space-y-1.5" role="radiogroup" aria-label="Medio">
-          <p className="text-sm font-medium">Medio</p>
-          <div className="flex flex-wrap gap-4">
-            {(Object.keys(DESTINATION_KIND) as ReceiptMethod[]).map((value) => (
-              <label key={value} className="flex items-center gap-2 text-sm">
-                <input
-                  type="radio"
-                  name="receipt-method"
-                  checked={method === value}
-                  onChange={() => {
-                    setMethod(value);
-                    setDestination(null);
-                  }}
-                />
-                {METHOD_LABELS[value]}
-              </label>
-            ))}
-          </div>
-        </div>
+        {methodChoice}
         <SelectField
           label={method === "CASH" ? "Caja de destino" : "Banco de destino"}
           value={destination}
@@ -508,17 +531,24 @@ export function ReverseDialog({
       description={
         <span className="flex gap-2">
           <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden />
-          <span>
-            Se corregirá la operación financiera en su fecha original ({formatDate(target.item.business_date)}). El
-            movimiento original no se borra: queda registrado junto con su reverso, y el saldo del pendiente vuelve a
-            quedar abierto.
-          </span>
+          {isReceipt && target.item.cheque_id !== null ? (
+            <span>
+              La corrección se registrará en la fecha financiera original ({formatDate(target.item.business_date)}). El
+              movimiento no se eliminará. El cheque sale de Cartera y el saldo del pendiente vuelve a quedar abierto.
+            </span>
+          ) : (
+            <span>
+              Se corregirá la operación financiera en su fecha original ({formatDate(target.item.business_date)}). El
+              movimiento original no se borra: queda registrado junto con su reverso, y el saldo del pendiente vuelve a
+              quedar abierto.
+            </span>
+          )}
         </span>
       }
       submitLabel="Revertir"
       action={action}
       onClose={onClose}
-      errorView={reversalErrorView}
+      errorView={isReceipt && target.item.cheque_id !== null ? chequeErrorView : reversalErrorView}
       where={WHERE}
       validate={() => (!reason.trim() ? "Indicá el motivo." : null)}
       build={(requestId) => ({
@@ -571,6 +601,226 @@ export function ResponsibleDialog({ pending, onClose }: { pending: PendingDetail
         options={options}
       />
       <TextField label="Motivo (opcional)" value={reason} onChange={setReason} multiline />
+    </ActionDialog>
+  );
+}
+
+const CHEQUE_OVER_BALANCE =
+  "El importe del cheque supera el saldo pendiente. DistriCom todavía no gestiona saldos a favor del cliente.";
+
+/**
+ * Collect the pending with a cheque (R4-2). A physical cheque collects at once (Pendiente ↓, Cartera ↑); an
+ * ECHEQ is only declared: the balance stays until it is verified, and the verification reads the balance
+ * again. Never more than the balance: there are no credit balances.
+ */
+function ChequeReceiptForm({
+  pending,
+  methodChoice,
+  onClose,
+}: {
+  pending: PendingDetail;
+  methodChoice: ReactNode;
+  onClose: () => void;
+}) {
+  const balance = pending.balance ?? "0.00";
+  const [draft, setDraft] = useState<InstrumentDraft>(() =>
+    emptyDraft(pending.customer_in_effect ?? pending.customer_name),
+  );
+  const [businessDate, setBusinessDate] = useState(todayIso);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [created, setCreated] = useState<{ chequeId: number | null; echeq: boolean } | null>(null);
+  // The cheques this pending had when the form opened: the new one is the one not in this set.
+  const [before] = useState(
+    () =>
+      new Set([
+        ...pending.receipts.map((r) => r.cheque_id).filter((id): id is number => id !== null),
+        ...pending.echeqs.map((e) => e.cheque_id),
+      ]),
+  );
+  const action = usePendingAction(`cheque-receipt:${pending.id}`, (detail) => {
+    const ids = [
+      ...detail.receipts.map((r) => r.cheque_id).filter((id): id is number => id !== null),
+      ...detail.echeqs.map((e) => e.cheque_id),
+    ];
+    setCreated({ chequeId: ids.find((id) => !before.has(id)) ?? null, echeq: draft.kind === "ECHEQ" });
+  });
+  const pendingRequest = action.mutation.isPending;
+  const error = action.mutation.error;
+  const view = error ? chequeErrorView(error) : null;
+  const parsed = parseAmount(draft.amount);
+  const echeq = draft.kind === "ECHEQ";
+
+  if (created) {
+    return (
+      <div className="space-y-4" role="status">
+        <p className="text-sm font-medium">
+          {created.echeq
+            ? "ECHEQ declarado. Este ECHEQ todavía no fue verificado. El saldo pendiente continúa vigente."
+            : "Cobro registrado con cheque: el pendiente bajó y el cheque entró a Cartera."}
+        </p>
+        <div className="flex flex-wrap justify-end gap-2">
+          {created.chequeId !== null && (
+            <Link href={chequeHref(created.chequeId)} className="self-center text-sm text-primary hover:underline">
+              Ver cheque
+            </Link>
+          )}
+          <Button onClick={onClose}>Cerrar</Button>
+        </div>
+      </div>
+    );
+  }
+  if (action.stored) return <PendingAttempt action={action} onClose={onClose} errorView={errorView} where={WHERE} />;
+
+  const review = (event: FormEvent) => {
+    event.preventDefault();
+    const local =
+      parsed && toCents(parsed) > toCents(balance)
+        ? CHEQUE_OVER_BALANCE
+        : (draftProblem(draft) ?? dateProblem(businessDate, pending.origin_business_date));
+    setProblem(local);
+    if (!local) {
+      action.mutation.reset();
+      setConfirming(true);
+    }
+  };
+
+  const confirm = () =>
+    action.submit((requestId) => ({
+      method: "POST",
+      path: pendingPath(pending.id, "/cheque-receipts"),
+      body: { client_request_id: requestId, business_date: businessDate, ...draftBody(draft) },
+      summary: `${echeq ? "ECHEQ declarado" : "Cobro con cheque"} n.º ${draft.number.trim()} de ${formatMoney(parsed!)} para ${pending.customer_name}`,
+    }));
+
+  const duplicate = error instanceof ApiError && error.code === "cheque_possible_duplicate";
+  if (confirming && !duplicate) {
+    return (
+      <div className="space-y-4">
+        <div className="space-y-2" role="group" aria-label="Revisá el cobro">
+          <p className="text-sm font-medium">Revisá el cobro antes de confirmarlo</p>
+          <dl className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-md border border-border px-3 py-2 text-sm">
+            <dt className="text-muted-foreground">Cliente</dt>
+            <dd>{pending.customer_name}</dd>
+            <dt className="text-muted-foreground">Saldo pendiente actual</dt>
+            <dd className="tabular-nums">{formatMoney(balance)}</dd>
+            <dt className="text-muted-foreground">Cheque</dt>
+            <dd>
+              {echeq ? "ECHEQ" : "Físico"} n.º {draft.number.trim()}
+            </dd>
+            <dt className="text-muted-foreground">Importe</dt>
+            <dd className="font-semibold tabular-nums">{formatMoney(parsed!)}</dd>
+            <dt className="text-muted-foreground">Fecha de negocio</dt>
+            <dd className="tabular-nums">{formatDate(businessDate)}</dd>
+            {echeq ? (
+              <>
+                <dt className="text-muted-foreground">Efecto</dt>
+                <dd>Queda declarado. El saldo no baja hasta verificarlo.</dd>
+              </>
+            ) : (
+              <>
+                <dt className="text-muted-foreground">Pendiente</dt>
+                <dd className="tabular-nums">−{formatMoney(parsed!)}</dd>
+                <dt className="text-muted-foreground">Cartera de cheques</dt>
+                <dd className="tabular-nums">+{formatMoney(parsed!)}</dd>
+              </>
+            )}
+          </dl>
+        </div>
+        <FormError message={view?.message} />
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button variant="ghost" disabled={pendingRequest} onClick={() => setConfirming(false)}>
+            Volver
+          </Button>
+          <Button disabled={pendingRequest} onClick={confirm}>
+            {pendingRequest ? "Registrando…" : echeq ? "Declarar ECHEQ" : "Confirmar cobro"}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <form className="space-y-4" onSubmit={review} noValidate>
+      <p className="text-sm">
+        {pending.customer_name} · Saldo pendiente{" "}
+        <strong className="tabular-nums" data-testid="receipt-balance">
+          {formatMoney(balance)}
+        </strong>
+      </p>
+      {methodChoice}
+      <InstrumentFields draft={draft} onChange={setDraft} possibleDuplicate={duplicate} />
+      {parsed && toCents(parsed) > toCents(balance) && <FormError message={CHEQUE_OVER_BALANCE} />}
+      <DateField
+        label="Fecha de negocio"
+        value={businessDate}
+        onChange={setBusinessDate}
+        min={pending.origin_business_date}
+      />
+      <FormError message={problem ?? view?.message} />
+      <div className="flex flex-wrap justify-end gap-2">
+        <Button variant="ghost" onClick={onClose}>
+          Cancelar
+        </Button>
+        <Button type="submit">Revisar cobro</Button>
+      </div>
+    </form>
+  );
+}
+
+/**
+ * Verify an ECHEQ received for this pending, or reject its verification. Verifying reads the balance again:
+ * if it no longer covers the ECHEQ (another receipt meanwhile), the backend refuses and nothing is collected.
+ */
+export function EcheqDecisionDialog({
+  pending,
+  echeq,
+  to,
+  onClose,
+}: {
+  pending: PendingDetail;
+  echeq: DeclaredEcheq;
+  to: "VERIFIED" | "VERIFICATION_REJECTED";
+  onClose: () => void;
+}) {
+  const [reason, setReason] = useState("");
+  const [businessDate, setBusinessDate] = useState(todayIso);
+  const action = usePendingAction(`echeq:${pending.id}:${echeq.cheque_id}`, onClose);
+  const verify = to === "VERIFIED";
+  return (
+    <ActionDialog
+      title={verify ? "Verificar ECHEQ" : "Rechazar verificación"}
+      description={
+        verify
+          ? "Confirmá que el ECHEQ está a nombre de la empresa. Al verificarlo se registra el cobro: el pendiente baja y el ECHEQ entra a Cartera."
+          : "El ECHEQ no se pudo validar: no se registra ningún cobro y el saldo sigue pendiente."
+      }
+      submitLabel={verify ? "Verificar y cobrar" : "Rechazar verificación"}
+      action={action}
+      onClose={onClose}
+      errorView={(error) => chequeErrorView(error)}
+      where={WHERE}
+      validate={() =>
+        !verify && !reason.trim() ? "Indicá el motivo." : dateProblem(businessDate, pending.origin_business_date)
+      }
+      build={() => ({
+        method: "POST",
+        path: pendingPath(pending.id, `/cheque-receipts/${echeq.cheque_id}/verification`),
+        body: { status: to, reason: reason.trim() || null, business_date: businessDate },
+        summary: `${verify ? "Verificación" : "Rechazo de verificación"} del ECHEQ n.º ${echeq.cheque_number}`,
+      })}
+    >
+      <p className="text-sm">
+        ECHEQ n.º {echeq.cheque_number} · <strong className="tabular-nums">{formatMoney(echeq.amount)}</strong> · Saldo
+        pendiente <strong className="tabular-nums">{formatMoney(pending.balance ?? "0.00")}</strong>
+      </p>
+      <TextField label={verify ? "Motivo (opcional)" : "Motivo"} value={reason} onChange={setReason} multiline />
+      <DateField
+        label="Fecha de negocio"
+        value={businessDate}
+        onChange={setBusinessDate}
+        min={pending.origin_business_date}
+      />
     </ActionDialog>
   );
 }

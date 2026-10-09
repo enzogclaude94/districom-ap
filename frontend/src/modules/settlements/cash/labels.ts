@@ -70,8 +70,17 @@ export function sourceLabel(sourceType: string | null, sourceId: number | null) 
   return sourceId === null ? sourceType : `${sourceType} #${sourceId}`;
 }
 
-/** Screen of the document an operation came from, when it has one (a pending collection: R3). */
+/** Screen of the document an operation came from, when it has one (a pending collection, a cheque document). */
+const DOCUMENT_SCREENS: Record<string, string> = {
+  pending_collection: "/rendiciones/pendientes",
+  cheque: "/rendiciones/cheques",
+  cheque_deposit: "/rendiciones/cheques/documentos/cheque-deposits",
+  cheque_credit: "/rendiciones/cheques/documentos/cheque-credits",
+  cheque_rejection: "/rendiciones/cheques/documentos/cheque-rejections",
+  cheque_return: "/rendiciones/cheques/documentos/cheque-returns",
+};
+
 export function sourceHref(sourceType: string | null, sourceId: number | null): string | null {
-  if (sourceType === "pending_collection" && sourceId !== null) return `/rendiciones/pendientes/${sourceId}`;
-  return null;
+  const screen = sourceType ? DOCUMENT_SCREENS[sourceType] : undefined;
+  return screen && sourceId !== null ? `${screen}/${sourceId}` : null;
 }

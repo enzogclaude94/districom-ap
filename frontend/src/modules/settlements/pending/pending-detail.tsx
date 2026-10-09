@@ -16,11 +16,14 @@ import { authApi, currentUserQueryKey, moduleRole, roleAtLeast } from "@/lib/api
 import { formatDate, formatDateTime, formatMoney } from "@/lib/format";
 import { settlementTitle } from "@/modules/settlements/delivery/labels";
 
-import { ReceiptDialog, ResolveDialog, ResponsibleDialog, ReverseDialog } from "./actions";
+import { chequeHref } from "@/modules/settlements/cheques/api";
+
+import { EcheqDecisionDialog, ReceiptDialog, ResolveDialog, ResponsibleDialog, ReverseDialog } from "./actions";
 import {
   pendingApi,
   pendingDetailKey,
   type Pending,
+  type DeclaredEcheq,
   type PendingDetail as Detail,
   type PendingEvent,
   type Receipt,
@@ -33,6 +36,7 @@ type Open =
   | { kind: "receipt" | "resolve" | "responsible" }
   | { kind: "reverse-receipt"; item: Receipt }
   | { kind: "reverse-resolution"; item: Resolution }
+  | { kind: "echeq"; item: DeclaredEcheq; to: "VERIFIED" | "VERIFICATION_REJECTED" }
   | null;
 
 const operationHref = (id: number) => `/rendiciones/cajas/operaciones/${id}`;
@@ -204,6 +208,7 @@ export function PendingDetailView({ pendingId }: { pendingId: number }) {
   }
 
   const pending = query.data;
+  const declared = pending.echeqs.filter((e) => e.verification_status === "DECLARED" && !e.voided);
   const owes = pending.state === "OPEN" || pending.state === "PARTIAL";
   const inEffect = pending.amount_in_effect !== null;
 
@@ -305,8 +310,14 @@ export function PendingDetailView({ pendingId }: { pendingId: number }) {
                     <span data-testid="pending-origin">{ORIGIN_LABELS[pending.origin_type]}</span>
                   </Field>
                   <Field label="Cheque">
-                    {pending.origin_cheque_id !== null ? `Cheque #${pending.origin_cheque_id}` : "—"} del{" "}
-                    {formatDate(pending.origin_business_date)}
+                    {pending.origin_cheque_id !== null ? (
+                      <Link href={chequeHref(pending.origin_cheque_id)} className="text-primary hover:underline">
+                        Cheque #{pending.origin_cheque_id}
+                      </Link>
+                    ) : (
+                      "—"
+                    )}{" "}
+                    del {formatDate(pending.origin_business_date)}
                   </Field>
                 </>
               )}
@@ -319,6 +330,50 @@ export function PendingDetailView({ pendingId }: { pendingId: number }) {
           </CardContent>
         </Card>
       </div>
+
+      {declared.length > 0 && (
+        <Card data-testid="declared-echeqs">
+          <CardHeader>
+            <CardTitle>ECHEQ declarados</CardTitle>
+            <CardDescription>
+              Este ECHEQ todavía no fue verificado. El saldo pendiente continúa vigente.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ul className="divide-y divide-border">
+              {declared.map((echeq) => (
+                <li
+                  key={echeq.cheque_id}
+                  className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm"
+                  data-testid={`declared-echeq-${echeq.cheque_id}`}
+                >
+                  <span>
+                    <Link href={chequeHref(echeq.cheque_id)} className="text-primary hover:underline">
+                      ECHEQ n.º {echeq.cheque_number}
+                    </Link>{" "}
+                    · <span className="tabular-nums">{formatMoney(echeq.amount)}</span>{" "}
+                    <Badge tone="warning">Pendiente de verificación</Badge>
+                  </span>
+                  {canOperate && (
+                    <span className="flex gap-2">
+                      <Button size="sm" onClick={() => setDialog({ kind: "echeq", item: echeq, to: "VERIFIED" })}>
+                        Verificar
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => setDialog({ kind: "echeq", item: echeq, to: "VERIFICATION_REJECTED" })}
+                      >
+                        Rechazar verificación
+                      </Button>
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>
@@ -369,6 +424,14 @@ export function PendingDetailView({ pendingId }: { pendingId: number }) {
                       >
                         Ver en Cajas
                       </Link>
+                      {receipt.cheque_id !== null && (
+                        <Link
+                          href={chequeHref(receipt.cheque_id)}
+                          className="px-2 text-sm text-primary hover:underline"
+                        >
+                          Ver cheque
+                        </Link>
+                      )}
                       {isAdmin && !receipt.reversal && (
                         <Button
                           variant="ghost"
@@ -473,6 +536,9 @@ export function PendingDetailView({ pendingId }: { pendingId: number }) {
 
       {dialog?.kind === "receipt" && <ReceiptDialog pendingId={pending.id} onClose={close} />}
       {dialog?.kind === "resolve" && <ResolveDialog pending={pending} onClose={close} />}
+      {dialog?.kind === "echeq" && (
+        <EcheqDecisionDialog pending={pending} echeq={dialog.item} to={dialog.to} onClose={close} />
+      )}
       {dialog?.kind === "responsible" && <ResponsibleDialog pending={pending} onClose={close} />}
       {dialog?.kind === "reverse-receipt" && (
         <ReverseDialog pending={pending} target={{ kind: "receipt", item: dialog.item }} onClose={close} />

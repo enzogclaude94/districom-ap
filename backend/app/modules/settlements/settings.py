@@ -14,6 +14,13 @@ SETTINGS = SettingsScope(
             "Un pendiente vigente con saldo alerta cuando pasaron más de estas horas desde que se registró.",
         ),
         SettingSpec(
+            "cheque_expiring_soon_days",
+            7,
+            "Cheques por vencer (días)",
+            "Un cheque en cartera se marca «Vence en N días» cuando faltan estos días o menos para su último día "
+            "de presentación. Solo cambia el aviso: los plazos del cheque son reglas fijas y no se configuran.",
+        ),
+        SettingSpec(
             "cash_denominations",
             DEFAULT_DENOMINATIONS,
             "Denominaciones de efectivo",

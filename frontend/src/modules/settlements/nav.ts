@@ -20,7 +20,7 @@ export const SETTLEMENTS_NAV: NavSection[] = [
     icon: Landmark,
     items: [
       { label: "Cajas", href: "/rendiciones/cajas" },
-      { label: "Cartera de cheques", href: "/rendiciones/cheques", phase: 4 },
+      { label: "Cartera de cheques", href: "/rendiciones/cheques" },
       { label: "Pagos", href: "/rendiciones/pagos", phase: 6 },
     ],
   },
