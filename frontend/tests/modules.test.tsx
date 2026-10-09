@@ -39,6 +39,7 @@ describe("AppShell", () => {
     expect(await screen.findByText("Inteligencia Comercial")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Inicio" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("link", { name: "Configuración" })).toHaveAttribute("href", "/configuracion");
+    expect(screen.getByRole("link", { name: "Vehículos" })).toHaveAttribute("href", "/vehiculos");
     expect(screen.getByText("Equipo y clientes")).toBeInTheDocument();
   });
 

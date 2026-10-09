@@ -1,7 +1,7 @@
 "use client";
 
 import type { LucideIcon } from "lucide-react";
-import { IdCard, Settings } from "lucide-react";
+import { IdCard, Settings, Truck } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -10,7 +10,10 @@ import type { NavItem, NavSection } from "@/lib/modules";
 import { cn } from "@/lib/cn";
 
 /** Platform pages, shown under every module's navigation. */
-const PLATFORM_NAV: NavSection[] = [{ label: "Configuración", icon: Settings, href: "/configuracion" }];
+const PLATFORM_NAV: NavSection[] = [
+  { label: "Vehículos", icon: Truck, href: "/vehiculos" },
+  { label: "Configuración", icon: Settings, href: "/configuracion" },
+];
 /** Platform pages only platform admins can use. */
 const PLATFORM_ADMIN_NAV: NavSection[] = [{ label: "Empleados", icon: IdCard, href: "/empleados" }];
 
