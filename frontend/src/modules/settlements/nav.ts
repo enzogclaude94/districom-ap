@@ -24,7 +24,7 @@ export const SETTLEMENTS_NAV: NavSection[] = [
       { label: "Pagos", href: "/rendiciones/pagos", phase: 6 },
     ],
   },
-  { label: "Combustible", icon: Fuel, href: "/rendiciones/combustible", phase: 5 },
+  { label: "Combustible", icon: Fuel, href: "/rendiciones/combustible" },
   { label: "Liquidación semanal", icon: Users, href: "/rendiciones/liquidaciones", phase: 8 },
   { label: "Configuración del módulo", icon: SlidersHorizontal, href: "/rendiciones/configuracion" },
 ];
