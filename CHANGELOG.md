@@ -5,6 +5,7 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 ## [Unreleased]
 
 ### Added — Vehículos de plataforma (R5‑1)
+- **R5‑1 DONE:** aprobada por Enzo el 2026-10-09; PR #21 mergeado; `0014` congelada. R5‑2 autorizada.
 - **R5 aprobada:** propuesta de combustible, vehículos y gastos directos aprobada por Enzo el 2026-10-09 con sus decisiones 1–4; solo R5‑1 autorizada.
 - **`public.vehicles`** (migración `0014`, `platform: vehicles master`): patente normalizada (mayúsculas, sin espacios, puntos ni guiones; `A–Z`/`0–9`, 5 a 10 caracteres), única por `plate_key`; descripción obligatoria; activo/inactivo; autor y último editor. Sin marca, modelo ni año. La base rechaza borrar un vehículo y cambiar su autor o su alta.
 - **API** `GET /api/v1/vehicles` (`include_inactive`), `GET /{id}` con la historia de cambios, `POST` y `PATCH /{id}`. Leer: todo usuario autenticado. Escribir: solo el admin de plataforma (un admin u operador de Rendiciones recibe 403). Sin DELETE. `plate_display` (`AB 123 CD`, `ABC 123`) se calcula, no se guarda. Duplicado o corrección hacia una patente ajena: 409 `vehicle_plate_taken` con el vehículo que la tiene, también cuando dos altas compiten a la vez (lo decide la clave única). `service.active()` (422 `invalid_vehicle`) es lo que usará R5‑2 para no aceptar un vehículo inactivo en registros nuevos.
