@@ -8,7 +8,7 @@ import type { Cheque, ChequeDetail } from "@/modules/settlements/cheques/api";
 import { ChequeDetailView } from "@/modules/settlements/cheques/cheque-detail";
 import { ChequeList } from "@/modules/settlements/cheques/cheque-list";
 import { chequeErrorView } from "@/modules/settlements/cheques/errors";
-import { depositBlocker, expiringText } from "@/modules/settlements/cheques/labels";
+import { deliveryBlocker, depositBlocker, expiringText } from "@/modules/settlements/cheques/labels";
 import { SettlementCheques } from "@/modules/settlements/cheques/settlement-cheques";
 import type { Settlement } from "@/modules/settlements/delivery/api";
 
@@ -392,6 +392,28 @@ const delivered = (changes: Partial<ChequeDetail> = {}) =>
   });
 
 describe("cheques delivered in payments (R6-2)", () => {
+  it("an expired cheque offers no «Entregar» in its detail nor in the list", async () => {
+    const expired = { presentation_expired: true, presentation_deadline: shift(-1) };
+    mockApi(
+      base("operator", {
+        "GET /settlements/cheques/21": () => jsonResponse(200, detail(expired)),
+        "GET /settlements/cheques": () => jsonResponse(200, { items: [cheque(expired)], total: 1 }),
+      }),
+    );
+    renderWithQuery(<ChequeDetailView chequeId={21} />);
+    await screen.findByTestId("cheque-state");
+    expect(screen.queryByRole("button", { name: "Entregar" })).not.toBeInTheDocument();
+    renderWithQuery(<ChequeList />);
+    await screen.findByTestId("cheque-21");
+    expect(screen.queryByRole("link", { name: /Entregar el cheque/ })).not.toBeInTheDocument();
+  });
+
+  it("delivers until its last presentation day, judged on the payment's date", () => {
+    const c = cheque({ presentation_deadline: "2026-10-10" });
+    expect(deliveryBlocker(c, "2026-10-10")).toBeNull();
+    expect(deliveryBlocker(c, "2026-10-09")).toBeNull();
+    expect(deliveryBlocker(c, "2026-10-11")).toBe("Vencido — podía presentarse hasta 10/10/2026");
+  });
   it("«Entregar» on a cheque of the portfolio opens «Registrar pago» with it, for an operator", async () => {
     router.push.mockClear();
     mockApi(base("operator", { "GET /settlements/cheques/21": () => jsonResponse(200, detail()) }));

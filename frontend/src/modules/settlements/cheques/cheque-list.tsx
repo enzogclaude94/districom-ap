@@ -87,7 +87,7 @@ function Whereabouts({ cheque, canOperate }: { cheque: Cheque; canOperate: boole
           </Link>
         </span>
       )}
-      {canOperate && cheque.state === "IN_PORTFOLIO" && (
+      {canOperate && cheque.state === "IN_PORTFOLIO" && !cheque.presentation_expired && (
         <Link
           href={deliverHref(cheque.id)}
           className="block font-medium text-primary hover:underline"

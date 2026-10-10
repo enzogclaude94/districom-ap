@@ -14,7 +14,7 @@ import { formatDate, formatMoney, todayIso } from "@/lib/format";
 import { parseAmount } from "@/modules/settlements/cash/amount";
 import { cashQueryKey, type Account } from "@/modules/settlements/cash/api";
 import { chequeApi, chequeQueryKey, type Cheque } from "@/modules/settlements/cheques/api";
-import { KIND_LABELS, PAYMENT_TYPE_LABELS } from "@/modules/settlements/cheques/labels";
+import { deliveryBlocker, KIND_LABELS, PAYMENT_TYPE_LABELS } from "@/modules/settlements/cheques/labels";
 import { deliveryApi, deliveryQueryKey, FUEL_CODE } from "@/modules/settlements/delivery/api";
 import { AmountField, FormError, PendingAttempt, selectClass, TextField } from "@/modules/settlements/delivery/form";
 import { useWriteAction, type WriteAction } from "@/modules/settlements/delivery/use-delivery-action";
@@ -47,9 +47,18 @@ export interface ItemForm {
 const PORTFOLIO_FILTERS = { in_portfolio: true, limit: 200, offset: 0 } as const;
 export const portfolioQueryKey = [...chequeQueryKey, "list", PORTFOLIO_FILTERS] as const;
 
-/** "N.º 123 · Banco Galicia · Físico diferido · $ 200.000,00". */
-export const chequeOption = (cheque: Cheque) =>
-  `N.º ${cheque.cheque_number} · ${cheque.bank_name} · ${KIND_LABELS[cheque.kind]} ${PAYMENT_TYPE_LABELS[cheque.payment_type].toLowerCase()} · ${formatMoney(cheque.amount)}`;
+/**
+ * "N.º 123 · Banco Galicia · Físico diferido · $ 200.000,00", plus «Pagadero desde …» for a deferred cheque
+ * not yet payable on the payment's date (it can be delivered) or «Vencido — podía presentarse hasta …»
+ * (it cannot).
+ */
+export function chequeOption(cheque: Cheque, businessDate: string) {
+  const base = `N.º ${cheque.cheque_number} · ${cheque.bank_name} · ${KIND_LABELS[cheque.kind]} ${PAYMENT_TYPE_LABELS[cheque.payment_type].toLowerCase()} · ${formatMoney(cheque.amount)}`;
+  const expired = deliveryBlocker(cheque, businessDate);
+  if (expired) return `${base} · ${expired}`;
+  if (cheque.payable_from > businessDate) return `${base} · Pagadero desde ${formatDate(cheque.payable_from)}`;
+  return base;
+}
 
 /**
  * The amount each item puts in the payment: what was typed for cash and transfers, the whole amount of the
@@ -165,6 +174,7 @@ function ChequeFields({
   cheques,
   loading,
   taken,
+  businessDate,
   onChange,
 }: {
   item: ItemForm;
@@ -172,6 +182,7 @@ function ChequeFields({
   cheques: Cheque[];
   loading: boolean;
   taken: Set<number>;
+  businessDate: string;
   onChange: (item: ItemForm) => void;
 }) {
   const ids = { cheque: useId(), amount: useId() };
@@ -191,11 +202,20 @@ function ChequeFields({
             {loading ? "Cargando cheques…" : options.length === 0 ? "No hay cheques en cartera" : "Elegí el cheque…"}
           </option>
           {options.map((c) => (
-            <option key={c.id} value={c.id}>
-              {chequeOption(c)}
+            <option
+              key={c.id}
+              value={c.id}
+              disabled={c.id !== item.chequeId && deliveryBlocker(c, businessDate) !== null}
+            >
+              {chequeOption(c, businessDate)}
             </option>
           ))}
         </select>
+        {cheque && deliveryBlocker(cheque, businessDate) && (
+          <p className="text-xs text-danger" data-testid={`payment-cheque-expired-${index}`}>
+            {deliveryBlocker(cheque, businessDate)}: no se entrega en un pago de esa fecha.
+          </p>
+        )}
       </div>
       {cheque && (
         <dl
@@ -242,6 +262,7 @@ function ItemRow({
   cheques,
   chequesLoading,
   takenCheques,
+  businessDate,
   removable,
   onChange,
   onRemove,
@@ -252,6 +273,7 @@ function ItemRow({
   cheques: Cheque[];
   chequesLoading: boolean;
   takenCheques: Set<number>;
+  businessDate: string;
   removable: boolean;
   onChange: (item: ItemForm) => void;
   onRemove: () => void;
@@ -314,6 +336,7 @@ function ItemRow({
           cheques={cheques}
           loading={chequesLoading}
           taken={takenCheques}
+          businessDate={businessDate}
           onChange={onChange}
         />
       ) : (
@@ -440,7 +463,10 @@ export function PaymentDialog({
     for (const [index, item] of items.entries()) {
       if (item.method === "CHEQUE") {
         if (item.chequeId === null) return `Elegí el cheque del medio ${index + 1}.`;
-        if (!chequeOf(item)) return `El cheque del medio ${index + 1} ya no está en cartera: elegí otro.`;
+        const chosen = chequeOf(item);
+        if (!chosen) return `El cheque del medio ${index + 1} ya no está en cartera: elegí otro.`;
+        const expired = deliveryBlocker(chosen, businessDate);
+        if (expired) return `El cheque del medio ${index + 1} no se puede entregar: ${expired.toLowerCase()}.`;
         continue;
       }
       if (item.accountId === null) return `Elegí la cuenta del medio ${index + 1}.`;
@@ -680,6 +706,7 @@ export function PaymentDialog({
               cheques={cheques}
               chequesLoading={portfolio.isPending}
               takenCheques={takenCheques}
+              businessDate={businessDate}
               removable={items.length > 1}
               onChange={(next) => setItems(items.map((i) => (i.key === item.key ? next : i)))}
               onRemove={() => setItems(items.filter((i) => i.key !== item.key))}

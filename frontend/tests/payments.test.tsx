@@ -12,7 +12,7 @@ import { paymentBalance } from "@/modules/settlements/payments/payment-dialog";
 import { PaymentList } from "@/modules/settlements/payments/payment-list";
 import { ApiError } from "@/lib/api/client";
 
-import { cheque } from "./cheque-fixture";
+import { cheque, shift } from "./cheque-fixture";
 import { jsonResponse, renderWithQuery } from "./render";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }));
@@ -762,6 +762,72 @@ describe("Cheques en pagos (R6-2)", () => {
     );
     expect(screen.getByTestId("payment-cheque-state-21")).toHaveTextContent("En cartera");
     expect(screen.getByRole("link", { name: "Ver cheque" })).toHaveAttribute("href", "/rendiciones/cheques/21");
+  });
+});
+
+describe("expired cheques are not delivered (R6-2, adjustment 1)", () => {
+  const EXPIRED = cheque({
+    id: 30,
+    cheque_number: "00030000",
+    issue_date: shift(-40),
+    payable_from: shift(-40),
+    presentation_deadline: shift(-10),
+    presentation_expired: true,
+  });
+  const FUTURE = cheque({
+    id: 31,
+    cheque_number: "00031000",
+    payment_type: "DEFERRED",
+    payable_from: shift(20),
+    presentation_deadline: shift(50),
+  });
+  const withPortfolio = (role: Role) =>
+    routes(role, {
+      "GET /settlements/cheques": () => jsonResponse(200, { items: [cheque(), EXPIRED, FUTURE], total: 3 }),
+    });
+
+  it("lists an expired cheque as not eligible and a future deferred one with its payable date", async () => {
+    mockApi(withPortfolio("operator"));
+    renderWithQuery(<PaymentList />);
+    const dialog = await openPayment();
+    await userEvent.selectOptions(within(dialog).getByLabelText("Medio de pago"), "CHEQUE");
+    const select = within(dialog).getByLabelText("Cheque de la cartera");
+    const expired = await within(select).findByRole("option", { name: /00030000/ });
+    expect(expired).toBeDisabled();
+    expect(expired).toHaveTextContent(`Vencido — podía presentarse hasta ${shift(-10).split("-").reverse().join("/")}`);
+    const future = within(select).getByRole("option", { name: /00031000/ });
+    expect(future).toBeEnabled();
+    expect(future).toHaveTextContent(`Pagadero desde ${shift(20).split("-").reverse().join("/")}`);
+    await userEvent.selectOptions(select, "31");
+    expect(within(dialog).getByLabelText("Importe del medio 1")).toHaveValue("$ 100.000,00");
+  });
+
+  it("an expired cheque preloaded cannot be sent, not even by an admin", async () => {
+    const spy = mockApi(withPortfolio("admin"));
+    renderWithQuery(<PaymentList initialCheque={30} />);
+    const dialog = await screen.findByRole("dialog", { name: "Registrar pago" });
+    expect(await within(dialog).findByTestId("payment-cheque-expired-0")).toHaveTextContent(
+      "Vencido — podía presentarse hasta",
+    );
+    await userEvent.selectOptions(within(dialog).getByLabelText("Tercero"), "5");
+    await userEvent.selectOptions(within(dialog).getByLabelText("Concepto"), "MERCHANDISE");
+    await userEvent.type(within(dialog).getByLabelText("Total del pago"), "100.000");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Revisar pago" }));
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("El cheque del medio 1 no se puede entregar: vencido");
+    expect(posts(spy, "/settlements/payments")).toHaveLength(0);
+  });
+
+  it("the term is judged on the payment's date: an earlier date makes it eligible again", async () => {
+    mockApi(withPortfolio("operator"));
+    renderWithQuery(<PaymentList />);
+    const dialog = await openPayment();
+    await userEvent.selectOptions(within(dialog).getByLabelText("Medio de pago"), "CHEQUE");
+    const select = within(dialog).getByLabelText("Cheque de la cartera");
+    expect(await within(select).findByRole("option", { name: /00030000/ })).toBeDisabled();
+    const date = within(dialog).getByLabelText("Fecha del pago");
+    await userEvent.clear(date);
+    await userEvent.type(date, shift(-11));
+    expect(within(select).getByRole("option", { name: /00030000/ })).toBeEnabled();
   });
 });
 

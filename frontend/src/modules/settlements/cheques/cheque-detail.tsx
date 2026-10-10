@@ -223,10 +223,13 @@ export function ChequeDetailView({ chequeId }: { chequeId: number }) {
                     Depositar
                   </Button>
                   {blocked && <span className="self-center text-xs text-muted-foreground">{blocked}</span>}
-                  <Button variant="secondary" size="sm" onClick={() => router.push(deliverHref(cheque.id))}>
-                    <HandCoins aria-hidden />
-                    Entregar
-                  </Button>
+                  {/* An expired cheque is never delivered (the payment would be refused): no «Entregar». */}
+                  {!cheque.presentation_expired && (
+                    <Button variant="secondary" size="sm" onClick={() => router.push(deliverHref(cheque.id))}>
+                      <HandCoins aria-hidden />
+                      Entregar
+                    </Button>
+                  )}
                   {isAdmin && (
                     <Button variant="secondary" size="sm" onClick={() => setDialog({ kind: "return" })}>
                       Devolver cheque

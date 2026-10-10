@@ -99,6 +99,17 @@ export function depositBlocker(cheque: Cheque, today: string): string | null {
   return null;
 }
 
+/**
+ * Why a cheque of the portfolio cannot be delivered in a payment dated `businessDate`, or null: never after
+ * its last presentation day, judged on the payment's date (the backend refuses it, whatever the role). A
+ * deferred cheque not yet payable can be delivered.
+ */
+export function deliveryBlocker(cheque: Pick<Cheque, "presentation_deadline">, businessDate: string): string | null {
+  return businessDate > cheque.presentation_deadline
+    ? `Vencido — podía presentarse hasta ${formatDate(cheque.presentation_deadline)}`
+    : null;
+}
+
 /** «Vence en N días» while it is near its deadline. */
 export function expiringText(cheque: Cheque) {
   if (!cheque.expiring_soon || cheque.expires_in_days === null) return null;
