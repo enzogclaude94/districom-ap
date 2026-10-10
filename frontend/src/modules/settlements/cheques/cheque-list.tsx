@@ -19,11 +19,13 @@ import { authApi, currentUserQueryKey, moduleRole, roleAtLeast } from "@/lib/api
 import { cn } from "@/lib/cn";
 import { formatDate, formatMoney, todayIso } from "@/lib/format";
 import { selectClass } from "@/modules/settlements/delivery/form";
+import { paymentHref } from "@/modules/settlements/payments/api";
 
 import {
   chequeApi,
   chequeHref,
   chequeQueryKey,
+  deliverHref,
   documentHref,
   type Cheque,
   type ChequeFilters,
@@ -67,6 +69,35 @@ export function ExpiryMark({ cheque }: { cheque: Cheque }) {
       {soon}
     </span>
   ) : null;
+}
+
+/**
+ * Where the cheque is, with what can be done from there: «Entregar» for one in the portfolio (it opens
+ * «Registrar pago» with the cheque preloaded) and «Ver pago» for one delivered to a third party (R6-2).
+ */
+function Whereabouts({ cheque, canOperate }: { cheque: Cheque; canOperate: boolean }) {
+  return (
+    <span className="block space-y-0.5 text-xs text-muted-foreground">
+      {cheque.location_label && <span className="block">{cheque.location_label}</span>}
+      {cheque.state === "DELIVERED" && cheque.delivery_payment_id !== null && (
+        <span className="block">
+          {cheque.delivery_business_date && `${formatDate(cheque.delivery_business_date)} · `}
+          <Link href={paymentHref(cheque.delivery_payment_id)} className="text-primary hover:underline">
+            Ver pago n.º {cheque.delivery_payment_id}
+          </Link>
+        </span>
+      )}
+      {canOperate && cheque.state === "IN_PORTFOLIO" && (
+        <Link
+          href={deliverHref(cheque.id)}
+          className="block font-medium text-primary hover:underline"
+          aria-label={`Entregar el cheque n.º ${cheque.cheque_number} en un pago`}
+        >
+          Entregar
+        </Link>
+      )}
+    </span>
+  );
 }
 
 /** Why a row cannot be selected for what is being done, or null. */
@@ -325,7 +356,7 @@ export function ChequeList() {
                       <Badge tone={STATE_TONES[cheque.state]}>{cheque.state_label}</Badge>
                       <ExpiryMark cheque={cheque} />
                     </div>
-                    {cheque.location_label && <p className="text-xs text-muted-foreground">{cheque.location_label}</p>}
+                    <Whereabouts cheque={cheque} canOperate={canOperate} />
                     {selectable && (
                       <label className="mt-2 flex items-center gap-2 text-xs">
                         <input
@@ -419,7 +450,13 @@ export function ChequeList() {
                         <TableCell>
                           <Badge tone={STATE_TONES[cheque.state]}>{cheque.state_label}</Badge>
                         </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">{cheque.location_label ?? "—"}</TableCell>
+                        <TableCell className="text-sm">
+                          {cheque.location_label || cheque.state === "IN_PORTFOLIO" ? (
+                            <Whereabouts cheque={cheque} canOperate={canOperate} />
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </TableCell>
                       </TableRow>
                     );
                   })}

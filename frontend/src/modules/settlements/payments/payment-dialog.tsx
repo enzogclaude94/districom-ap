@@ -13,6 +13,8 @@ import { thirdPartiesApi, thirdPartiesQueryKey, type ThirdParty } from "@/lib/ap
 import { formatDate, formatMoney, todayIso } from "@/lib/format";
 import { parseAmount } from "@/modules/settlements/cash/amount";
 import { cashQueryKey, type Account } from "@/modules/settlements/cash/api";
+import { chequeApi, chequeQueryKey, type Cheque } from "@/modules/settlements/cheques/api";
+import { KIND_LABELS, PAYMENT_TYPE_LABELS } from "@/modules/settlements/cheques/labels";
 import { deliveryApi, deliveryQueryKey, FUEL_CODE } from "@/modules/settlements/delivery/api";
 import { AmountField, FormError, PendingAttempt, selectClass, TextField } from "@/modules/settlements/delivery/form";
 import { useWriteAction, type WriteAction } from "@/modules/settlements/delivery/use-delivery-action";
@@ -35,8 +37,30 @@ export interface ItemForm {
   key: number;
   method: PaymentMethod;
   accountId: number | null;
+  /** CHEQUE: the cheque of the portfolio; its amount is the cheque's, never typed. */
+  chequeId: number | null;
   amount: string;
   reference: string;
+}
+
+/** The cheques that can be delivered: those in the portfolio now (the backend checks it again, on the date). */
+const PORTFOLIO_FILTERS = { in_portfolio: true, limit: 200, offset: 0 } as const;
+export const portfolioQueryKey = [...chequeQueryKey, "list", PORTFOLIO_FILTERS] as const;
+
+/** "N.º 123 · Banco Galicia · Físico diferido · $ 200.000,00". */
+export const chequeOption = (cheque: Cheque) =>
+  `N.º ${cheque.cheque_number} · ${cheque.bank_name} · ${KIND_LABELS[cheque.kind]} ${PAYMENT_TYPE_LABELS[cheque.payment_type].toLowerCase()} · ${formatMoney(cheque.amount)}`;
+
+/**
+ * The amount each item puts in the payment: what was typed for cash and transfers, the whole amount of the
+ * cheque for a cheque (never a fraction, never typed).
+ */
+export function itemAmounts(items: ItemForm[], cheques: Pick<Cheque, "id" | "amount">[]): Pick<ItemForm, "amount">[] {
+  return items.map((item) =>
+    item.method === "CHEQUE"
+      ? { amount: cheques.find((c) => c.id === item.chequeId)?.amount ?? "" }
+      : { amount: item.amount },
+  );
 }
 
 /** Amount in cents from the API decimal string ("1500.50" → 150050). Only for the form's own arithmetic. */
@@ -129,16 +153,95 @@ export function usePaymentAction(slot: string, onDone: (payment: PaymentDetail) 
   return useWriteAction<PaymentDetail>({
     slot,
     write: (request) => paymentApi.write(request.path, request.body),
-    invalidate: [paymentQueryKey, cashQueryKey, thirdPartiesQueryKey],
+    invalidate: [paymentQueryKey, cashQueryKey, thirdPartiesQueryKey, chequeQueryKey],
     isUncertain: (error) => Boolean(paymentErrorView(error).uncertain),
     onDone,
   });
+}
+
+function ChequeFields({
+  item,
+  index,
+  cheques,
+  loading,
+  taken,
+  onChange,
+}: {
+  item: ItemForm;
+  index: number;
+  cheques: Cheque[];
+  loading: boolean;
+  taken: Set<number>;
+  onChange: (item: ItemForm) => void;
+}) {
+  const ids = { cheque: useId(), amount: useId() };
+  const cheque = cheques.find((c) => c.id === item.chequeId);
+  const options = cheques.filter((c) => c.id === item.chequeId || !taken.has(c.id));
+  return (
+    <>
+      <div className="space-y-1.5">
+        <Label htmlFor={ids.cheque}>Cheque de la cartera</Label>
+        <select
+          id={ids.cheque}
+          className={selectClass}
+          value={item.chequeId ?? ""}
+          onChange={(e) => onChange({ ...item, chequeId: e.target.value ? Number(e.target.value) : null })}
+        >
+          <option value="">
+            {loading ? "Cargando cheques…" : options.length === 0 ? "No hay cheques en cartera" : "Elegí el cheque…"}
+          </option>
+          {options.map((c) => (
+            <option key={c.id} value={c.id}>
+              {chequeOption(c)}
+            </option>
+          ))}
+        </select>
+      </div>
+      {cheque && (
+        <dl
+          className="grid grid-cols-2 gap-2 rounded-md bg-muted/40 px-3 py-2 text-xs sm:grid-cols-3"
+          data-testid={`payment-cheque-${index}`}
+        >
+          <div>
+            <dt className="text-muted-foreground">Librador</dt>
+            <dd className="break-words">{cheque.drawer_name}</dd>
+          </div>
+          <div>
+            <dt className="text-muted-foreground">Lo entregó</dt>
+            <dd className="break-words">{cheque.delivered_by_name}</dd>
+          </div>
+          <div>
+            <dt className="text-muted-foreground">Pagadero desde</dt>
+            <dd className="tabular-nums">{formatDate(cheque.payable_from)}</dd>
+          </div>
+        </dl>
+      )}
+      <div className="space-y-1.5">
+        <Label htmlFor={ids.amount}>{`Importe del medio ${index + 1}`}</Label>
+        <Input
+          id={ids.amount}
+          readOnly
+          aria-readonly
+          className="tabular-nums"
+          value={cheque ? formatMoney(cheque.amount) : ""}
+          placeholder="El del cheque"
+          aria-describedby={`${ids.amount}-hint`}
+        />
+        <p id={`${ids.amount}-hint`} className="text-xs text-muted-foreground">
+          Es el importe del cheque: se entrega entero, sin fracciones ni vuelto.
+        </p>
+      </div>
+    </>
+  );
 }
 
 function ItemRow({
   item,
   index,
   accounts,
+  cheques,
+  chequesLoading,
+  takenCheques,
   removable,
   onChange,
   onRemove,
@@ -146,6 +249,9 @@ function ItemRow({
   item: ItemForm;
   index: number;
   accounts: Account[];
+  cheques: Cheque[];
+  chequesLoading: boolean;
+  takenCheques: Set<number>;
   removable: boolean;
   onChange: (item: ItemForm) => void;
   onRemove: () => void;
@@ -166,7 +272,13 @@ function ItemRow({
             onChange={(e) => {
               const method = e.target.value as PaymentMethod;
               const next = accounts.filter((a) => a.active && a.kind === METHOD_KIND[method]);
-              onChange({ ...item, method, accountId: next.length === 1 ? next[0].id : null });
+              onChange({
+                ...item,
+                method,
+                accountId: method !== "CHEQUE" && next.length === 1 ? next[0].id : null,
+                chequeId: null,
+                amount: method === "CHEQUE" ? "" : item.amount,
+              });
             }}
           >
             {ENABLED_METHODS.map((method) => (
@@ -176,34 +288,53 @@ function ItemRow({
             ))}
           </select>
         </div>
-        <div className="space-y-1.5">
-          <Label htmlFor={ids.account}>{item.method === "CASH" ? "Caja" : "Banco"}</Label>
-          <select
-            id={ids.account}
-            className={selectClass}
-            value={item.accountId ?? ""}
-            onChange={(e) => onChange({ ...item, accountId: e.target.value ? Number(e.target.value) : null })}
-          >
-            <option value="">{item.method === "CASH" ? "Elegí la caja…" : "Elegí el banco…"}</option>
-            {options.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name} · saldo {formatMoney(a.balance)}
-              </option>
-            ))}
-          </select>
-        </div>
+        {item.method !== "CHEQUE" && (
+          <div className="space-y-1.5">
+            <Label htmlFor={ids.account}>{item.method === "CASH" ? "Caja" : "Banco"}</Label>
+            <select
+              id={ids.account}
+              className={selectClass}
+              value={item.accountId ?? ""}
+              onChange={(e) => onChange({ ...item, accountId: e.target.value ? Number(e.target.value) : null })}
+            >
+              <option value="">{item.method === "CASH" ? "Elegí la caja…" : "Elegí el banco…"}</option>
+              {options.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name} · saldo {formatMoney(a.balance)}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
-      <AmountField
-        label={`Importe del medio ${index + 1}`}
-        value={item.amount}
-        onChange={(amount) => onChange({ ...item, amount })}
-      />
+      {item.method === "CHEQUE" ? (
+        <ChequeFields
+          item={item}
+          index={index}
+          cheques={cheques}
+          loading={chequesLoading}
+          taken={takenCheques}
+          onChange={onChange}
+        />
+      ) : (
+        <AmountField
+          label={`Importe del medio ${index + 1}`}
+          value={item.amount}
+          onChange={(amount) => onChange({ ...item, amount })}
+        />
+      )}
       <TextField
         label={`Referencia del medio ${index + 1} (opcional)`}
         value={item.reference}
         onChange={(reference) => onChange({ ...item, reference })}
         maxLength={100}
-        hint={item.method === "TRANSFER" ? "Por ejemplo el número de la transferencia." : undefined}
+        hint={
+          item.method === "TRANSFER"
+            ? "Por ejemplo el número de la transferencia."
+            : item.method === "CHEQUE"
+              ? "Por ejemplo el recibo que firmó el tercero."
+              : undefined
+        }
       />
       {removable && (
         <div className="flex justify-end">
@@ -218,8 +349,9 @@ function ItemRow({
 }
 
 /**
- * «Registrar pago» (R6-1): a payment made to a third party with one or several means (cash from a cash box,
- * transfers from a bank). It records a payment made, never a debt: there is no balance per third party.
+ * «Registrar pago» (R6-1/R6-2): a payment made to a third party with one or several means (cash from a cash
+ * box, transfers from a bank, cheques of the portfolio delivered whole). It records a payment made, never a
+ * debt: there is no balance per third party. «Entregar» on a cheque opens it with that cheque preloaded.
  * Three steps: the form (the third party can be registered on the spot), then an explicit confirmation
  * listing every leg of the ledger, so money never leaves from one accidental click. The confirmation stays
  * closed until the means add up exactly to the total.
@@ -228,12 +360,14 @@ export function PaymentDialog({
   accounts,
   isAdmin,
   initialThirdParty,
+  initialCheque,
   onClose,
   onDone,
 }: {
   accounts: Account[];
   isAdmin: boolean;
   initialThirdParty?: number;
+  initialCheque?: number;
   onClose: () => void;
   onDone: (payment: PaymentDetail) => void;
 }) {
@@ -244,10 +378,18 @@ export function PaymentDialog({
     queryFn: () => thirdPartiesApi.list(false),
   });
   const categories = useQuery({ queryKey: [...deliveryQueryKey, "categories"], queryFn: deliveryApi.categories });
+  const portfolio = useQuery({ queryKey: portfolioQueryKey, queryFn: () => chequeApi.list(PORTFOLIO_FILTERS) });
 
-  const newItem = (key: number, method: PaymentMethod = "CASH"): ItemForm => {
+  const newItem = (key: number, method: PaymentMethod = "CASH", chequeId: number | null = null): ItemForm => {
     const options = accounts.filter((a) => a.active && a.kind === METHOD_KIND[method]);
-    return { key, method, accountId: options.length === 1 ? options[0].id : null, amount: "", reference: "" };
+    return {
+      key,
+      method,
+      accountId: method !== "CHEQUE" && options.length === 1 ? options[0].id : null,
+      chequeId,
+      amount: "",
+      reference: "",
+    };
   };
 
   const [step, setStep] = useState<"form" | "third-party" | "confirm">("form");
@@ -259,7 +401,9 @@ export function PaymentDialog({
   const [total, setTotal] = useState("");
   const [reference, setReference] = useState("");
   const [description, setDescription] = useState("");
-  const [items, setItems] = useState<ItemForm[]>(() => [newItem(0)]);
+  const [items, setItems] = useState<ItemForm[]>(() => [
+    initialCheque ? newItem(0, "CHEQUE", initialCheque) : newItem(0),
+  ]);
   const [problem, setProblem] = useState<string | null>(null);
 
   const action: WriteAction = usePaymentAction("payment-create", (payment) => {
@@ -277,7 +421,13 @@ export function PaymentDialog({
   const expenseCategories = (categories.data ?? []).filter((c) => c.code !== FUEL_CODE);
   const category = expenseCategories.find((c) => c.id === categoryId);
   const concepts = isAdmin ? [...OPERATOR_CONCEPTS, "OTHER" as const] : OPERATOR_CONCEPTS;
-  const balance = paymentBalance(total, items);
+  const cheques = portfolio.data?.items ?? [];
+  const chequeOf = (item: ItemForm) => cheques.find((c) => c.id === item.chequeId);
+  const balance = paymentBalance(total, itemAmounts(items, cheques));
+  const takenCheques = new Set(
+    items.flatMap((item) => (item.method === "CHEQUE" && item.chequeId ? [item.chequeId] : [])),
+  );
+  const portfolioAccount = accounts.find((a) => a.kind === "CHEQUE_PORTFOLIO")?.name ?? "Cartera de cheques";
 
   const validate = () => {
     if (thirdPartyId === null) return "Elegí el tercero o registralo.";
@@ -288,10 +438,15 @@ export function PaymentDialog({
     if (concept === "OTHER" && !description.trim()) return "En «Otro pago» la descripción es obligatoria.";
     if (!parseAmount(total)) return "Ingresá el total del pago, mayor a cero, con hasta dos decimales.";
     for (const [index, item] of items.entries()) {
+      if (item.method === "CHEQUE") {
+        if (item.chequeId === null) return `Elegí el cheque del medio ${index + 1}.`;
+        if (!chequeOf(item)) return `El cheque del medio ${index + 1} ya no está en cartera: elegí otro.`;
+        continue;
+      }
       if (item.accountId === null) return `Elegí la cuenta del medio ${index + 1}.`;
       if (!parseAmount(item.amount)) return `Ingresá el importe del medio ${index + 1}.`;
     }
-    const used = items.map((item) => item.accountId);
+    const used = items.filter((item) => item.method !== "CHEQUE").map((item) => item.accountId);
     if (new Set(used).size !== used.length)
       return "Cada caja o banco va una sola vez: sumá su importe en un solo medio.";
     if (!balance.matches) return "Los medios tienen que sumar exactamente el total.";
@@ -311,10 +466,15 @@ export function PaymentDialog({
   const counter = concept ? COUNTER_ACCOUNTS[concept] : null;
   const preview = (): PaymentPreview => ({
     title: `${concept ? CONCEPT_LABELS[concept] : ""} a ${thirdParty?.name ?? ""}`,
-    legs: items.map((item) => ({
-      account: accountName(item.accountId ?? 0) ?? "",
-      amount: parseAmount(item.amount) ?? "0",
-    })),
+    legs: items.map((item) => {
+      const cheque = chequeOf(item);
+      if (item.method === "CHEQUE")
+        return {
+          account: `Cheque n.º ${cheque?.cheque_number ?? ""} desde ${portfolioAccount}`,
+          amount: cheque?.amount ?? "0",
+        };
+      return { account: accountName(item.accountId ?? 0) ?? "", amount: parseAmount(item.amount) ?? "0" };
+    }),
     counter: {
       account: accounts.find((a) => a.code === counter?.code)?.name ?? counter?.name ?? "",
       amount: balance.total ?? "0",
@@ -338,18 +498,28 @@ export function PaymentDialog({
         amount: balance.total,
         reference: reference.trim() || null,
         description: description.trim() || null,
-        items: items.map((item) => ({
-          method: item.method,
-          account_id: item.accountId,
-          amount: parseAmount(item.amount),
-          reference: item.reference.trim() || null,
-        })),
+        items: items.map((item) =>
+          item.method === "CHEQUE"
+            ? {
+                method: item.method,
+                cheque_id: item.chequeId,
+                amount: chequeOf(item)?.amount,
+                reference: item.reference.trim() || null,
+              }
+            : {
+                method: item.method,
+                account_id: item.accountId,
+                amount: parseAmount(item.amount),
+                reference: item.reference.trim() || null,
+              },
+        ),
       },
       summary: `${concept ? CONCEPT_LABELS[concept] : "Pago"} a ${thirdParty?.name ?? ""} por ${formatMoney(balance.total ?? "0")}`,
     }));
 
   const title = "Registrar pago";
-  const intro = "Un pago hecho a un tercero, en efectivo o por transferencia. Registra lo pagado, no deudas.";
+  const intro =
+    "Un pago hecho a un tercero, en efectivo, por transferencia o con cheques de la cartera. Registra lo pagado, no deudas.";
 
   if (action.stored) {
     return (
@@ -507,6 +677,9 @@ export function PaymentDialog({
               item={item}
               index={index}
               accounts={accounts}
+              cheques={cheques}
+              chequesLoading={portfolio.isPending}
+              takenCheques={takenCheques}
               removable={items.length > 1}
               onChange={(next) => setItems(items.map((i) => (i.key === item.key ? next : i)))}
               onRemove={() => setItems(items.filter((i) => i.key !== item.key))}

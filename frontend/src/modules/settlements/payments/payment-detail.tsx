@@ -15,9 +15,18 @@ import { authApi, currentUserQueryKey, moduleRole, roleAtLeast } from "@/lib/api
 import { thirdPartyHref } from "@/lib/api/third-parties";
 import { formatDate, formatDateTime, formatMoney } from "@/lib/format";
 import type { Operation } from "@/modules/settlements/cash/api";
+import { chequeHref } from "@/modules/settlements/cheques/api";
+import { STATE_TONES as CHEQUE_TONES } from "@/modules/settlements/cheques/labels";
 import { ActionDialog, TextField } from "@/modules/settlements/delivery/form";
 
-import { paymentApi, paymentDetailKey, paymentPath, type PaymentDetail, type PaymentEvent } from "./api";
+import {
+  paymentApi,
+  paymentDetailKey,
+  paymentPath,
+  type PaymentDetail,
+  type PaymentEvent,
+  type PaymentItem,
+} from "./api";
 import { usePaymentAction } from "./payment-dialog";
 import { paymentErrorView } from "./errors";
 import { CONCEPT_LABELS, eventLabel, METHOD_LABELS, STATE_LABELS, STATE_TONES } from "./labels";
@@ -33,7 +42,19 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-function Legs({ operation, title }: { operation: Operation; title: string }) {
+/** "Banco Nación" or, for a cheque, "Cheque n.º 123 · Banco Galicia". */
+const itemName = (item: PaymentItem) =>
+  item.cheque ? `Cheque n.º ${item.cheque.cheque_number} · ${item.cheque.bank_name}` : (item.account_name ?? "");
+
+function Legs({
+  operation,
+  title,
+  chequeNumbers,
+}: {
+  operation: Operation;
+  title: string;
+  chequeNumbers: Map<number, string>;
+}) {
   return (
     <div className="space-y-1.5 text-sm">
       <p className="flex flex-wrap items-center gap-2 font-medium">
@@ -47,8 +68,11 @@ function Legs({ operation, title }: { operation: Operation; title: string }) {
       </p>
       <ul className="space-y-0.5">
         {operation.entries.map((entry) => (
-          <li key={entry.account_id} className="flex justify-between gap-4 tabular-nums">
-            <span>{entry.account_name}</span>
+          <li key={`${entry.account_id}-${entry.cheque_id ?? ""}`} className="flex justify-between gap-4 tabular-nums">
+            <span>
+              {entry.account_name}
+              {entry.cheque_id != null && ` · Cheque n.º ${chequeNumbers.get(entry.cheque_id) ?? entry.cheque_id}`}
+            </span>
             <span>{formatMoney(entry.amount, { signed: true })}</span>
           </li>
         ))}
@@ -57,10 +81,30 @@ function Legs({ operation, title }: { operation: Operation; title: string }) {
   );
 }
 
+/**
+ * The reversal undoes the whole payment. With cheques it needs the user to confirm, cheque by cheque, that
+ * each one was physically recovered from the third party: with one missing there is no reversal, never a
+ * partial one (the backend refuses it with `cheque_recovery_required`). The recovered cheques go back to the
+ * portfolio in the same transaction.
+ */
 function ReverseDialog({ payment, onClose }: { payment: PaymentDetail; onClose: () => void }) {
   const [reason, setReason] = useState("");
+  const [recovered, setRecovered] = useState<Set<number>>(new Set());
   const action = usePaymentAction(`payment-reverse:${payment.id}`, onClose);
-  const back = payment.items.map((item) => `${formatMoney(item.amount)} a ${item.account_name}`).join(", ");
+  const cheques = payment.items.flatMap((item) => (item.cheque ? [{ item, cheque: item.cheque }] : []));
+  const back = payment.items
+    .map((item) =>
+      item.cheque
+        ? `el cheque n.º ${item.cheque.cheque_number} (${formatMoney(item.amount)}) a Cartera de cheques`
+        : `${formatMoney(item.amount)} a ${item.account_name}`,
+    )
+    .join(", ");
+  const toggle = (id: number) => {
+    const next = new Set(recovered);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setRecovered(next);
+  };
   return (
     <ActionDialog
       title="Revertir pago"
@@ -76,14 +120,44 @@ function ReverseDialog({ payment, onClose }: { payment: PaymentDetail; onClose: 
       errorView={(e) => paymentErrorView(e)}
       where="el pago"
       onClose={onClose}
-      validate={() => (!reason.trim() ? "Indicá el motivo." : null)}
+      validate={() =>
+        (cheques.some(({ cheque }) => !recovered.has(cheque.cheque_id))
+          ? "Confirmá que recuperaste cada cheque. Si alguno no volvió, el pago no se puede revertir."
+          : null) ?? (!reason.trim() ? "Indicá el motivo." : null)
+      }
       build={(requestId) => ({
         method: "POST",
         path: paymentPath(payment.id, "/reverse"),
-        body: { client_request_id: requestId, reason: reason.trim() },
+        body: {
+          client_request_id: requestId,
+          reason: reason.trim(),
+          recovered_cheque_ids: cheques.map(({ cheque }) => cheque.cheque_id).filter((id) => recovered.has(id)),
+        },
         summary: `Reverso del pago n.º ${payment.id} por ${formatMoney(payment.amount)}`,
       })}
     >
+      {cheques.length > 0 && (
+        <fieldset className="space-y-2 rounded-md border border-border p-3" data-testid="recovered-cheques">
+          <legend className="px-1 text-sm font-medium">Cheques recuperados del tercero</legend>
+          <p className="text-xs text-muted-foreground">
+            Confirmá uno por uno que tenés cada cheque en mano. Si alguno no se recuperó, no se revierte.
+          </p>
+          {cheques.map(({ item, cheque }) => (
+            <label key={cheque.cheque_id} className="flex items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={recovered.has(cheque.cheque_id)}
+                onChange={() => toggle(cheque.cheque_id)}
+              />
+              <span>
+                Recuperé el cheque n.º {cheque.cheque_number} · {cheque.bank_name} por{" "}
+                <span className="tabular-nums">{formatMoney(item.amount)}</span>
+              </span>
+            </label>
+          ))}
+        </fieldset>
+      )}
       <TextField label="Motivo" value={reason} onChange={setReason} multiline />
     </ActionDialog>
   );
@@ -136,7 +210,7 @@ function CorrectDialog({ payment, onClose }: { payment: PaymentDetail; onClose: 
       {payment.items.map((item) => (
         <TextField
           key={item.id}
-          label={`Referencia de ${METHOD_LABELS[item.method].toLowerCase()} · ${item.account_name}`}
+          label={`Referencia de ${METHOD_LABELS[item.method].toLowerCase()} · ${itemName(item)}`}
           value={itemReferences[item.id] ?? ""}
           onChange={(value) => setItemReferences({ ...itemReferences, [item.id]: value })}
           maxLength={100}
@@ -209,6 +283,9 @@ export function PaymentDetailView({ paymentId }: { paymentId: number }) {
   }
   const payment = query.data;
   const editable = isAdmin && payment.state === "IN_EFFECT";
+  const chequeNumbers = new Map(
+    payment.items.flatMap((item) => (item.cheque ? [[item.cheque.cheque_id, item.cheque.cheque_number] as const] : [])),
+  );
 
   return (
     <>
@@ -286,8 +363,42 @@ export function PaymentDetailView({ paymentId }: { paymentId: number }) {
           <ul className="divide-y divide-border text-sm" data-testid="payment-items">
             {payment.items.map((item) => (
               <li key={item.id} className="flex flex-wrap justify-between gap-x-4 gap-y-0.5 py-2">
-                <span>
-                  {METHOD_LABELS[item.method]} · {item.account_name}
+                <span className="min-w-0">
+                  {item.cheque ? (
+                    <>
+                      {METHOD_LABELS[item.method]}{" "}
+                      <Link href={chequeHref(item.cheque.cheque_id)} className="text-primary hover:underline">
+                        n.º {item.cheque.cheque_number}
+                      </Link>{" "}
+                      · {item.cheque.bank_name}{" "}
+                      <Badge
+                        tone={CHEQUE_TONES[item.cheque.state]}
+                        data-testid={`payment-cheque-state-${item.cheque.cheque_id}`}
+                      >
+                        {item.cheque.state_label}
+                      </Badge>
+                      <span className="block text-xs text-muted-foreground">
+                        Librador {item.cheque.drawer_name} · lo entregó {item.cheque.delivered_by_name}
+                      </span>
+                      {item.cheque.recovered_at && (
+                        <span
+                          className="block text-xs"
+                          data-testid={`payment-cheque-recovered-${item.cheque.cheque_id}`}
+                        >
+                          Cheque recuperado y devuelto a Cartera
+                          {item.cheque.recovered_by_name && ` · ${item.cheque.recovered_by_name}`} ·{" "}
+                          {formatDateTime(item.cheque.recovered_at)} ·{" "}
+                          <Link href={chequeHref(item.cheque.cheque_id)} className="text-primary hover:underline">
+                            Ver cheque
+                          </Link>
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      {METHOD_LABELS[item.method]} · {item.account_name}
+                    </>
+                  )}
                   {item.reference && <span className="block text-xs text-muted-foreground">Ref. {item.reference}</span>}
                 </span>
                 <span className="font-medium tabular-nums">{formatMoney(item.amount)}</span>
@@ -306,8 +417,8 @@ export function PaymentDetailView({ paymentId }: { paymentId: number }) {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {payment.operation && <Legs operation={payment.operation} title="Pago" />}
-            {payment.reversal && <Legs operation={payment.reversal} title="Reverso" />}
+            {payment.operation && <Legs operation={payment.operation} title="Pago" chequeNumbers={chequeNumbers} />}
+            {payment.reversal && <Legs operation={payment.reversal} title="Reverso" chequeNumbers={chequeNumbers} />}
           </CardContent>
         </Card>
       )}

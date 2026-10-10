@@ -12,11 +12,13 @@ import { depositBlocker, expiringText } from "@/modules/settlements/cheques/labe
 import { SettlementCheques } from "@/modules/settlements/cheques/settlement-cheques";
 import type { Settlement } from "@/modules/settlements/delivery/api";
 
+import { cheque, shift } from "./cheque-fixture";
 import { jsonResponse, renderWithQuery } from "./render";
 
 const search = vi.hoisted(() => ({ params: new URLSearchParams() }));
+const router = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useRouter: () => router,
   useSearchParams: () => search.params,
 }));
 
@@ -30,72 +32,6 @@ const me = (role: Role) => ({
   role: "viewer",
   modules: [{ key: "settlements", name: "Rendiciones", role }],
 });
-
-function shift(days: number) {
-  const date = new Date(`${todayIso()}T12:00:00`);
-  date.setDate(date.getDate() + days);
-  return date.toISOString().slice(0, 10);
-}
-
-function cheque(changes: Partial<Cheque> = {}): Cheque {
-  return {
-    id: 21,
-    kind: "PHYSICAL",
-    payment_type: "COMMON",
-    amount: "100000.00",
-    issuer_bank_id: 7,
-    bank_bcra_code: 7,
-    bank_name: "Banco de Galicia",
-    branch_code: "001",
-    account_ref: null,
-    cheque_number: "00012345",
-    echeq_external_id: null,
-    identity_complete: true,
-    issue_date: shift(-5),
-    payment_date: null,
-    payable_from: shift(-5),
-    presentation_deadline: shift(25),
-    presentation_expired: false,
-    expires_in_days: 25,
-    expiring_soon: false,
-    location_label: "En Cartera de cheques",
-    deposit_id: null,
-    deposit_business_date: null,
-    deposit_bank_account_id: null,
-    deposit_bank_account_name: null,
-    credit_id: null,
-    credit_business_date: null,
-    drawer_name: "Don José SRL",
-    drawer_tax_id: null,
-    delivered_by_name: "Almacén Don José",
-    origin_type: "SETTLEMENT",
-    settlement_id: 7,
-    origin_pending_id: null,
-    received_business_date: shift(-5),
-    received_by_employee_id: 4,
-    received_by_name: "Pedro Gómez",
-    physical_receipt_confirmed_by_name: "Oscar Operador",
-    physical_receipt_confirmed_at: "2026-10-04T12:00:00Z",
-    verification_status: null,
-    verification_changed_by_name: null,
-    verification_changed_at: null,
-    verification_reason: null,
-    notes: null,
-    state: "IN_PORTFOLIO",
-    state_label: "En cartera",
-    published: true,
-    in_effect: true,
-    load_change: null,
-    load_change_detail: null,
-    created_by_name: "Oscar Operador",
-    created_at: "2026-10-04T12:00:00Z",
-    voided: false,
-    voided_by_name: null,
-    voided_at: null,
-    void_reason: null,
-    ...changes,
-  };
-}
 
 function detail(changes: Partial<ChequeDetail> = {}): ChequeDetail {
   return {
@@ -111,6 +47,7 @@ function detail(changes: Partial<ChequeDetail> = {}): ChequeDetail {
         settlement_version: 1,
         close_operation_id: null,
         operation_id: null,
+        payment_id: null,
         created_by_name: "Oscar Operador",
         created_at: "2026-10-04T12:00:00Z",
       },
@@ -124,6 +61,7 @@ function detail(changes: Partial<ChequeDetail> = {}): ChequeDetail {
         settlement_version: 1,
         close_operation_id: 400,
         operation_id: 400,
+        payment_id: null,
         created_by_name: "Oscar Operador",
         created_at: "2026-10-04T13:00:00Z",
       },
@@ -199,6 +137,7 @@ describe("expiry rules shown to the user", () => {
     expect(depositBlocker(cheque({ payable_from: shift(10) }), today)).toMatch(/^Disponible para depósito desde el /);
     expect(depositBlocker(cheque({ presentation_expired: true }), today)).toMatch(/^Vencido: se podía presentar hasta/);
     expect(depositBlocker(cheque({ state: "DEPOSITED" }), today)).toBe("No está en cartera.");
+    expect(depositBlocker(cheque({ state: "DELIVERED" }), today)).toBe("Entregado a un tercero: no está en cartera.");
   });
 
   it("says «Vence en N días» only when it is close", () => {
@@ -402,6 +341,8 @@ describe("cheque detail", () => {
           reversed: false,
           reversal_operation_id: null,
           pending_id: null,
+          third_party_id: null,
+          third_party_name: null,
         },
       ],
     });
@@ -421,6 +362,122 @@ describe("cheque detail", () => {
     await userEvent.type(within(dialog).getByLabelText("Motivo"), "Boleta equivocada");
     await userEvent.click(within(dialog).getByRole("button", { name: "Revertir" }));
     expect(await within(dialog).findByRole("alert")).toHaveTextContent("primero hay que revertir los posteriores");
+  });
+});
+
+/** Cheque n.º 00012345 delivered to «Distribuidora X» in the payment n.º 8 (R6-2). */
+const delivered = (changes: Partial<ChequeDetail> = {}) =>
+  detail({
+    state: "DELIVERED",
+    state_label: "Entregado",
+    location_label: "Entregado a Distribuidora X",
+    delivery_payment_id: 8,
+    delivery_third_party_id: 5,
+    delivery_third_party_name: "Distribuidora X",
+    delivery_business_date: "2026-10-09",
+    documents: [
+      {
+        type: "PAYMENT",
+        id: 8,
+        business_date: "2026-10-09",
+        operation_id: 60,
+        reversed: false,
+        reversal_operation_id: null,
+        pending_id: null,
+        third_party_id: 5,
+        third_party_name: "Distribuidora X",
+      },
+    ],
+    ...changes,
+  });
+
+describe("cheques delivered in payments (R6-2)", () => {
+  it("«Entregar» on a cheque of the portfolio opens «Registrar pago» with it, for an operator", async () => {
+    router.push.mockClear();
+    mockApi(base("operator", { "GET /settlements/cheques/21": () => jsonResponse(200, detail()) }));
+    renderWithQuery(<ChequeDetailView chequeId={21} />);
+    await userEvent.click(await screen.findByRole("button", { name: "Entregar" }));
+    expect(router.push).toHaveBeenCalledWith("/rendiciones/pagos?cheque=21");
+  });
+
+  it("a viewer has no «Entregar»", async () => {
+    mockApi(base("viewer", { "GET /settlements/cheques/21": () => jsonResponse(200, detail()) }));
+    renderWithQuery(<ChequeDetailView chequeId={21} />);
+    await screen.findByTestId("cheque-state");
+    expect(screen.queryByRole("button", { name: "Entregar" })).not.toBeInTheDocument();
+  });
+
+  it("a delivered cheque says to whom, by which payment and when, with nothing to deposit, return or deliver", async () => {
+    mockApi(base("admin", { "GET /settlements/cheques/21": () => jsonResponse(200, delivered()) }));
+    renderWithQuery(<ChequeDetailView chequeId={21} />);
+    expect(await screen.findByTestId("cheque-state")).toHaveTextContent("Entregado");
+    const delivery = screen.getByTestId("cheque-delivery");
+    expect(delivery).toHaveTextContent("Entregado a Distribuidora X en el pago n.º 8 del 09/10/2026.");
+    expect(within(delivery).getByRole("link", { name: "Ver pago" })).toHaveAttribute("href", "/rendiciones/pagos/8");
+    expect(within(delivery).getByRole("link", { name: "Distribuidora X" })).toHaveAttribute("href", "/terceros/5");
+    for (const name of ["Depositar", "Devolver cheque", "Entregar", "Registrar rechazo"]) {
+      expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
+    }
+    const document = screen.getByTestId("document-PAYMENT-8");
+    expect(document).toHaveTextContent("Entregado a tercero");
+    expect(document).toHaveTextContent("a Distribuidora X");
+    expect(within(document).getByRole("link", { name: "Ver pago" })).toHaveAttribute("href", "/rendiciones/pagos/8");
+    // The payment is reversed only from the payment, with the cheque recovered: no «Revertir» here.
+    expect(within(document).queryByRole("button", { name: "Revertir" })).not.toBeInTheDocument();
+  });
+
+  it("its history names the delivery and the recovery with a link to the payment", async () => {
+    const event = (id: number, event_type: string, reason: string | null = null) => ({
+      id,
+      event_type,
+      before: null,
+      after: null,
+      reason,
+      settlement_id: null,
+      settlement_version: null,
+      close_operation_id: null,
+      operation_id: 60,
+      payment_id: 8,
+      created_by_name: "Ada Admin",
+      created_at: "2026-10-10T12:00:00Z",
+    });
+    mockApi(
+      base("viewer", {
+        "GET /settlements/cheques/21": () =>
+          jsonResponse(
+            200,
+            detail({ events: [event(5, "DELIVERED"), event(6, "RECOVERED_FROM_PAYMENT", "Pago equivocado")] }),
+          ),
+      }),
+    );
+    renderWithQuery(<ChequeDetailView chequeId={21} />);
+    expect(await screen.findByText("Entregado a un tercero en un pago")).toBeInTheDocument();
+    expect(screen.getByText("Recuperado del tercero y devuelto a Cartera")).toBeInTheDocument();
+    expect(screen.getByText("Motivo: Pago equivocado")).toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: "Pago n.º 8" })[0]).toHaveAttribute("href", "/rendiciones/pagos/8");
+  });
+
+  it("the list offers «Entregar» on cheques of the portfolio and «Ver pago» on delivered ones", async () => {
+    mockApi(
+      base("operator", {
+        "GET /settlements/cheques": () =>
+          jsonResponse(200, {
+            items: [cheque(), { ...delivered(), id: 23, cheque_number: "00099999" }],
+            total: 2,
+          }),
+      }),
+    );
+    renderWithQuery(<ChequeList />);
+    const inPortfolio = await screen.findByTestId("cheque-21");
+    expect(within(inPortfolio).getByRole("link", { name: /Entregar el cheque n.º 00012345/ })).toHaveAttribute(
+      "href",
+      "/rendiciones/pagos?cheque=21",
+    );
+    const gone = screen.getByTestId("cheque-23");
+    expect(gone).toHaveTextContent("Entregado a Distribuidora X");
+    expect(within(gone).getByRole("link", { name: "Ver pago n.º 8" })).toHaveAttribute("href", "/rendiciones/pagos/8");
+    expect(within(gone).queryByRole("link", { name: /Entregar/ })).not.toBeInTheDocument();
+    expect(within(gone).queryByRole("checkbox")).not.toBeInTheDocument();
   });
 });
 

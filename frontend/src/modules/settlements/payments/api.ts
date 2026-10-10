@@ -1,13 +1,33 @@
 import { apiFetch } from "@/lib/api/client";
 import type { ThirdParty, ThirdPartyInput } from "@/lib/api/third-parties";
 import type { AccountKind, Operation } from "@/modules/settlements/cash/api";
+import type { ChequeKind, ChequeState, PaymentType } from "@/modules/settlements/cheques/api";
 
-/** Payments API (`/api/v1/settlements/payments`, R6-1): payments made to third parties, never debts. */
+/**
+ * Payments API (`/api/v1/settlements/payments`, R6-1/R6-2): payments made to third parties, never debts. A
+ * payment combines cash, transfers and cheques of the portfolio, each cheque for its whole amount.
+ */
 
 export type PaymentConcept = "MERCHANDISE" | "EXPENSE" | "REFUND" | "OTHER";
-/** CHEQUE belongs to the model; R6-1 refuses it (`payment_method_not_enabled`). */
 export type PaymentMethod = "CASH" | "TRANSFER" | "CHEQUE";
 export type PaymentState = "IN_EFFECT" | "REVERSED";
+
+/** The cheque of a CHEQUE item as it is now: «Entregado» while the payment is in effect. */
+export interface PaymentCheque {
+  cheque_id: number;
+  kind: ChequeKind;
+  payment_type: PaymentType;
+  cheque_number: string;
+  bank_name: string;
+  drawer_name: string;
+  delivered_by_name: string;
+  payable_from: string;
+  state: ChequeState;
+  state_label: string;
+  /** When the payment was reversed: who confirmed the cheque was recovered from the third party, and when. */
+  recovered_at: string | null;
+  recovered_by_name: string | null;
+}
 
 export interface PaymentItem {
   id: number;
@@ -16,6 +36,7 @@ export interface PaymentItem {
   account_name: string | null;
   account_kind: AccountKind | null;
   cheque_id: number | null;
+  cheque: PaymentCheque | null;
   amount: string;
   reference: string | null;
 }

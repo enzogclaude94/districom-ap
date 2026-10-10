@@ -1,8 +1,9 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, CheckCircle2 } from "lucide-react";
+import { ArrowLeft, CheckCircle2, HandCoins } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState, type ReactNode } from "react";
 
 import { ErrorState } from "@/components/common/error-state";
@@ -12,12 +13,15 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { authApi, currentUserQueryKey, moduleRole, roleAtLeast } from "@/lib/api/auth";
+import { thirdPartyHref } from "@/lib/api/third-parties";
 import { formatDate, formatDateTime, formatMoney, todayIso } from "@/lib/format";
+import { paymentHref } from "@/modules/settlements/payments/api";
 import { pendingHref } from "@/modules/settlements/pending/labels";
 
 import {
   chequeApi,
   chequeDetailKey,
+  deliverHref,
   documentHref,
   type ChequeDetail as Detail,
   type ChequeDocument,
@@ -86,7 +90,41 @@ function Origin({ cheque }: { cheque: Detail }) {
 }
 
 const isCycle = (doc: ChequeDocument): doc is ChequeDocument & { type: CycleDocumentType } =>
-  doc.type !== "PENDING_RECEIPT";
+  doc.type !== "PENDING_RECEIPT" && doc.type !== "PAYMENT";
+
+/** Who has a DELIVERED cheque, by which payment and since when (R6-2). */
+export function Delivery({ cheque }: { cheque: Detail }) {
+  if (cheque.state !== "DELIVERED" || cheque.delivery_payment_id === null) return null;
+  return (
+    <div
+      className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-border px-3 py-2 text-sm"
+      data-testid="cheque-delivery"
+    >
+      <span>
+        Entregado a{" "}
+        {cheque.delivery_third_party_id !== null ? (
+          <Link
+            href={thirdPartyHref(cheque.delivery_third_party_id)}
+            className="font-medium text-primary hover:underline"
+          >
+            {cheque.delivery_third_party_name}
+          </Link>
+        ) : (
+          <span className="font-medium">{cheque.delivery_third_party_name}</span>
+        )}{" "}
+        en el pago n.º {cheque.delivery_payment_id}
+        {cheque.delivery_business_date && ` del ${formatDate(cheque.delivery_business_date)}`}.
+      </span>
+      <Link href={paymentHref(cheque.delivery_payment_id)} className="text-primary hover:underline">
+        Ver pago
+      </Link>
+      <span className="basis-full text-xs text-muted-foreground">
+        No se deposita, no se devuelve ni se vuelve a entregar. Vuelve a Cartera solo si se revierte el pago con el
+        cheque recuperado.
+      </span>
+    </div>
+  );
+}
 
 /** `/rendiciones/cheques/[id]`: the instrument, where it came from, where it is, and everything that happened. */
 export function ChequeDetailView({ chequeId }: { chequeId: number }) {
@@ -95,6 +133,7 @@ export function ChequeDetailView({ chequeId }: { chequeId: number }) {
   const canOperate = roleAtLeast(role, "operator");
   const isAdmin = roleAtLeast(role, "admin");
   const query = useQuery({ queryKey: chequeDetailKey(chequeId), queryFn: () => chequeApi.get(chequeId) });
+  const router = useRouter();
   const [dialog, setDialog] = useState<Open>(null);
   const [notice, setNotice] = useState<Notice>(null);
   const close = () => setDialog(null);
@@ -170,6 +209,7 @@ export function ChequeDetailView({ chequeId }: { chequeId: number }) {
               Disponible para depósito desde el {formatDate(cheque.payable_from)}.
             </p>
           )}
+          <Delivery cheque={cheque} />
           {cheque.state === "DECLARED" && (
             <p className="rounded-md border border-warning/40 bg-warning-soft px-3 py-2 text-sm">
               ECHEQ pendiente de verificación: todavía no justifica nada ni está en cartera.
@@ -183,6 +223,10 @@ export function ChequeDetailView({ chequeId }: { chequeId: number }) {
                     Depositar
                   </Button>
                   {blocked && <span className="self-center text-xs text-muted-foreground">{blocked}</span>}
+                  <Button variant="secondary" size="sm" onClick={() => router.push(deliverHref(cheque.id))}>
+                    <HandCoins aria-hidden />
+                    Entregar
+                  </Button>
                   {isAdmin && (
                     <Button variant="secondary" size="sm" onClick={() => setDialog({ kind: "return" })}>
                       Devolver cheque
@@ -274,7 +318,9 @@ export function ChequeDetailView({ chequeId }: { chequeId: number }) {
         </CardHeader>
         <CardContent>
           {cheque.documents.length === 0 ? (
-            <p className="py-3 text-center text-sm text-muted-foreground">Todavía no se depositó ni se cobró.</p>
+            <p className="py-3 text-center text-sm text-muted-foreground">
+              Todavía no se depositó, no se cobró ni se entregó.
+            </p>
           ) : (
             <ul className="divide-y divide-border text-sm">
               {cheque.documents.map((doc) => (
@@ -286,9 +332,17 @@ export function ChequeDetailView({ chequeId }: { chequeId: number }) {
                   <span className="font-medium">{DOCUMENT_LABELS[doc.type]}</span>
                   <span className="text-muted-foreground tabular-nums">{formatDate(doc.business_date)}</span>
                   {doc.reversed && <Badge tone="warning">Revertido</Badge>}
+                  {doc.type === "PAYMENT" && doc.third_party_name && (
+                    <span className="text-muted-foreground">a {doc.third_party_name}</span>
+                  )}
                   {isCycle(doc) && (
                     <Link href={documentHref(doc.type, doc.id)} className="text-primary hover:underline">
                       Ver documento
+                    </Link>
+                  )}
+                  {doc.type === "PAYMENT" && (
+                    <Link href={paymentHref(doc.id)} className="text-primary hover:underline">
+                      Ver pago
                     </Link>
                   )}
                   <Link href={operationHref(doc.operation_id)} className="text-primary hover:underline">
@@ -330,6 +384,11 @@ export function ChequeDetailView({ chequeId }: { chequeId: number }) {
                   {event.settlement_version !== null && ` · versión ${event.settlement_version} de la rendición`}
                 </p>
                 {event.reason && <p className="text-xs">Motivo: {event.reason}</p>}
+                {event.payment_id !== null && (
+                  <Link href={paymentHref(event.payment_id)} className="text-xs text-primary hover:underline">
+                    Pago n.º {event.payment_id}
+                  </Link>
+                )}
               </li>
             ))}
           </ol>

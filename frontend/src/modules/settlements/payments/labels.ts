@@ -16,8 +16,8 @@ export const METHOD_LABELS: Record<PaymentMethod, string> = {
   CHEQUE: "Cheque",
 };
 
-/** Means enabled in R6-1. Cheques arrive with R6-2. */
-export const ENABLED_METHODS: PaymentMethod[] = ["CASH", "TRANSFER"];
+/** Every mean: cash from a cash box, a transfer from a bank, a cheque of the portfolio (R6-2). */
+export const ENABLED_METHODS: PaymentMethod[] = ["CASH", "TRANSFER", "CHEQUE"];
 
 export const STATE_LABELS: Record<PaymentState, string> = {
   IN_EFFECT: "Vigente",

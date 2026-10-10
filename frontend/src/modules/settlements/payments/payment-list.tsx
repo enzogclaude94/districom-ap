@@ -38,7 +38,13 @@ const PAGE_SIZE = 20;
  * `/rendiciones/pagos` (R6-1): payments made to third parties, with filters and the sum of those in effect.
  * It is what was paid, never a balance owed: DistriCom records no debts with third parties.
  */
-export function PaymentList({ initialThirdParty }: { initialThirdParty?: number }) {
+export function PaymentList({
+  initialThirdParty,
+  initialCheque,
+}: {
+  initialThirdParty?: number;
+  initialCheque?: number;
+}) {
   const ids = { thirdParty: useId(), concept: useId(), account: useId(), state: useId(), from: useId(), to: useId() };
   const me = useQuery({ queryKey: currentUserQueryKey, queryFn: authApi.me });
   const role = moduleRole(me.data, "settlements");
@@ -56,7 +62,8 @@ export function PaymentList({ initialThirdParty }: { initialThirdParty?: number 
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(0);
-  const [creating, setCreating] = useState(false);
+  // «Entregar» on a cheque lands here with it preloaded in «Registrar pago» (R6-2).
+  const [creating, setCreating] = useState(initialCheque !== undefined);
   const [notice, setNotice] = useState<{ id: number; text: string } | null>(null);
 
   const filters: PaymentFilters = {
@@ -86,7 +93,7 @@ export function PaymentList({ initialThirdParty }: { initialThirdParty?: number 
     <>
       <PageHeader
         title="Pagos"
-        description="Pagos hechos a proveedores y otros terceros, en efectivo o por transferencia. Es lo pagado, no deudas."
+        description="Pagos hechos a proveedores y otros terceros, en efectivo, por transferencia o con cheques de la cartera. Es lo pagado, no deudas."
         actions={
           canOperate &&
           accounts.data && (
@@ -238,11 +245,12 @@ export function PaymentList({ initialThirdParty }: { initialThirdParty?: number 
         </Card>
       )}
 
-      {creating && accounts.data && (
+      {creating && canOperate && accounts.data && (
         <PaymentDialog
           accounts={accounts.data}
           isAdmin={isAdmin}
           initialThirdParty={thirdPartyId}
+          initialCheque={initialCheque}
           onClose={() => setCreating(false)}
           onDone={(payment) => {
             setPage(0);
