@@ -1,12 +1,10 @@
 import { expect, test, type APIRequestContext, type Locator, type Page } from "@playwright/test";
 
 import { adminEmail, adminPassword, login } from "./helpers";
+import { api, chequeForPending, closedWithPending, day, driver, openSettlement } from "./settlement-setup";
 
 const operatorEmail = process.env.E2E_OPERATOR_EMAIL ?? "e2e-operator@districom.local";
 const operatorPassword = process.env.E2E_OPERATOR_PASSWORD ?? "operator-password-123";
-
-const HEADERS = { "X-Requested-With": "e2e" };
-const DRIVER_FUNCTION = "settlements.delivery_driver";
 
 interface Account {
   id: number;
@@ -16,37 +14,7 @@ interface Account {
   balance: string;
 }
 
-/** Days from today in the business calendar (the browser runs in the business time zone). */
-function day(offset: number) {
-  const at = new Date(Date.now() + offset * 24 * 60 * 60 * 1000);
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }).format(at);
-}
-
 const cents = (amount: string) => Math.round(Number(amount) * 100);
-
-async function api<T>(
-  request: APIRequestContext,
-  method: "GET" | "POST" | "PUT" | "PATCH",
-  path: string,
-  data?: unknown,
-) {
-  const response = await request.fetch(`/api/v1${path}`, { method, headers: HEADERS, data });
-  expect(response.ok(), `${method} ${path}: ${await response.text()}`).toBeTruthy();
-  return (await response.json()) as T;
-}
-
-async function driver(request: APIRequestContext, name: string) {
-  const created = await api<{ id: number }>(request, "POST", "/employees", {
-    full_name: name,
-    hire_date: null,
-    phone: null,
-  });
-  await api(request, "POST", `/employees/${created.id}/functions`, {
-    function_code: DRIVER_FUNCTION,
-    valid_from: "2026-01-01",
-  });
-  return created.id;
-}
 
 async function account(request: APIRequestContext, code: string) {
   const all = await api<Account[]>(request, "GET", "/settlements/accounts?include_inactive=true");
@@ -58,69 +26,6 @@ const balance = async (request: APIRequestContext, code: string) => cents((await
 async function switchUser(page: Page, email: string, password: string, next: string) {
   await page.context().clearCookies();
   await login(page, next, email, password);
-}
-
-async function openSettlement(request: APIRequestContext, driverId: number, amount: string) {
-  const created = await api<{ id: number }>(request, "POST", "/settlements/deliveries", {
-    client_request_id: crypto.randomUUID(),
-    business_date: day(-1),
-    employee_id: driverId,
-    expected_amount: amount,
-  });
-  return created.id;
-}
-
-/** A closed settlement whose only justification is one pending (API: the setup is not under test). */
-async function closedWithPending(request: APIRequestContext, driverId: number, customer: string, amount: string) {
-  const id = await openSettlement(request, driverId, amount);
-  const loaded = await api<{ pending_collections: { id: number }[] }>(
-    request,
-    "POST",
-    `/settlements/deliveries/${id}/pending-collections`,
-    { client_request_id: crypto.randomUUID(), customer_name: customer, amount, reason: "Paga con cheque" },
-  );
-  const preview = await api<{ preview_token: string }>(request, "GET", `/settlements/deliveries/${id}/closing-preview`);
-  await api(request, "POST", `/settlements/deliveries/${id}/close`, {
-    version: 1,
-    preview_token: preview.preview_token,
-    allocations: [],
-    confirm: true,
-  });
-  return loaded.pending_collections[0].id;
-}
-
-async function galicia(request: APIRequestContext) {
-  const banks = await api<{ id: number; bcra_code: number }[]>(request, "GET", "/financial-institutions");
-  return banks.find((b) => b.bcra_code === 7)!.id;
-}
-
-/** A physical cheque collected for a pending, by API (setup of the flows that start later in the cycle). */
-async function chequeForPending(
-  request: APIRequestContext,
-  pendingId: number,
-  amount: string,
-  number: string,
-  customer: string,
-) {
-  const detail = await api<{ receipts: { cheque_id: number | null }[] }>(
-    request,
-    "POST",
-    `/settlements/pending-collections/${pendingId}/cheque-receipts`,
-    {
-      client_request_id: crypto.randomUUID(),
-      business_date: day(-1),
-      kind: "PHYSICAL",
-      payment_type: "COMMON",
-      amount,
-      issuer_bank_id: await galicia(request),
-      cheque_number: number,
-      issue_date: day(-1),
-      drawer_name: "Librador E2E",
-      delivered_by_name: customer,
-      physical_receipt_confirmed: true,
-    },
-  );
-  return detail.receipts.find((r) => r.cheque_id !== null)!.cheque_id!;
 }
 
 /** Fill the instrument form (settlement or pending receipt). */
@@ -231,7 +136,7 @@ test("A. physical cheque in a settlement: close, deposit and credit from the por
   // The document shows the slip and links to the cheque; the detail shows the history.
   await page.getByRole("status").getByRole("link", { name: "Ver documento" }).click();
   await expect(page.getByRole("heading", { name: /Acreditación n.º \d+/ })).toBeVisible();
-  await page.getByRole("link", { name: `N.º ${number}` }).click();
+  await page.getByRole("link", { name: `N.º ${number}`, exact: true }).click();
   await expect(page.getByTestId("cheque-state")).toHaveText("Acreditado");
   for (const event of ["Recibido", "Entró a cartera", "Depositado", "Acreditado"]) {
     await expect(page.getByText(event, { exact: true }).first()).toBeVisible();
@@ -471,7 +376,7 @@ test("F. the cheque list and detail work on a phone", async ({ page, isMobile })
   await expect(card).toContainText("En cartera");
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   expect(overflow).toBeLessThanOrEqual(0);
-  await card.getByRole("link", { name: `N.º ${number}` }).click();
+  await card.getByRole("link", { name: `N.º ${number}`, exact: true }).click();
   await expect(page.getByTestId("cheque-state")).toHaveText("En cartera");
   await expect(page.getByText("Presentar hasta").first()).toBeVisible();
   await expect(page.getByRole("button", { name: "Depositar" })).toBeVisible();
