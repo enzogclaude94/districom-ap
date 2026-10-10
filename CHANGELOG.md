@@ -4,6 +4,15 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Added — Cheques de cartera como medio de pago (R6‑2)
+- **Pagos con cheques:** un pago combina efectivo, transferencias y uno o más cheques de la cartera, cada uno por su importe nominal entero (sin fracciones, vuelto ni saldo a favor). El cheque tiene que estar en cartera en la fecha del pago y sin otra salida después, no solo hoy (`cheque_not_in_portfolio`, `cheque_not_in_portfolio_on_date`, `cheque_amount_mismatch`). Patas: Cartera de cheques −nominal con su `cheque_id` por cheque, contrapartida del concepto.
+- **Estado «Entregado» (`DELIVERED`)**, derivado del pago vigente; nunca convive con Depositado, Acreditado, Rechazado ni Devuelto. Precedencia documentada en `cheques/state.py` y `DATA_MODEL.md §13.6.1`. Un cheque entregado no se deposita, devuelve ni vuelve a entregar.
+- **Eventos** `DELIVERED` y `RECOVERED_FROM_PAYMENT` en `cheque_events` con `payment_id` y operación.
+- **Reverso con recuperación física por cheque:** `recovered_cheque_ids`; si falta uno no hay reverso (`cheque_recovery_required`), sin reversos parciales. Reverso espejo, eventos y vuelta a Cartera en una transacción; un pago sin cheques no pide confirmación.
+- **Migración `0020`** (sin tablas nuevas): `cheque_events.payment_id`, CHECKs de eventos, `check_payment_item` y `verify_payment` extendidos (ítem CHEQUE por el nominal, pata exacta por cheque, un pago vigente por cheque, cartera continua desde la fecha, un `DELIVERED` por cheque, reverso espejo y recuperación completa); el downgrade se rechaza si ya se entregó un cheque.
+- **Pantallas:** medio «Cheque» en «Registrar pago» con selector de cheques en cartera e importe bloqueado; confirmación «Cheque n.º … desde Cartera de cheques»; «Entregar» en Cartera y en el detalle del cheque (precarga el pago); estado «Entregado» con tercero, pago y fecha y «Ver pago»; documento «Entregado a tercero» en la historia del cheque; reverso con una confirmación por cheque y «Cheque recuperado y devuelto a Cartera».
+- **Tests:** API, SQL directo, concurrencia A–F, frontend y E2E (`docs/TESTING.md`).
+
 ### Added — Terceros y pagos con efectivo/transferencia (R6‑1)
 - **R6‑1 DONE:** aprobada por Enzo el 2026-10-10 con sus desvíos documentados; PR #29 mergeado; `0018` y `0019` congeladas. R6‑2 autorizada.
 - **Propuesta R6 aprobada** por Enzo el 2026-10-09 con precisiones (D1–D8); solo R6‑1 autorizada. Registra **pagos realizados**, no cuentas a pagar: sin deuda, saldo por tercero, factura ni vencimiento.

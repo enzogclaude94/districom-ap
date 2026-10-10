@@ -43,7 +43,7 @@ DistriCom es una plataforma modular (ADR 006). Este roadmap tiene tres carriles:
 | R3 | Pendientes de cobro | **DONE** (2026-10-07; R3‑1, R3‑2 y R3‑3 aprobados y mergeados, PRs #13, #14 y #16) | R2 |
 | R4 | Cartera de cheques | **DONE** (aprobada por Enzo el 2026-10-09; PRs #17, #18 y #19) | R2 · R3 |
 | R5 | Combustible y vehículos | **DONE** (R5‑1 a R5‑4; `0014`–`0017` congeladas) | R2 |
-| R6 | Pagos a proveedores y terceros | IN_PROGRESS (R6‑1 DONE; R6‑2 en curso) | R1 · R4 |
+| R6 | Pagos a proveedores y terceros | IN_PROGRESS (R6‑1 DONE; R6‑2 IN_REVIEW) | R1 · R4 |
 | R7 | Boca de expendio | PLANNED | R2–R5 |
 | R8 | Cuenta interna de empleados y liquidación semanal | PLANNED | R1 · R2 |
 | R9 | Endurecimiento | PLANNED | todas |
@@ -225,7 +225,7 @@ Propuesta `PROPUESTA_R6_PAGOS_Y_TERCEROS.md` **aprobada** por Enzo el 2026-10-09
 | PR | Contenido | Estado |
 |---|---|---|
 | R6‑1 | Terceros + pagos con efectivo y transferencia (cheque rechazado con `payment_method_not_enabled`); `0018` y `0019` | **DONE** (PR #29, aprobada por Enzo el 2026-10-10 con sus desvíos documentados; `0018` y `0019` congeladas) |
-| R6‑2 | Entrega de cheques de cartera como medio de pago (`DELIVERED`, «Entregar», reverso con recuperación física por cheque; `0020` si hace falta) | IN_PROGRESS |
+| R6‑2 | Entrega de cheques de cartera como medio de pago (`DELIVERED`, «Entregar», reverso con recuperación física por cheque); `0020` | IN_REVIEW (espera aprobación de Enzo; R6‑3 no empieza sin ella) |
 
 ### R7 — Boca de expendio
 **Alcance:** boca como punto que rinde (`outlets`), una rendición diaria con entregas parciales, misma lógica de rendición.
