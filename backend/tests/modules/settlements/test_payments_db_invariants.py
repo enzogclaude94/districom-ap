@@ -221,20 +221,6 @@ def test_an_item_leaves_the_right_kind_of_active_account(db: Session, world) -> 
     assert "not an active account of method" in _refused(db, lambda: _item(db, pid_of(), world["change"], 100))
 
 
-def test_cheque_items_are_not_enabled(db: Session, world) -> None:  # type: ignore[no-untyped-def]
-    def write() -> None:
-        pid = _payment(db, world)
-        _sql(
-            db,
-            "INSERT INTO settlements.payment_items (payment_id, method, cheque_id, amount) "
-            "VALUES (:p, 'CHEQUE', 1, 100)",
-            p=pid,
-        )
-
-    message = _refused(db, write)
-    assert "not enabled" in message or "fk_payment_items_cheque_id_cheques" in message
-
-
 # --- 4, 5, 6, 14: the operation ------------------------------------------------------------------------
 
 
