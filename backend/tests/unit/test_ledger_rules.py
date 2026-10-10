@@ -80,7 +80,11 @@ def test_fingerprint_changes_with_the_command(change: dict[str, object]) -> None
         ("PAYMENT", ["CASH_BOX", "MERCHANDISE_PAYMENTS", "EXPENSE"], [-1, 1, 1], False),
         ("PAYMENT", ["CASH_BOX", "BANK"], [-1, 1], False),
         ("PAYMENT", ["CASH_BOX", "MERCHANDISE_PAYMENTS"], [1, -1], False),
-        ("PAYMENT", ["CHEQUE_PORTFOLIO", "MERCHANDISE_PAYMENTS"], [-1, 1], False),
+        # R6-2: cheques of the portfolio leave it, one leg each, never enter it through a payment.
+        ("PAYMENT", ["CHEQUE_PORTFOLIO", "MERCHANDISE_PAYMENTS"], [-1, 1], True),
+        ("PAYMENT", ["CASH_BOX", "BANK", "CHEQUE_PORTFOLIO", "CHEQUE_PORTFOLIO", "EXPENSE"], [-1, -1, -1, -1, 1], True),
+        ("PAYMENT", ["CHEQUE_PORTFOLIO", "MERCHANDISE_PAYMENTS"], [1, -1], False),
+        ("PAYMENT", ["CHEQUES_IN_TRANSIT", "MERCHANDISE_PAYMENTS"], [-1, 1], False),
         ("PAYMENT", ["CASH_BOX", "UNCOLLECTIBLE"], [-1, 1], False),
     ],
 )

@@ -134,17 +134,19 @@ RULES: dict[str, OperationRule] = {
     "DIRECT_EXPENSE": OperationRule(
         "operator", CASH_AND_BANK | {"EXPENSE"}, "EXPENSE", (("CASH_BOX", -1), ("BANK", -1), ("EXPENSE", 1))
     ),
-    # A payment made to a third party (R6-1): each item leaves its cash box or bank account; ONE counter-leg
-    # for the whole amount enters the technical account of its concept (merchandise, expense, refund, other).
-    # Its document is the payment, which builds the legs; the database checks them against it. An ordinary
-    # debit: the bank never goes into an overdraft for it (not an EXTERNAL_BANK_DEBIT).
+    # A payment made to a third party (R6-1): each item leaves its cash box or bank account, or (R6-2) each
+    # cheque leaves "Cartera de cheques" with its own leg; ONE counter-leg for the whole amount enters the
+    # technical account of its concept (merchandise, expense, refund, other). Its document is the payment,
+    # which builds the legs; the database checks them against it. An ordinary debit: the bank never goes
+    # into an overdraft for it (not an EXTERNAL_BANK_DEBIT).
     "PAYMENT": OperationRule(
         "operator",
-        CASH_AND_BANK | PAYMENT_COUNTERPARTS,
+        CASH_AND_BANK | PAYMENT_COUNTERPARTS | {"CHEQUE_PORTFOLIO"},
         None,
         (
             ("CASH_BOX", -1),
             ("BANK", -1),
+            ("CHEQUE_PORTFOLIO", -1),
             ("MERCHANDISE_PAYMENTS", 1),
             ("EXPENSE", 1),
             ("THIRD_PARTY_REFUNDS", 1),
