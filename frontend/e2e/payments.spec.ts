@@ -1,6 +1,6 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 
-import { adminEmail, adminPassword, login } from "./helpers";
+import { adminEmail, adminPassword, businessDay, login } from "./helpers";
 
 const operatorEmail = process.env.E2E_OPERATOR_EMAIL ?? "e2e-operator@districom.local";
 const operatorPassword = process.env.E2E_OPERATOR_PASSWORD ?? "operator-password-123";
@@ -26,10 +26,7 @@ async function account(request: APIRequestContext, code: string) {
   return all.find((a) => a.code === code)!;
 }
 
-function today() {
-  const now = new Date();
-  return new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
-}
+const today = () => businessDay();
 
 async function noHorizontalScroll(page: Page) {
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);

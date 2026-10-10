@@ -1,6 +1,6 @@
 import { expect, test, type APIRequestContext } from "@playwright/test";
 
-import { adminEmail, adminPassword, login } from "./helpers";
+import { adminEmail, adminPassword, businessDay, login } from "./helpers";
 
 const operatorEmail = process.env.E2E_OPERATOR_EMAIL ?? "e2e-operator@districom.local";
 const operatorPassword = process.env.E2E_OPERATOR_PASSWORD ?? "operator-password-123";
@@ -26,10 +26,7 @@ async function mainCash(request: APIRequestContext) {
   return all.find((a) => a.code === "main_cash")!;
 }
 
-function today() {
-  const now = new Date();
-  return new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
-}
+const today = () => businessDay();
 
 test("an operator pays fuel from the main cash box after a confirmation; an admin reverses it", async ({
   page,
