@@ -5,6 +5,7 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 ## [Unreleased]
 
 ### Added — Terceros y pagos con efectivo/transferencia (R6‑1)
+- **R6‑1 DONE:** aprobada por Enzo el 2026-10-10 con sus desvíos documentados; PR #29 mergeado; `0018` y `0019` congeladas. R6‑2 autorizada.
 - **Propuesta R6 aprobada** por Enzo el 2026-10-09 con precisiones (D1–D8); solo R6‑1 autorizada. Registra **pagos realizados**, no cuentas a pagar: sin deuda, saldo por tercero, factura ni vencimiento.
 - **Migración `0018`** (`platform: third parties master`): `public.third_parties` (nombre, `name_key` no único, CUIT opcional de 11 dígitos con dígito verificador validado en la base por `public.cuit_is_valid` y único parcial, notas, activo). Sin DELETE; autor y alta inmutables.
 - **Migración `0019`** (`settlements: payments to third parties`): `payments` + `payment_items` (multi-medio, a lo sumo un ítem por cuenta), operación `PAYMENT` (cada medio −importe, una contrapartida +total) y tres cuentas técnicas nuevas: «Pagos por mercadería», «Devoluciones a terceros» y «Otros pagos» (un pago de gasto va a «Gastos operativos»). Son clasificadores de adónde fue el dinero; no son cuentas a pagar, deuda, inventario valorizado ni compras devengadas. Guardas y verificación diferida de pago ⇔ ítems ⇔ operación ⇔ patas ⇔ reverso.
