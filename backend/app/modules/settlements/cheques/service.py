@@ -610,6 +610,7 @@ def record_event(
     settlement: Settlement | None = None,
     close_operation_id: int | None = None,
     operation_id: int | None = None,
+    payment_id: int | None = None,
 ) -> None:
     db.add(
         ChequeEvent(
@@ -622,6 +623,7 @@ def record_event(
             settlement_version=settlement.version if settlement else None,
             close_operation_id=close_operation_id,
             operation_id=operation_id,
+            payment_id=payment_id,
             created_by=actor.id,
         )
     )
@@ -875,7 +877,8 @@ def _check_no_activity(db: Session, cheque_ids: list[int]) -> None:
         raise AppError(
             409,
             "cheque_has_activity",
-            "El cheque ya tuvo movimientos después del cierre (depósito, acreditación, rechazo o devolución): "
+            "El cheque ya tuvo movimientos después del cierre (depósito, acreditación, rechazo, devolución o "
+            "entrega en un pago): "
             "la rendición no puede quitarlo como si nunca se hubiera recibido.",
             {"cheque_id": min(moved)},
         )

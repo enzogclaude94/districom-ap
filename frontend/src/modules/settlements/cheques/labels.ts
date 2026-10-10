@@ -25,6 +25,7 @@ export const STATE_LABELS: Record<ChequeState, string> = {
   CREDITED: "Acreditado",
   REJECTED: "Rechazado",
   RETURNED: "Devuelto",
+  DELIVERED: "Entregado",
   VOIDED: "Anulado",
 };
 
@@ -37,6 +38,7 @@ export const STATE_TONES: Record<ChequeState, Tone> = {
   CREDITED: "success",
   REJECTED: "danger",
   RETURNED: "warning",
+  DELIVERED: "neutral",
   VOIDED: "neutral",
 };
 
@@ -46,9 +48,10 @@ export const DOCUMENT_LABELS: Record<DocumentType, string> = {
   REJECTION: "Rechazo",
   RETURN: "Devolución",
   PENDING_RECEIPT: "Cobro de pendiente",
+  PAYMENT: "Entregado a tercero",
 };
 
-export const REVERSED_LABELS: Record<Exclude<DocumentType, "PENDING_RECEIPT">, string> = {
+export const REVERSED_LABELS: Record<Exclude<DocumentType, "PENDING_RECEIPT" | "PAYMENT">, string> = {
   DEPOSIT: "Depósito revertido",
   CREDIT: "Acreditación revertida",
   REJECTION: "Rechazo revertido",
@@ -74,6 +77,8 @@ export const EVENT_LABELS: Record<string, string> = {
   RETURN_REVERSED: "Devolución revertida",
   COLLECTED: "Recibido como cobro de un pendiente",
   COLLECTION_REVERSED: "Cobro revertido",
+  DELIVERED: "Entregado a un tercero en un pago",
+  RECOVERED_FROM_PAYMENT: "Recuperado del tercero y devuelto a Cartera",
 };
 
 /** "N.º 00012345 · Banco de la Nación Argentina". */
@@ -86,11 +91,23 @@ export function chequeTitle(cheque: Pick<Cheque, "cheque_number" | "bank_name">)
  * never after its last presentation day (the backend refuses both, whatever the role).
  */
 export function depositBlocker(cheque: Cheque, today: string): string | null {
+  if (cheque.state === "DELIVERED") return "Entregado a un tercero: no está en cartera.";
   if (cheque.state !== "IN_PORTFOLIO") return "No está en cartera.";
   if (cheque.presentation_expired)
     return `Vencido: se podía presentar hasta el ${formatDate(cheque.presentation_deadline)}.`;
   if (cheque.payable_from > today) return `Disponible para depósito desde el ${formatDate(cheque.payable_from)}.`;
   return null;
+}
+
+/**
+ * Why a cheque of the portfolio cannot be delivered in a payment dated `businessDate`, or null: never after
+ * its last presentation day, judged on the payment's date (the backend refuses it, whatever the role). A
+ * deferred cheque not yet payable can be delivered.
+ */
+export function deliveryBlocker(cheque: Pick<Cheque, "presentation_deadline">, businessDate: string): string | null {
+  return businessDate > cheque.presentation_deadline
+    ? `Vencido — podía presentarse hasta ${formatDate(cheque.presentation_deadline)}`
+    : null;
 }
 
 /** «Vence en N días» while it is near its deadline. */

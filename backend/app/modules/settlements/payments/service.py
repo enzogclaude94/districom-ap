@@ -1,13 +1,17 @@
-"""Payments to third parties (R6-1): what left one or several cash boxes or bank accounts, to whom, and why.
+"""Payments to third parties (R6): what left one or several cash boxes, bank accounts or cheques of the
+portfolio, to whom, and why.
 
 A payment is the document of its own ledger operation: in ONE transaction the service writes the payment,
-its items, the `PAYMENT` operation (each item's account -X, ONE counter-leg +total in the technical account
-of the concept, source `payment:<id>`, on the payment's business date) and the audit; the database checks
-at commit that the payment, its items and its operation are exactly each other (migration 0019).
+its items, the `PAYMENT` operation (each item's account -X, each cheque's «Cartera de cheques» -X naming it,
+ONE counter-leg +total in the technical account of the concept, source `payment:<id>`, on the payment's
+business date), a DELIVERED event per cheque and the audit; the database checks at commit that the
+payment, its items, its operation and its cheques' events are exactly each other (migrations 0019, 0020).
 
 - Never accounts payable: there is no debt, invoice or balance owed; only a payment made.
 - Means: CASH (an active cash box) and TRANSFER (an active bank account the user chooses), at most one item
-  per account. CHEQUE belongs to the model and is refused until R6-2 (`payment_method_not_enabled`).
+  per account; CHEQUE (R6-2), a cheque of the portfolio for exactly its face amount (never split, no change
+  given back), at most once per payment, held in the portfolio without interruption since the payment's
+  business date. Its state (Entregado) is derived from the payment in effect, never stored.
 - Amount: exactly the sum of the items; a total sent by the client is verified, never trusted.
 - Concepts: MERCHANDISE, EXPENSE (an active category, never fuel: fuel goes through a settlement or a direct
   expense with its load), REFUND, and OTHER (admin only, with a description).
@@ -16,17 +20,24 @@ at commit that the payment, its items and its operation are exactly each other (
 - Funds: an ordinary debit through `ledger.service`: a cash box is never negative, today or on any day from
   the business date on; the bank never goes into an overdraft for it, nor deeper into one.
 - Money is immutable once published. A mistake is a reversal (admin, with a reason, the whole payment, on
-  the ORIGINAL business date) plus a new payment. Cajas never reverses a `PAYMENT` directly.
+  the ORIGINAL business date) plus a new payment. Cajas never reverses a `PAYMENT` directly. A payment
+  with cheques is reversed only when the user confirms, cheque by cheque, that each one was physically
+  recovered from the third party (`cheque_recovery_required` otherwise; no partial reversals): the
+  reversal, the cheques back in the portfolio and their RECOVERED_FROM_PAYMENT events are one transaction.
 - Descriptive correction (admin, with a reason): only the reference, the description and item references.
 
 Idempotent by `client_request_id`: the ledger request ids derive from the client's.
+
+Lock order, as in the cheque cycle: the cheques by id (FOR UPDATE), then the payment or the third party,
+then (in the ledger) the accounts. A payment and a deposit, a return or another payment of the same cheque
+serialize on it, and the second sees where the first left it.
 """
 
 import logging
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, cast
 from uuid import UUID, uuid5
 
 from sqlalchemy import select
@@ -35,6 +46,10 @@ from sqlalchemy.orm import Session
 
 from app.core.clock import business_today
 from app.core.errors import AppError
+from app.modules.settlements.cheques import cycle as cheque_cycle
+from app.modules.settlements.cheques import terms
+from app.modules.settlements.cheques.models import Cheque, ChequeEvent
+from app.modules.settlements.cheques.service import record_event
 from app.modules.settlements.delivery import idempotency
 from app.modules.settlements.delivery.models import FUEL, ExpenseCategory
 from app.modules.settlements.delivery.service import money
@@ -50,7 +65,6 @@ logger = logging.getLogger(__name__)
 
 MODULE_KEY = "settlements"
 SOURCE = "payment"
-ENABLED_METHODS = ("CASH", "TRANSFER")
 METHOD_KINDS = {"CASH": "CASH_BOX", "TRANSFER": "BANK"}
 CONCEPT_LABELS = {
     "MERCHANDISE": "Pago por mercadería",
@@ -58,6 +72,7 @@ CONCEPT_LABELS = {
     "REFUND": "Devolución",
     "OTHER": "Otro pago",
 }
+ZERO = Decimal("0.00")
 # Namespace of the ledger request ids derived from the client's; never change it.
 NAMESPACE = UUID("3f9b1c27-5d84-4a6e-b0c3-8e2d7a41f659")
 
@@ -100,12 +115,6 @@ def create(db: Session, actor: User, body: s.PaymentIn) -> Created:
 
     if not items:
         raise AppError(422, "payment_items_required", "Indicá con qué se pagó: al menos un medio de pago.")
-    if any(item.method not in ENABLED_METHODS for item, _ in items):
-        raise AppError(
-            422,
-            "payment_method_not_enabled",
-            "El pago con cheques todavía no está habilitado: usá efectivo o transferencia.",
-        )
     if body.business_date > business_today():
         raise AppError(422, "future_business_date", "La fecha del pago no puede ser futura.")
     if body.concept == "OTHER":
@@ -113,7 +122,8 @@ def create(db: Session, actor: User, body: s.PaymentIn) -> Created:
         if description is None:
             raise AppError(422, "description_required", "Un pago de concepto «Otro» lleva una descripción.")
     _check_category(db, body.concept, body.expense_category_id)
-    _paying_accounts(db, [item for item, _ in items])
+    _paying_accounts(db, [item for item, _ in items if item.method != "CHEQUE"])
+    cheque_ids = _cheque_ids([item for item, _ in items if item.method == "CHEQUE"])
     total = sum((item.amount for item, _ in items), Decimal(0))
     if body.amount is not None and body.amount != total:
         raise AppError(
@@ -122,6 +132,15 @@ def create(db: Session, actor: User, body: s.PaymentIn) -> Created:
             "El total del pago no coincide con la suma de los medios de pago.",
             {"amount": money(body.amount), "items_total": money(total)},
         )
+    cheques = {c.id: c for c in cheque_cycle.lock_cheques(db, cheque_ids)}
+    if cheques:
+        # The same request may have been written while this one waited on its cheques.
+        existing = _by_request_id(db, body.client_request_id)
+        if existing is not None:
+            idempotency.check_replay(existing.request_fingerprint, fingerprint, "payment_id", existing.id)
+            db.commit()  # release the locks taken
+            return Created(existing.id, created=False)
+    _check_cheques(db, cheques, [item for item, _ in items if item.method == "CHEQUE"], body.business_date)
     third_party = third_parties.lock_active(db, body.third_party_id)
 
     payment = Payment(
@@ -152,6 +171,7 @@ def create(db: Session, actor: User, body: s.PaymentIn) -> Created:
             payment_id=payment.id,
             method=item.method,
             account_id=item.account_id,
+            cheque_id=item.cheque_id,
             amount=item.amount,
             reference=item_reference,
         )
@@ -161,12 +181,18 @@ def create(db: Session, actor: User, body: s.PaymentIn) -> Created:
     db.flush()
 
     counter = COUNTER_ACCOUNTS[payment.concept]
+    portfolio = ledger.system_account_id(db, "cheque_portfolio") if cheques else None
+    legs = [
+        ledger.Leg(row.account_id, -row.amount)
+        if row.account_id is not None
+        else ledger.Leg(cast(int, portfolio), -row.amount, row.cheque_id)
+        for row in rows
+    ]
     operation = ledger.post_operation(
         db,
         actor=actor,
         type="PAYMENT",
-        legs=[ledger.Leg(row.account_id, -row.amount) for row in rows if row.account_id is not None]
-        + [ledger.Leg(ledger.system_account_id(db, counter), total)],
+        legs=[*legs, ledger.Leg(ledger.system_account_id(db, counter), total)],
         client_request_id=uuid5(NAMESPACE, f"payment:{body.client_request_id}"),
         business_date=body.business_date,
         # Fixed with the operation: the payment's own reference and description may still be corrected.
@@ -175,6 +201,23 @@ def create(db: Session, actor: User, body: s.PaymentIn) -> Created:
     ).operation
     payment.operation_id = operation.id
     db.flush()
+    for cheque_id in cheque_ids:
+        record_event(
+            db,
+            actor,
+            cheques[cheque_id],
+            "DELIVERED",
+            None,
+            {
+                "payment_id": payment.id,
+                "third_party_id": third_party.id,
+                "third_party_name": third_party.name,
+                "business_date": payment.business_date.isoformat(),
+                "operation_id": operation.id,
+            },
+            operation_id=operation.id,
+            payment_id=payment.id,
+        )
     record_change(
         db,
         "settlements.payment.created",
@@ -190,15 +233,36 @@ def create(db: Session, actor: User, body: s.PaymentIn) -> Created:
 
 
 def reverse(db: Session, actor: User, payment_id: int, body: s.PaymentReversalIn) -> Created:
-    """Reverse the whole payment, on its original business date; `created_at` says when."""
+    """Reverse the whole payment, on its original business date; `created_at` says when.
+
+    With cheques, only when every one of them is declared physically recovered from the third party: the
+    reversal puts them back in the portfolio and records who confirmed it, when, and why."""
     _require_admin(actor, "Solo un administrador revierte un pago.")
     reason = _reason(body.reason)
+    found = db.get(Payment, payment_id)
+    if found is None:
+        raise AppError(404, "payment_not_found", "El pago no existe.")
+    delivered = select(PaymentItem.cheque_id).where(
+        PaymentItem.payment_id == payment_id, PaymentItem.cheque_id.is_not(None)
+    )
+    cheque_ids = sorted(cid for cid in db.scalars(delivered) if cid is not None)
+    cheques = {c.id: c for c in cheque_cycle.lock_cheques(db, cheque_ids)}
     payment = _locked(db, payment_id)
+    recovered = sorted(set(body.recovered_cheque_ids))
     request_id = uuid5(NAMESPACE, f"payment-reversal:{body.client_request_id}")
     if payment.reversal_operation_id is not None:
         reversal = ledger.get_operation(db, payment.reversal_operation_id)
         if reversal.client_request_id == request_id:
-            if (payment.reversed_by, payment.reversal_reason) != (actor.id, reason):
+            declared = sorted(
+                db.scalars(
+                    select(ChequeEvent.cheque_id).where(
+                        ChequeEvent.payment_id == payment.id,
+                        ChequeEvent.event_type == "RECOVERED_FROM_PAYMENT",
+                        ChequeEvent.operation_id == reversal.id,
+                    )
+                )
+            )
+            if (payment.reversed_by, payment.reversal_reason, declared) != (actor.id, reason, recovered):
                 raise AppError(
                     409,
                     "idempotency_conflict",
@@ -210,6 +274,7 @@ def reverse(db: Session, actor: User, payment_id: int, body: s.PaymentReversalIn
         raise AppError(
             409, "payment_already_reversed", "El pago ya fue revertido.", {"reversal_operation_id": reversal.id}
         )
+    _check_recovered(cheque_ids, recovered)
     assert payment.operation_id is not None  # a published payment always has it (0019)
     reversal = ledger.reverse_document_operation(
         db,
@@ -224,6 +289,24 @@ def reverse(db: Session, actor: User, payment_id: int, body: s.PaymentReversalIn
     payment.reversed_at = datetime.now(UTC)
     payment.reversal_reason = reason
     db.flush()
+    for cheque_id in cheque_ids:
+        record_event(
+            db,
+            actor,
+            cheques[cheque_id],
+            "RECOVERED_FROM_PAYMENT",
+            None,
+            {
+                "payment_id": payment.id,
+                "third_party_id": payment.third_party_id,
+                "reversal_operation_id": reversal.id,
+                "business_date": payment.business_date.isoformat(),
+                "recovery_confirmed": True,
+            },
+            reason=reason,
+            operation_id=reversal.id,
+            payment_id=payment.id,
+        )
     record_change(
         db,
         "settlements.payment.reversed",
@@ -236,6 +319,7 @@ def reverse(db: Session, actor: User, payment_id: int, body: s.PaymentReversalIn
             "reversal_operation_id": reversal.id,
             "business_date": reversal.business_date.isoformat(),
             "reason": reason,
+            "recovered_cheque_ids": cheque_ids,
         },
     )
     commit(db)
@@ -313,7 +397,13 @@ def snapshot(payment: Payment, items: list[PaymentItem]) -> dict[str, Any]:
         "reference": payment.reference,
         "description": payment.description,
         "items": [
-            {"method": i.method, "account_id": i.account_id, "amount": money(i.amount), "reference": i.reference}
+            {
+                "method": i.method,
+                "account_id": i.account_id,
+                "cheque_id": i.cheque_id,
+                "amount": money(i.amount),
+                "reference": i.reference,
+            }
             for i in items
         ],
     }
@@ -379,6 +469,101 @@ def _paying_accounts(db: Session, items: list[s.PaymentItemIn]) -> None:
                 {"account_id": account.account_id},
             )
         seen.add(account.account_id)
+
+
+def _cheque_ids(items: list[s.PaymentItemIn]) -> list[int]:
+    """The cheques of the CHEQUE items: each names one cheque and no account, at most once per payment."""
+    seen: set[int] = set()
+    for item in items:
+        if item.cheque_id is None or item.account_id is not None:
+            raise AppError(
+                422,
+                "invalid_payment_item",
+                "Un medio «Cheque» es un cheque de la cartera, sin caja ni banco.",
+                {"method": item.method, "cheque_id": item.cheque_id, "account_id": item.account_id},
+            )
+        if item.cheque_id in seen:
+            raise AppError(
+                422,
+                "duplicate_payment_cheque",
+                f"El cheque #{item.cheque_id} aparece dos veces en el pago: cada cheque se entrega una sola vez.",
+                {"cheque_id": item.cheque_id},
+            )
+        seen.add(item.cheque_id)
+    return sorted(seen)
+
+
+def _check_cheques(db: Session, cheques: dict[int, Cheque], items: list[s.PaymentItemIn], business_date: date) -> None:
+    """Each cheque (already locked) is in the portfolio, held there without interruption since the payment's
+    business date, not expired for presentation on that date (the rule of a deposit, no override for any
+    role; a deferred cheque not yet payable can be delivered), and paid for exactly its face amount: never
+    split, no change given back."""
+    if not cheques:
+        return
+    ids = sorted(cheques)
+    positions = ledger.cheque_positions(db, ids)
+    held_since = ledger.cheque_held_since(db, ids, "CHEQUE_PORTFOLIO")
+    for item in items:
+        assert item.cheque_id is not None  # _cheque_ids
+        cheque = cheques[item.cheque_id]
+        since = held_since.get(cheque.id)
+        if cheque.voided_at is not None or positions[cheque.id].get("CHEQUE_PORTFOLIO", ZERO) <= 0 or since is None:
+            raise AppError(
+                409,
+                "cheque_not_in_portfolio",
+                f"El cheque #{cheque.id} no está en cartera: solo se entrega un cheque que está en la cartera.",
+                {"cheque_id": cheque.id},
+            )
+        if business_date < since:
+            raise AppError(
+                422,
+                "cheque_not_in_portfolio_on_date",
+                f"El cheque #{cheque.id} está en cartera desde el {since:%d/%m/%Y}: el pago no puede tener una "
+                "fecha anterior.",
+                {"cheque_id": cheque.id, "in_portfolio_since": since.isoformat()},
+            )
+        deadline = terms.presentation_deadline(cheque.payment_type, cheque.issue_date, cheque.payment_date)
+        if business_date > deadline:
+            raise AppError(
+                422,
+                "cheque_presentation_expired",
+                f"El cheque #{cheque.id} venció para su presentación el {deadline:%d/%m/%Y}: no se entrega en un "
+                f"pago del {business_date:%d/%m/%Y}.",
+                {"cheque_id": cheque.id, "deadline": deadline.isoformat()},
+            )
+        if item.amount != cheque.amount:
+            raise AppError(
+                422,
+                "cheque_amount_mismatch",
+                f"El cheque #{cheque.id} se entrega por su importe completo, {_pesos(cheque.amount)}: un cheque "
+                "no se fracciona ni da vuelto.",
+                {"cheque_id": cheque.id, "cheque_amount": money(cheque.amount), "amount": money(item.amount)},
+            )
+
+
+def _pesos(amount: Decimal) -> str:
+    return "$ " + f"{amount:,.2f}".replace(",", "_").replace(".", ",").replace("_", ".")
+
+
+def _check_recovered(cheque_ids: list[int], recovered: list[int]) -> None:
+    """Every cheque of the payment, and only those, declared physically recovered (R6-2)."""
+    foreign = sorted(set(recovered) - set(cheque_ids))
+    if foreign:
+        raise AppError(
+            422,
+            "invalid_recovered_cheques",
+            "Uno de los cheques indicados como recuperados no es de este pago.",
+            {"cheque_ids": foreign},
+        )
+    missing = sorted(set(cheque_ids) - set(recovered))
+    if missing:
+        raise AppError(
+            409,
+            "cheque_recovery_required",
+            "El pago no se revierte mientras un cheque entregado siga en manos del tercero: confirmá que "
+            "recuperaste cada cheque. Si no volvió, primero hay que recuperarlo.",
+            {"missing_cheque_ids": missing},
+        )
 
 
 def _locked(db: Session, payment_id: int) -> Payment:

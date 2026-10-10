@@ -358,4 +358,4 @@ R4 aprobada por Enzo el 2026-10-09; las deudas conocidas del informe final no bl
 | R5‑3 | Gasto directo desde Caja/Banco (`0016`) | **DONE** (PR #25; `0016` congelada) |
 | R5‑4 | Historial consolidado de combustible y E2E (`0017`) | **DONE** (PR #27; `0017` congelada) |
 
-R5 aprobada por Enzo el 2026-10-09 (R5‑4 con la barrera fail safe de `0017`). R6 (pagos y terceros): propuesta aprobada con precisiones el 2026-10-09 (`ROADMAP.md`); R6‑1 (terceros + pagos con efectivo y transferencia) **DONE**: aprobada por Enzo el 2026-10-10, PR #29 mergeado, `0018` y `0019` congeladas. R6‑2 (entrega de cheques en pagos) IN_PROGRESS; R6‑3 requiere su aprobación.
+R5 aprobada por Enzo el 2026-10-09 (R5‑4 con la barrera fail safe de `0017`). R6 (pagos y terceros): propuesta aprobada con precisiones el 2026-10-09 (`ROADMAP.md`); R6‑1 (terceros + pagos con efectivo y transferencia) **DONE**: aprobada por Enzo el 2026-10-10, PR #29 mergeado, `0018` y `0019` congeladas. R6‑2 (entrega de cheques en pagos, `0020`) IN_REVIEW, espera la aprobación de Enzo; R6‑3 requiere su aprobación.

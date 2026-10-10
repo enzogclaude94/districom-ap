@@ -12,6 +12,7 @@ import { paymentBalance } from "@/modules/settlements/payments/payment-dialog";
 import { PaymentList } from "@/modules/settlements/payments/payment-list";
 import { ApiError } from "@/lib/api/client";
 
+import { cheque, shift } from "./cheque-fixture";
 import { jsonResponse, renderWithQuery } from "./render";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }));
@@ -37,6 +38,19 @@ const ACCOUNTS: Account[] = [
   account(12, "Pagos por mercadería", "MERCHANDISE_PAYMENTS", { code: "merchandise_payments", allow_negative: true }),
   account(13, "Devoluciones a terceros", "THIRD_PARTY_REFUNDS", { code: "third_party_refunds", allow_negative: true }),
   account(14, "Otros pagos", "OTHER_PAYMENTS", { code: "other_payments", allow_negative: true }),
+  account(20, "Cartera de cheques", "CHEQUE_PORTFOLIO", { code: "cheque_portfolio" }),
+];
+
+/** The portfolio: two cheques the operator can deliver. */
+const PORTFOLIO = [
+  cheque(),
+  cheque({
+    id: 22,
+    cheque_number: "00099999",
+    amount: "50000.00",
+    bank_name: "Banco Nación",
+    payment_type: "DEFERRED",
+  }),
 ];
 
 const CATEGORIES = [
@@ -102,6 +116,7 @@ const payment = (changes: Partial<PaymentDetail> = {}): PaymentDetail => ({
       account_name: "Caja principal",
       account_kind: "CASH_BOX",
       cheque_id: null,
+      cheque: null,
       amount: "100000.00",
       reference: null,
     },
@@ -112,6 +127,7 @@ const payment = (changes: Partial<PaymentDetail> = {}): PaymentDetail => ({
       account_name: "Banco",
       account_kind: "BANK",
       cheque_id: null,
+      cheque: null,
       amount: "200000.00",
       reference: "TRF 99",
     },
@@ -167,6 +183,10 @@ const routes = (role: Role, extra: Record<string, Handler> = {}): Record<string,
   "GET /settlements/expense-categories": () => jsonResponse(200, CATEGORIES),
   "GET /third-parties": () => jsonResponse(200, THIRD_PARTIES),
   "GET /settlements/payments": () => jsonResponse(200, EMPTY_PAGE),
+  "GET /settlements/cheques": (_, url) =>
+    url.searchParams.get("in_portfolio") === "true"
+      ? jsonResponse(200, { items: PORTFOLIO, total: PORTFOLIO.length })
+      : jsonResponse(400, { code: "bad_filter", message: "x", details: null, request_id: null }),
   ...extra,
 });
 
@@ -224,12 +244,12 @@ describe("Pagos (R6-1)", () => {
     expect(screen.queryByRole("button", { name: "Registrar pago" })).not.toBeInTheDocument();
   });
 
-  it("offers only cash and transfers, OTHER only to an admin, and never fuel as a category", async () => {
+  it("offers cash, transfers and cheques, OTHER only to an admin, and never fuel as a category", async () => {
     mockApi(routes("operator"));
     renderWithQuery(<PaymentList />);
     const dialog = await openPayment();
     const methods = within(within(dialog).getByLabelText("Medio de pago")).getAllByRole("option");
-    expect(methods.map((o) => o.textContent)).toEqual(["Efectivo", "Transferencia"]);
+    expect(methods.map((o) => o.textContent)).toEqual(["Efectivo", "Transferencia", "Cheque"]);
     const concepts = within(within(dialog).getByLabelText("Concepto")).getAllByRole("option");
     expect(concepts.map((o) => o.textContent)).toEqual([
       "Elegí el concepto…",
@@ -514,6 +534,303 @@ describe("payment detail", () => {
   });
 });
 
+/** A payment of $150.000: $50.000 in cash and the cheque n.º 00012345 of $100.000 from the portfolio. */
+const chequePayment = (changes: Partial<PaymentDetail> = {}, recovered = false): PaymentDetail =>
+  payment({
+    amount: "150000.00",
+    items: [
+      {
+        id: 81,
+        method: "CASH",
+        account_id: 1,
+        account_name: "Caja principal",
+        account_kind: "CASH_BOX",
+        cheque_id: null,
+        cheque: null,
+        amount: "50000.00",
+        reference: null,
+      },
+      {
+        id: 83,
+        method: "CHEQUE",
+        account_id: null,
+        account_name: null,
+        account_kind: null,
+        cheque_id: 21,
+        cheque: {
+          cheque_id: 21,
+          kind: "PHYSICAL",
+          payment_type: "COMMON",
+          cheque_number: "00012345",
+          bank_name: "Banco de Galicia",
+          drawer_name: "Don José SRL",
+          delivered_by_name: "Almacén Don José",
+          payable_from: "2026-10-01",
+          state: recovered ? "IN_PORTFOLIO" : "DELIVERED",
+          state_label: recovered ? "En cartera" : "Entregado",
+          recovered_at: recovered ? "2026-10-10T12:00:00Z" : null,
+          recovered_by_name: recovered ? "Ada Admin" : null,
+        },
+        amount: "100000.00",
+        reference: "Recibo 7",
+      },
+    ],
+    operation: {
+      ...OPERATION,
+      entries: [
+        { account_id: 1, account_name: "Caja principal", account_kind: "CASH_BOX", amount: "-50000.00" },
+        {
+          account_id: 20,
+          account_name: "Cartera de cheques",
+          account_kind: "CHEQUE_PORTFOLIO",
+          amount: "-100000.00",
+          cheque_id: 21,
+        },
+        {
+          account_id: 12,
+          account_name: "Pagos por mercadería",
+          account_kind: "MERCHANDISE_PAYMENTS",
+          amount: "150000.00",
+        },
+      ],
+    },
+    ...changes,
+  });
+
+describe("Cheques en pagos (R6-2)", () => {
+  it("offers only cheques of the portfolio, each once, with its amount locked", async () => {
+    const spy = mockApi(routes("operator"));
+    renderWithQuery(<PaymentList />);
+    const dialog = await openPayment();
+    await userEvent.selectOptions(within(dialog).getByLabelText("Medio de pago"), "CHEQUE");
+    expect(within(dialog).queryByLabelText("Caja")).not.toBeInTheDocument();
+    const select = within(dialog).getByLabelText("Cheque de la cartera");
+    await within(select).findByRole("option", { name: /00012345/ });
+    expect(
+      within(select)
+        .getAllByRole("option")
+        .map((o) => o.textContent),
+    ).toEqual([
+      "Elegí el cheque…",
+      "N.º 00012345 · Banco de Galicia · Físico común · $ 100.000,00",
+      "N.º 00099999 · Banco Nación · Físico diferido · $ 50.000,00",
+    ]);
+    const requested = spy.mock.calls
+      .map(([input]) => new URL(String(input), "http://l"))
+      .filter((url) => url.pathname === "/api/v1/settlements/cheques");
+    expect(requested.every((url) => url.searchParams.get("in_portfolio") === "true")).toBe(true);
+
+    await userEvent.selectOptions(select, "21");
+    const amount = within(dialog).getByLabelText("Importe del medio 1");
+    expect(amount).toHaveValue("$ 100.000,00");
+    expect(amount).toHaveAttribute("readonly");
+    expect(within(dialog).getByTestId("payment-cheque-0")).toHaveTextContent("Lo entregóAlmacén Don José");
+    await userEvent.type(within(dialog).getByLabelText("Total del pago"), "150.000");
+    expect(within(dialog).getByTestId("payment-balance")).toHaveTextContent("Aplicado$ 100.000,00");
+    expect(within(dialog).getByTestId("payment-balance")).toHaveTextContent("Falta$ 50.000,00");
+
+    await userEvent.click(within(dialog).getByRole("button", { name: "Agregar medio de pago" }));
+    await userEvent.selectOptions(within(dialog).getAllByLabelText("Medio de pago")[1], "CHEQUE");
+    const second = within(dialog).getAllByLabelText("Cheque de la cartera")[1];
+    expect(within(second).queryByRole("option", { name: /00012345/ })).not.toBeInTheDocument();
+    await userEvent.selectOptions(second, "22");
+    expect(within(dialog).getByTestId("payment-balance")).toHaveTextContent("Aplicado$ 150.000,00");
+  });
+
+  it("mixes cash and a cheque: the confirmation names the cheque leaving the portfolio and sends its whole amount", async () => {
+    const spy = mockApi(routes("operator", { "POST /settlements/payments": () => jsonResponse(201, chequePayment()) }));
+    renderWithQuery(<PaymentList />);
+    const dialog = await openPayment();
+    await userEvent.selectOptions(within(dialog).getByLabelText("Tercero"), "5");
+    await userEvent.selectOptions(within(dialog).getByLabelText("Concepto"), "MERCHANDISE");
+    await userEvent.type(within(dialog).getByLabelText("Total del pago"), "150.000");
+    await userEvent.selectOptions(within(dialog).getByLabelText("Caja"), "1");
+    await userEvent.type(within(dialog).getByLabelText("Importe del medio 1"), "50.000");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Agregar medio de pago" }));
+    await userEvent.selectOptions(within(dialog).getAllByLabelText("Medio de pago")[1], "CHEQUE");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Revisar pago" }));
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("Elegí el cheque del medio 2.");
+    await userEvent.selectOptions(within(dialog).getByLabelText("Cheque de la cartera"), "21");
+    await userEvent.type(within(dialog).getByLabelText("Referencia del medio 2 (opcional)"), "Recibo 7");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Revisar pago" }));
+
+    const confirmation = await screen.findByTestId("payment-confirmation");
+    expect(confirmation).toHaveTextContent("Caja principal-$ 50.000,00");
+    expect(confirmation).toHaveTextContent("Cheque n.º 00012345 desde Cartera de cheques-$ 100.000,00");
+    expect(confirmation).toHaveTextContent("Pagos por mercadería+$ 150.000,00");
+    await userEvent.click(screen.getByRole("button", { name: "Confirmar pago" }));
+    await waitFor(() => expect(posts(spy, "/settlements/payments")).toHaveLength(1));
+    const [body] = posts(spy, "/settlements/payments");
+    expect(body.amount).toBe("150000.00");
+    expect(body.items).toEqual([
+      { method: "CASH", account_id: 1, amount: "50000.00", reference: null },
+      { method: "CHEQUE", cheque_id: 21, amount: "100000.00", reference: "Recibo 7" },
+    ]);
+  });
+
+  it("«Entregar» opens «Registrar pago» with the cheque preloaded; the user still completes the rest", async () => {
+    mockApi(routes("operator"));
+    renderWithQuery(<PaymentList initialCheque={22} />);
+    const dialog = await screen.findByRole("dialog", { name: "Registrar pago" });
+    expect(within(dialog).getByLabelText("Medio de pago")).toHaveValue("CHEQUE");
+    await waitFor(() => expect(within(dialog).getByLabelText("Cheque de la cartera")).toHaveValue("22"));
+    expect(within(dialog).getByLabelText("Importe del medio 1")).toHaveValue("$ 50.000,00");
+    expect(within(dialog).getByLabelText("Tercero")).toHaveValue("");
+    expect(within(dialog).getByLabelText("Concepto")).toHaveValue("");
+  });
+
+  it("a cheque that left the portfolio meanwhile is not offered and cannot be sent", async () => {
+    const spy = mockApi(routes("operator"));
+    renderWithQuery(<PaymentList initialCheque={99} />);
+    const dialog = await screen.findByRole("dialog", { name: "Registrar pago" });
+    await within(within(dialog).getByLabelText("Cheque de la cartera")).findByRole("option", { name: /00012345/ });
+    await userEvent.selectOptions(within(dialog).getByLabelText("Tercero"), "5");
+    await userEvent.selectOptions(within(dialog).getByLabelText("Concepto"), "MERCHANDISE");
+    await userEvent.type(within(dialog).getByLabelText("Total del pago"), "1000");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Revisar pago" }));
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("ya no está en cartera");
+    expect(posts(spy, "/settlements/payments")).toHaveLength(0);
+  });
+
+  it("a viewer gets no «Registrar pago» even from «Entregar»", async () => {
+    mockApi(routes("viewer"));
+    renderWithQuery(<PaymentList initialCheque={21} />);
+    await screen.findByRole("heading", { name: "Pagos" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("the detail shows each cheque with its link, state and its leg on the portfolio", async () => {
+    mockApi(routes("admin", { "GET /settlements/payments/8": () => jsonResponse(200, chequePayment()) }));
+    renderWithQuery(<PaymentDetailView paymentId={8} />);
+    await screen.findByRole("heading", { name: "Pago n.º 8" });
+    expect(screen.getByRole("link", { name: "n.º 00012345" })).toHaveAttribute("href", "/rendiciones/cheques/21");
+    expect(screen.getByTestId("payment-cheque-state-21")).toHaveTextContent("Entregado");
+    expect(screen.getByText("Cartera de cheques · Cheque n.º 00012345")).toBeInTheDocument();
+  });
+
+  it("reverses only with every cheque confirmed as recovered, one by one", async () => {
+    const spy = mockApi(
+      routes("admin", {
+        "GET /settlements/payments/8": () => jsonResponse(200, chequePayment()),
+        "POST /settlements/payments/8/reverse": () => jsonResponse(200, chequePayment({ state: "REVERSED" }, true)),
+      }),
+    );
+    renderWithQuery(<PaymentDetailView paymentId={8} />);
+    await userEvent.click(await screen.findByRole("button", { name: "Revertir pago" }));
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveTextContent("el cheque n.º 00012345 ($ 100.000,00) a Cartera de cheques");
+    await userEvent.type(within(dialog).getByLabelText("Motivo"), "Pago equivocado");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Revertir pago" }));
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("Confirmá que recuperaste cada cheque");
+    expect(posts(spy, "/settlements/payments/8/reverse")).toHaveLength(0);
+
+    await userEvent.click(within(dialog).getByRole("checkbox", { name: /Recuperé el cheque n.º 00012345/ }));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Revertir pago" }));
+    await waitFor(() => expect(posts(spy, "/settlements/payments/8/reverse")).toHaveLength(1));
+    expect(posts(spy, "/settlements/payments/8/reverse")[0]).toMatchObject({
+      reason: "Pago equivocado",
+      recovered_cheque_ids: [21],
+    });
+  });
+
+  it("a payment without cheques asks for no recovery", async () => {
+    const spy = mockApi(
+      routes("admin", {
+        "GET /settlements/payments/8": () => jsonResponse(200, payment()),
+        "POST /settlements/payments/8/reverse": () => jsonResponse(200, payment({ state: "REVERSED" })),
+      }),
+    );
+    renderWithQuery(<PaymentDetailView paymentId={8} />);
+    await userEvent.click(await screen.findByRole("button", { name: "Revertir pago" }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).queryByTestId("recovered-cheques")).not.toBeInTheDocument();
+    await userEvent.type(within(dialog).getByLabelText("Motivo"), "Duplicado");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Revertir pago" }));
+    await waitFor(() => expect(posts(spy, "/settlements/payments/8/reverse")).toHaveLength(1));
+    expect(posts(spy, "/settlements/payments/8/reverse")[0]).toMatchObject({ recovered_cheque_ids: [] });
+  });
+
+  it("after the reversal the cheque reads «recuperado y devuelto a Cartera»", async () => {
+    mockApi(
+      routes("admin", {
+        "GET /settlements/payments/8": () => jsonResponse(200, chequePayment({ state: "REVERSED" }, true)),
+      }),
+    );
+    renderWithQuery(<PaymentDetailView paymentId={8} />);
+    expect(await screen.findByTestId("payment-cheque-recovered-21")).toHaveTextContent(
+      "Cheque recuperado y devuelto a Cartera · Ada Admin",
+    );
+    expect(screen.getByTestId("payment-cheque-state-21")).toHaveTextContent("En cartera");
+    expect(screen.getByRole("link", { name: "Ver cheque" })).toHaveAttribute("href", "/rendiciones/cheques/21");
+  });
+});
+
+describe("expired cheques are not delivered (R6-2, adjustment 1)", () => {
+  const EXPIRED = cheque({
+    id: 30,
+    cheque_number: "00030000",
+    issue_date: shift(-40),
+    payable_from: shift(-40),
+    presentation_deadline: shift(-10),
+    presentation_expired: true,
+  });
+  const FUTURE = cheque({
+    id: 31,
+    cheque_number: "00031000",
+    payment_type: "DEFERRED",
+    payable_from: shift(20),
+    presentation_deadline: shift(50),
+  });
+  const withPortfolio = (role: Role) =>
+    routes(role, {
+      "GET /settlements/cheques": () => jsonResponse(200, { items: [cheque(), EXPIRED, FUTURE], total: 3 }),
+    });
+
+  it("lists an expired cheque as not eligible and a future deferred one with its payable date", async () => {
+    mockApi(withPortfolio("operator"));
+    renderWithQuery(<PaymentList />);
+    const dialog = await openPayment();
+    await userEvent.selectOptions(within(dialog).getByLabelText("Medio de pago"), "CHEQUE");
+    const select = within(dialog).getByLabelText("Cheque de la cartera");
+    const expired = await within(select).findByRole("option", { name: /00030000/ });
+    expect(expired).toBeDisabled();
+    expect(expired).toHaveTextContent(`Vencido — podía presentarse hasta ${shift(-10).split("-").reverse().join("/")}`);
+    const future = within(select).getByRole("option", { name: /00031000/ });
+    expect(future).toBeEnabled();
+    expect(future).toHaveTextContent(`Pagadero desde ${shift(20).split("-").reverse().join("/")}`);
+    await userEvent.selectOptions(select, "31");
+    expect(within(dialog).getByLabelText("Importe del medio 1")).toHaveValue("$ 100.000,00");
+  });
+
+  it("an expired cheque preloaded cannot be sent, not even by an admin", async () => {
+    const spy = mockApi(withPortfolio("admin"));
+    renderWithQuery(<PaymentList initialCheque={30} />);
+    const dialog = await screen.findByRole("dialog", { name: "Registrar pago" });
+    expect(await within(dialog).findByTestId("payment-cheque-expired-0")).toHaveTextContent(
+      "Vencido — podía presentarse hasta",
+    );
+    await userEvent.selectOptions(within(dialog).getByLabelText("Tercero"), "5");
+    await userEvent.selectOptions(within(dialog).getByLabelText("Concepto"), "MERCHANDISE");
+    await userEvent.type(within(dialog).getByLabelText("Total del pago"), "100.000");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Revisar pago" }));
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("El cheque del medio 1 no se puede entregar: vencido");
+    expect(posts(spy, "/settlements/payments")).toHaveLength(0);
+  });
+
+  it("the term is judged on the payment's date: an earlier date makes it eligible again", async () => {
+    mockApi(withPortfolio("operator"));
+    renderWithQuery(<PaymentList />);
+    const dialog = await openPayment();
+    await userEvent.selectOptions(within(dialog).getByLabelText("Medio de pago"), "CHEQUE");
+    const select = within(dialog).getByLabelText("Cheque de la cartera");
+    expect(await within(select).findByRole("option", { name: /00030000/ })).toBeDisabled();
+    const date = within(dialog).getByLabelText("Fecha del pago");
+    await userEvent.clear(date);
+    await userEvent.type(date, shift(-11));
+    expect(within(select).getByRole("option", { name: /00030000/ })).toBeEnabled();
+  });
+});
+
 describe("payment errors", () => {
   it("reads idempotency conflicts and unknown outcomes for the user", () => {
     const conflict = new ApiError(409, { code: "idempotency_conflict", message: "x", details: null, request_id: null });
@@ -521,12 +838,14 @@ describe("payment errors", () => {
     expect(
       paymentErrorView(new ApiError(502, { code: "x", message: "", details: null, request_id: null })),
     ).toMatchObject({ uncertain: true });
-    const disabled = new ApiError(422, {
-      code: "payment_method_not_enabled",
-      message: "Los pagos con cheque todavía no están habilitados.",
-      details: null,
+    const missing = new ApiError(409, {
+      code: "cheque_recovery_required",
+      message: "Para revertir el pago confirmá que recuperaste cada cheque: falta el n.º 00012345.",
+      details: { missing_cheque_ids: [21] },
       request_id: null,
     });
-    expect(paymentErrorView(disabled).message).toBe("Los pagos con cheque todavía no están habilitados.");
+    expect(paymentErrorView(missing).message).toBe(
+      "Para revertir el pago confirmá que recuperaste cada cheque: falta el n.º 00012345.",
+    );
   });
 });

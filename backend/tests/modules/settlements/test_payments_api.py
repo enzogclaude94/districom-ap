@@ -106,7 +106,7 @@ def test_merchandise_paid_in_cash(as_role, box, perez, db: Session) -> None:  # 
     [created] = _audit(db, "created")
     assert created["after"]["operation_id"] == operation["id"]
     assert created["after"]["items"] == [
-        {"method": "CASH", "account_id": box, "amount": "100000.00", "reference": "Recibo 0001-123"}
+        {"method": "CASH", "account_id": box, "cheque_id": None, "amount": "100000.00", "reference": "Recibo 0001-123"}
     ]
 
 
@@ -243,15 +243,6 @@ def test_a_payment_needs_at_least_one_item_with_a_positive_amount(as_role, box, 
     assert error(pay(operator, perez, [cash(box, "0")])) == (422, "validation_error")
     assert error(pay(operator, perez, [cash(box, "-5")])) == (422, "validation_error")
     assert error(pay(operator, perez, [cash(box, "1.001")])) == (422, "validation_error")
-
-
-def test_cheques_are_not_enabled_yet(as_role, box, perez, db: Session) -> None:  # type: ignore[no-untyped-def]
-    operator = as_role("operator")
-    before = counts(db)
-    cheque = {"method": "CHEQUE", "cheque_id": 1, "amount": "100"}
-    assert error(pay(operator, perez, [cheque])) == (422, "payment_method_not_enabled")
-    assert error(pay(operator, perez, [cash(box, "100"), cheque])) == (422, "payment_method_not_enabled")
-    assert counts(db) == before
 
 
 # --- funds -----------------------------------------------------------------------------------------------

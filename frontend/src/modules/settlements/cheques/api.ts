@@ -20,9 +20,11 @@ export type ChequeState =
   | "CREDITED"
   | "REJECTED"
   | "RETURNED"
+  | "DELIVERED"
   | "VOIDED";
 export type VerificationStatus = "DECLARED" | "VERIFIED" | "VERIFICATION_REJECTED";
-export type DocumentType = "DEPOSIT" | "CREDIT" | "REJECTION" | "RETURN" | "PENDING_RECEIPT";
+/** PAYMENT (R6-2): the payment to a third party that delivered the cheque. */
+export type DocumentType = "DEPOSIT" | "CREDIT" | "REJECTION" | "RETURN" | "PENDING_RECEIPT" | "PAYMENT";
 
 export interface Cheque {
   id: number;
@@ -51,6 +53,11 @@ export interface Cheque {
   deposit_bank_account_name: string | null;
   credit_id: number | null;
   credit_business_date: string | null;
+  /** The payment in effect that delivered it to a third party (R6-2); null unless DELIVERED. */
+  delivery_payment_id: number | null;
+  delivery_third_party_id: number | null;
+  delivery_third_party_name: string | null;
+  delivery_business_date: string | null;
   drawer_name: string;
   drawer_tax_id: string | null;
   delivered_by_name: string;
@@ -91,6 +98,7 @@ export interface ChequeEvent {
   settlement_version: number | null;
   close_operation_id: number | null;
   operation_id: number | null;
+  payment_id: number | null;
   created_by_name: string;
   created_at: string;
 }
@@ -103,6 +111,8 @@ export interface ChequeDocument {
   reversed: boolean;
   reversal_operation_id: number | null;
   pending_id: number | null;
+  third_party_id: number | null;
+  third_party_name: string | null;
 }
 
 export interface ChequeDetail extends Cheque {
@@ -191,6 +201,8 @@ export interface Bank {
 }
 
 export interface ChequeFilters {
+  /** Only the cheques in the portfolio now, whatever else `state` says. */
+  in_portfolio?: boolean;
   state?: ChequeState;
   kind?: ChequeKind;
   issuer_bank_id?: number;
@@ -245,5 +257,7 @@ export const chequeQueryKey = ["settlements", "cheques"] as const;
 export const chequeDetailKey = (id: number) => [...chequeQueryKey, "detail", id] as const;
 export const chequeSummaryKey = [...chequeQueryKey, "summary"] as const;
 export const chequeHref = (id: number) => `/rendiciones/cheques/${id}`;
+/** «Entregar» (R6-2): «Registrar pago» with the cheque preloaded; the payment is the only way out. */
+export const deliverHref = (id: number) => `/rendiciones/pagos?cheque=${id}`;
 export const documentHref = (type: CycleDocumentType, id: number) =>
   `/rendiciones/cheques/documentos/${DOCUMENT_PATHS[type]}/${id}`;

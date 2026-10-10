@@ -68,6 +68,9 @@ CYCLE_EVENT_TYPES = (
     "COLLECTED",
     "COLLECTION_REVERSED",
 )
+# R6-2: a payment delivered it to a third party, or that payment was reversed with the cheque physically
+# recovered. Each names its payment (`payment_id`) and its operation (the PAYMENT, or its REVERSAL).
+PAYMENT_EVENT_TYPES = ("DELIVERED", "RECOVERED_FROM_PAYMENT")
 EVENT_TYPES = (
     "RECEIVED",
     "CORRECTED",
@@ -79,6 +82,7 @@ EVENT_TYPES = (
     "WITHDRAWN",
     "DESCRIPTIVE_CORRECTED",
     *CYCLE_EVENT_TYPES,
+    *PAYMENT_EVENT_TYPES,
 )
 CLOSE_EVENT_TYPES = ("PUBLISHED", "WITHDRAWN")
 REASON_EVENT_TYPES = (
@@ -92,6 +96,7 @@ REASON_EVENT_TYPES = (
     "RETURNED",
     "RETURN_REVERSED",
     "COLLECTION_REVERSED",
+    "RECOVERED_FROM_PAYMENT",
 )
 REJECTION_STAGES = ("IN_TRANSIT", "AFTER_CREDIT")
 
@@ -246,7 +251,11 @@ class ChequeEvent(IdMixin, Base):
         ),
         CheckConstraint("(settlement_id IS NULL) = (settlement_version IS NULL)", name="settlement_pair"),
         CheckConstraint(
-            f"event_type NOT IN ({_in(CYCLE_EVENT_TYPES)}) OR operation_id IS NOT NULL", name="cycle_operation"
+            f"event_type NOT IN ({_in(CYCLE_EVENT_TYPES + PAYMENT_EVENT_TYPES)}) OR operation_id IS NOT NULL",
+            name="cycle_operation",
+        ),
+        CheckConstraint(
+            f"(event_type IN ({_in(PAYMENT_EVENT_TYPES)})) = (payment_id IS NOT NULL)", name="payment_events"
         ),
         {"schema": SCHEMA},
     )
@@ -264,6 +273,10 @@ class ChequeEvent(IdMixin, Base):
     # The operation that put it in the portfolio outside a settlement (opening balance, contribution).
     operation_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("settlements.financial_operations.id", ondelete="RESTRICT")
+    )
+    # DELIVERED / RECOVERED_FROM_PAYMENT: the payment that delivered the cheque (R6-2).
+    payment_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey(f"{SCHEMA}.payments.id", ondelete="RESTRICT"), index=True
     )
     created_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

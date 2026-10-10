@@ -821,6 +821,34 @@ def cheque_entry_dates(db: Session, cheque_ids: Sequence[int], kind: str) -> dic
     return {cid: day for cid, day in rows if cid is not None}
 
 
+def cheque_held_since(db: Session, cheque_ids: Sequence[int], kind: str) -> dict[int, date]:
+    """Since which business date each cheque is held without interruption in an account of `kind`: the
+    first day of the last stretch of end-of-day positions > 0, for cheques held today (R6-2). A document
+    dated before it would find the cheque elsewhere on that day, or take it out twice."""
+    if not cheque_ids:
+        return {}
+    rows = db.execute(
+        select(LedgerEntry.cheque_id, FinancialOperation.business_date, func.sum(LedgerEntry.amount))
+        .join(FinancialOperation, FinancialOperation.id == LedgerEntry.operation_id)
+        .join(Account, Account.id == LedgerEntry.account_id)
+        .where(LedgerEntry.cheque_id.in_(cheque_ids), Account.kind == kind)
+        .group_by(LedgerEntry.cheque_id, FinancialOperation.business_date)
+        .order_by(LedgerEntry.cheque_id, FinancialOperation.business_date)
+    )
+    balances: dict[int, Decimal] = {}
+    since: dict[int, date | None] = {}
+    for cheque_id, day, amount in rows:
+        if cheque_id is None or amount == 0:
+            continue
+        before = balances.get(cheque_id, Decimal(0))
+        balances[cheque_id] = before + amount
+        if balances[cheque_id] <= 0:
+            since[cheque_id] = None
+        elif before <= 0:
+            since[cheque_id] = day
+    return {cid: day for cid, day in since.items() if day is not None and balances[cid] > 0}
+
+
 def document_operation(db: Session, type: str, source: SourceRef) -> FinancialOperation:
     """The one operation of a document of the cheque cycle (unique by type and source)."""
     operation = db.scalars(

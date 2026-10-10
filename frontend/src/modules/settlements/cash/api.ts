@@ -90,6 +90,8 @@ export interface Entry {
   account_name: string;
   account_kind: AccountKind;
   amount: string;
+  /** The cheque a leg on a cheque account moves; absent or null on every other account. */
+  cheque_id?: number | null;
 }
 
 export interface Operation {
