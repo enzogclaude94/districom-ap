@@ -33,11 +33,13 @@ describe("AppShell with Rendiciones", () => {
     renderShell([commercial, settlements]);
     expect(await screen.findByRole("link", { name: "Inicio" })).toHaveAttribute("href", "/rendiciones");
     expect(screen.getByText("Tesorería")).toBeInTheDocument();
-    expect(screen.getByTitle("Disponible en la fase R6")).toHaveTextContent("R6");
+    expect(screen.getByTitle("Disponible en la fase R7")).toHaveTextContent("R7");
     expect(screen.queryByTitle("Disponible en la fase R5")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Combustible" })).toHaveAttribute("href", "/rendiciones/combustible");
     expect(screen.getByRole("link", { name: "Cartera de cheques" })).toHaveAttribute("href", "/rendiciones/cheques");
     expect(screen.getByRole("link", { name: "Pendientes" })).toHaveAttribute("href", "/rendiciones/pendientes");
+    expect(screen.getByRole("link", { name: "Pagos" })).toHaveAttribute("href", "/rendiciones/pagos");
+    expect(screen.queryByTitle("Disponible en la fase R6")).not.toBeInTheDocument();
     expect(screen.getByText("contenido")).toBeInTheDocument();
   });
 

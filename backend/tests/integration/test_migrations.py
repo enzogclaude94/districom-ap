@@ -15,6 +15,7 @@ EXPECTED_TABLES = {
     "user_module_roles",
     "financial_institutions",
     "vehicles",
+    "third_parties",
 }
 
 
@@ -58,6 +59,8 @@ SETTLEMENTS_TABLES = {
     "cheque_returns",
     "fuel_loads",
     "settlement_closing_fuel_loads",
+    "payments",
+    "payment_items",
 }
 
 
@@ -137,6 +140,9 @@ def test_settlements_system_accounts_seeded(migrated_db: None) -> None:
         ("uncollectible", "UNCOLLECTIBLE", False),
         ("cheque_portfolio", "CHEQUE_PORTFOLIO", False),
         ("cheques_in_transit", "CHEQUES_IN_TRANSIT", False),
+        ("merchandise_payments", "MERCHANDISE_PAYMENTS", False),
+        ("third_party_refunds", "THIRD_PARTY_REFUNDS", False),
+        ("other_payments", "OTHER_PAYMENTS", False),
     ]
 
 
@@ -199,6 +205,9 @@ def test_account_name_key_backfill() -> None:
             "incobrables",
             "cartera de cheques",
             "cheques depositados",
+            "pagos por mercaderia",
+            "devoluciones a terceros",
+            "otros pagos",
         ]
     finally:
         with engine.begin() as conn:
@@ -216,6 +225,34 @@ def test_platform_vehicles_migration_goes_down_and_up() -> None:
     assert "vehicles" in _tables(url)
     command.downgrade(cfg, "0013")
     assert "vehicles" not in _tables(url)
-    assert _tables(url) >= EXPECTED_TABLES - {"vehicles"}
+    assert _tables(url) >= EXPECTED_TABLES - {"vehicles", "third_parties"}
     command.upgrade(cfg, "head")
     assert "vehicles" in _tables(url)
+
+
+def test_third_parties_and_payments_migrations_go_down_and_up() -> None:
+    """R6-1: 0019 only adds the payments, their technical accounts and PAYMENT; 0018 only `public.third_parties`
+    and the CUIT rule. Going back removes exactly that; coming up again restores it."""
+    cfg = alembic_config()
+    url = cfg.get_main_option("sqlalchemy.url")
+    assert url
+
+    command.upgrade(cfg, "head")
+    command.downgrade(cfg, "0018")
+    assert _settlements_tables(url) == SETTLEMENTS_TABLES - {"payments", "payment_items"}
+    assert "third_parties" in _tables(url)
+    engine = create_engine(url)
+    try:
+        with engine.connect() as conn:
+            kinds = conn.execute(text("SELECT kind FROM settlements.accounts")).scalars().all()
+        assert {"MERCHANDISE_PAYMENTS", "THIRD_PARTY_REFUNDS", "OTHER_PAYMENTS"}.isdisjoint(kinds)
+        command.downgrade(cfg, "0017")
+        assert "third_parties" not in _tables(url)
+        with engine.connect() as conn:
+            exists = conn.execute(text("SELECT to_regprocedure('public.cuit_is_valid(text)') IS NOT NULL")).scalar()
+        assert exists is False
+    finally:
+        engine.dispose()
+        command.upgrade(cfg, "head")
+    assert _settlements_tables(url) == SETTLEMENTS_TABLES
+    assert "third_parties" in _tables(url)

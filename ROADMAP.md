@@ -224,7 +224,7 @@ Propuesta `PROPUESTA_R6_PAGOS_Y_TERCEROS.md` **aprobada** por Enzo el 2026-10-09
 
 | PR | Contenido | Estado |
 |---|---|---|
-| R6‑1 | Terceros + pagos con efectivo y transferencia (cheque rechazado con `payment_method_not_enabled`) | IN_PROGRESS |
+| R6‑1 | Terceros + pagos con efectivo y transferencia (cheque rechazado con `payment_method_not_enabled`); `0018` y `0019` | IN_REVIEW (espera aprobación de Enzo) |
 | R6‑2 | Pago con cheques de cartera | PLANNED (requiere aprobación de Enzo) |
 
 ### R7 — Boca de expendio

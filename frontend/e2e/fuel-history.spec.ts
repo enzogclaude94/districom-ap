@@ -1,6 +1,6 @@
 import { expect, test, type APIRequestContext, type Locator, type Page } from "@playwright/test";
 
-import { adminEmail, adminPassword, login } from "./helpers";
+import { adminEmail, adminPassword, businessDay, login } from "./helpers";
 
 const operatorEmail = process.env.E2E_OPERATOR_EMAIL ?? "e2e-operator@districom.local";
 const operatorPassword = process.env.E2E_OPERATOR_PASSWORD ?? "operator-password-123";
@@ -13,10 +13,7 @@ async function api<T>(request: APIRequestContext, method: "GET" | "POST", path: 
   return (await response.json()) as T;
 }
 
-function localDay(offsetDays: number) {
-  const date = new Date(Date.now() + offsetDays * 24 * 60 * 60 * 1000);
-  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
-}
+const localDay = (offsetDays: number) => businessDay(offsetDays);
 
 async function switchUser(page: Page, email: string, password: string, next: string) {
   await page.context().clearCookies();
