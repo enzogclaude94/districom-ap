@@ -43,7 +43,7 @@ DistriCom es una plataforma modular (ADR 006). Este roadmap tiene tres carriles:
 | R3 | Pendientes de cobro | **DONE** (2026-10-07; R3‑1, R3‑2 y R3‑3 aprobados y mergeados, PRs #13, #14 y #16) | R2 |
 | R4 | Cartera de cheques | **DONE** (aprobada por Enzo el 2026-10-09; PRs #17, #18 y #19) | R2 · R3 |
 | R5 | Combustible y vehículos | **DONE** (R5‑1 a R5‑4; `0014`–`0017` congeladas) | R2 |
-| R6 | Pagos a proveedores y terceros | IN_PROGRESS (R6‑1 DONE; R6‑2 IN_REVIEW) | R1 · R4 |
+| R6 | Pagos a proveedores y terceros | IN_PROGRESS (R6‑1 y R6‑2 DONE; R6‑3 IN_REVIEW) | R1 · R4 |
 | R7 | Boca de expendio | PLANNED | R2–R5 |
 | R8 | Cuenta interna de empleados y liquidación semanal | PLANNED | R1 · R2 |
 | R9 | Endurecimiento | PLANNED | todas |
@@ -220,12 +220,14 @@ Propuesta `PROPUESTA_R6_PAGOS_Y_TERCEROS.md` **aprobada** por Enzo el 2026-10-09
 - `settlements.payments` + `payment_items` multi-medio desde el inicio; importe = suma exacta de los ítems; a lo sumo un ítem por cuenta en efectivo/transferencia.
 - Conceptos fijos `MERCHANDISE`, `EXPENSE` (categoría activa, nunca `FUEL`), `REFUND`, `OTHER` (solo admin, descripción obligatoria). Contrapartidas técnicas `MERCHANDISE_PAYMENTS`, `EXPENSE`, `THIRD_PARTY_REFUNDS`, `OTHER_PAYMENTS`: clasifican adónde fue el dinero; no son cuentas a pagar, deuda, inventario valorizado ni compras devengadas.
 - Fuera de R6: adjuntos; cheque entregado que vuelve rechazado (deuda conocida).
-- R6‑2 (autorizada el 2026-10-10): revertir un pago con cheques exige confirmar, cheque por cheque, que cada uno se recuperó físicamente del tercero; sin eso no hay reverso.
+- R6‑2 (autorizada el 2026-10-10): revertir un pago con cheques exige confirmar, cheque por cheque, que cada uno se recuperó físicamente del tercero; sin eso no hay reverso. Un cheque vencido para presentar a la fecha del pago no se entrega (ajuste de Enzo).
+- R6‑3 (autorizada el 2026-10-10): consolidación sin ampliar el dominio financiero; nada de cuentas por pagar, facturas, saldos ni vencimientos de deuda.
 
 | PR | Contenido | Estado |
 |---|---|---|
 | R6‑1 | Terceros + pagos con efectivo y transferencia (cheque rechazado con `payment_method_not_enabled`); `0018` y `0019` | **DONE** (PR #29, aprobada por Enzo el 2026-10-10 con sus desvíos documentados; `0018` y `0019` congeladas) |
-| R6‑2 | Entrega de cheques de cartera como medio de pago (`DELIVERED`, «Entregar», reverso con recuperación física por cheque); `0020` | IN_REVIEW (espera aprobación de Enzo; R6‑3 no empieza sin ella) |
+| R6‑2 | Entrega de cheques de cartera como medio de pago (`DELIVERED`, «Entregar», reverso con recuperación física por cheque, cheque vencido no se entrega); `0020` | **DONE** (PR #31, aprobada por Enzo el 2026-10-10 con dos ajustes —cheque vencido bloqueado y `CREDITED` confirmado—; mergeado `f9847c8`; `0020` congelada) |
+| R6‑3 | Consolidación y cierre: ficha del tercero (totales vigentes, por concepto y por medio, cheques entregados), filtros completos de Pagos en la base, fecha de negocio en tests resuelta al usarla, E2E final de R6; sin migración | IN_REVIEW (espera aprobación de Enzo; R7 no empieza sin ella) |
 
 ### R7 — Boca de expendio
 **Alcance:** boca como punto que rinde (`outlets`), una rendición diaria con entregas parciales, misma lógica de rendición.
