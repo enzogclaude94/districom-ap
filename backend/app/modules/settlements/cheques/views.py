@@ -24,11 +24,13 @@ from app.modules.settlements.cheques.models import (
 from app.modules.settlements.delivery import closing
 from app.modules.settlements.delivery.models import Settlement
 from app.modules.settlements.ledger import service as ledger
+from app.modules.settlements.payments.models import Payment, PaymentItem
 from app.modules.settlements.pending.models import PendingCollectionReceipt
 from app.platform.auth.models import User
 from app.platform.banks.models import FinancialInstitution
 from app.platform.parties.models import Employee
 from app.platform.settings.service import get_setting
+from app.platform.third_parties.models import ThirdParty
 
 EXPIRING_SOON_KEY = "settlements.cheque_expiring_soon_days"
 
@@ -57,6 +59,14 @@ def items(db: Session, rows: Sequence[Cheque]) -> list[s.ChequeOut]:
     done = cycle.outcomes(db, ids)
     deposits = cycle.deposit_items_in_effect(db, ids)
     credits = cycle.credit_items_in_effect(db, ids)
+    deliveries = cycle.deliveries_in_effect(db, ids)
+    third_parties = dict(
+        db.execute(
+            select(ThirdParty.id, ThirdParty.name).where(
+                ThirdParty.id.in_({p.third_party_id for p in deliveries.values()})
+            )
+        ).all()
+    )
     account_names = {
         account_id: _account_name(db, account_id)
         for account_id in {slip.bank_account_id for _, slip in deposits.values()}
@@ -107,7 +117,9 @@ def items(db: Session, rows: Sequence[Cheque]) -> list[s.ChequeOut]:
         days_left = (deadline - today).days if derived == "IN_PORTFOLIO" and not expired else None
         deposit = deposits.get(c.id)
         crediting = credits.get(c.id)
+        delivery = deliveries.get(c.id)
         bank_name = account_names[deposit[1].bank_account_id] if deposit else None
+        third_party_name = third_parties.get(delivery.third_party_id) if delivery else None
         result.append(
             s.ChequeOut(
                 id=c.id,
@@ -130,13 +142,17 @@ def items(db: Session, rows: Sequence[Cheque]) -> list[s.ChequeOut]:
                 presentation_expired=expired,
                 expires_in_days=days_left,
                 expiring_soon=days_left is not None and days_left <= soon,
-                location_label=_location(derived, bank_name),
+                location_label=_location(derived, bank_name, third_party_name),
                 deposit_id=deposit[1].id if deposit else None,
                 deposit_business_date=deposit[1].business_date if deposit else None,
                 deposit_bank_account_id=deposit[1].bank_account_id if deposit else None,
                 deposit_bank_account_name=bank_name,
                 credit_id=crediting[1].id if crediting else None,
                 credit_business_date=crediting[1].business_date if crediting else None,
+                delivery_payment_id=delivery.id if delivery else None,
+                delivery_third_party_id=delivery.third_party_id if delivery else None,
+                delivery_third_party_name=third_party_name,
+                delivery_business_date=delivery.business_date if delivery else None,
                 drawer_name=c.drawer_name,
                 drawer_tax_id=c.drawer_tax_id,
                 delivered_by_name=c.delivered_by_name,
@@ -179,14 +195,17 @@ def expiring_soon_days(db: Session) -> int:
     return int(get_setting(db, EXPIRING_SOON_KEY))
 
 
-def _location(derived: str, bank_name: str | None) -> str | None:
-    """Where the value of the cheque is now. Nothing once it left (credited money is the bank's balance)."""
+def _location(derived: str, bank_name: str | None, third_party_name: str | None = None) -> str | None:
+    """Where the value of the cheque is now. Nothing once it left (credited money is the bank's balance),
+    except to whom it was delivered in a payment."""
     if derived == "IN_PORTFOLIO":
         return "Cartera de cheques"
     if derived == "DEPOSITED":
         return f"Cheques depositados en {bank_name}" if bank_name else "Cheques depositados"
     if derived == "CREDITED":
         return f"Acreditado en {bank_name}" if bank_name else "Acreditado"
+    if derived == "DELIVERED":
+        return f"Entregado a {third_party_name}" if third_party_name else "Entregado"
     return None
 
 
@@ -239,6 +258,7 @@ def detail(db: Session, cheque_id: int) -> s.ChequeDetailOut:
                 settlement_version=e.settlement_version,
                 close_operation_id=e.close_operation_id,
                 operation_id=e.operation_id,
+                payment_id=e.payment_id,
                 created_by=e.created_by,
                 created_by_name=users.get(e.created_by, ""),
                 created_at=e.created_at,
@@ -353,8 +373,8 @@ def _names(db: Session, model: type[User] | type[Employee], ids: list[int]) -> d
 
 
 def documents(db: Session, cheque_id: int) -> list[s.ChequeDocumentOut]:
-    """Every document of a cheque's cycle, oldest first: deposits, creditings, rejections, returns, and the
-    receipt of the pending it paid."""
+    """Every document of a cheque's cycle, oldest first: deposits, creditings, rejections, returns, the
+    receipt of the pending it paid, and the payments that delivered it to a third party (R6-2)."""
     result: list[tuple[datetime, s.ChequeDocumentOut]] = []
     deposits = list(
         db.scalars(
@@ -408,6 +428,30 @@ def documents(db: Session, cheque_id: int) -> list[s.ChequeDocumentOut]:
                     reversed=r.reversal_operation_id is not None,
                     reversal_operation_id=r.reversal_operation_id,
                     pending_id=r.pending_id,
+                ),
+            )
+        )
+    payments = db.execute(
+        select(Payment, ThirdParty.name)
+        .join(PaymentItem, PaymentItem.payment_id == Payment.id)
+        .join(ThirdParty, ThirdParty.id == Payment.third_party_id)
+        .where(PaymentItem.cheque_id == cheque_id)
+    ).all()
+    for p, third_party_name in payments:
+        assert p.operation_id is not None  # a published payment always has it (0019)
+        result.append(
+            (
+                p.created_at,
+                s.ChequeDocumentOut(
+                    type="PAYMENT",
+                    id=p.id,
+                    business_date=p.business_date,
+                    operation_id=p.operation_id,
+                    reversed=p.reversal_operation_id is not None,
+                    reversal_operation_id=p.reversal_operation_id,
+                    pending_id=None,
+                    third_party_id=p.third_party_id,
+                    third_party_name=third_party_name,
                 ),
             )
         )

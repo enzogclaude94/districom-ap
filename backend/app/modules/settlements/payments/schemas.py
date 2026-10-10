@@ -11,7 +11,7 @@ from app.modules.settlements.cash.schemas import Amount, Money, OperationOut, Re
 from app.modules.settlements.delivery.schemas import Text500
 
 Concept = Literal["MERCHANDISE", "EXPENSE", "REFUND", "OTHER"]
-# CHEQUE is part of the model; R6-1 refuses it (`payment_method_not_enabled`).
+# CHEQUE (R6-2): a cheque of the portfolio, delivered for its whole face amount.
 Method = Literal["CASH", "TRANSFER", "CHEQUE"]
 PaymentState = Literal["IN_EFFECT", "REVERSED"]
 Reference = Annotated[str, Field(max_length=100)]
@@ -26,7 +26,7 @@ class PaymentItemIn(StrictIn):
     method: Method
     # CASH: an active cash box; TRANSFER: an active bank account the user chose.
     account_id: int | None = None
-    # CHEQUE (R6-2).
+    # CHEQUE: a cheque in the portfolio on the payment's date; `amount` must be its face amount.
     cheque_id: int | None = None
     amount: Amount
     reference: Reference | None = None
@@ -52,6 +52,9 @@ class PaymentIn(StrictIn):
 class PaymentReversalIn(StrictIn):
     client_request_id: UUID
     reason: Reason
+    # A payment with cheques is reversed only when EVERY cheque was physically recovered from the third
+    # party: the ids of the cheques the user confirmed, one by one (R6-2). Empty for a payment without them.
+    recovered_cheque_ids: Annotated[list[int], Field(max_length=MAX_ITEMS)] = []
 
 
 class PaymentItemCorrection(StrictIn):
@@ -70,6 +73,24 @@ class PaymentCorrectionIn(StrictIn):
     items: Annotated[list[PaymentItemCorrection], Field(max_length=MAX_ITEMS)] | None = None
 
 
+class PaymentChequeOut(BaseModel):
+    """The cheque of a CHEQUE item, as it is now (its state is derived: Entregado while the payment is in
+    effect, back En cartera, or wherever it went, after a reversal with the cheque recovered)."""
+
+    cheque_id: int
+    kind: str
+    payment_type: str
+    cheque_number: str
+    bank_name: str
+    drawer_name: str
+    delivered_by_name: str
+    payable_from: date
+    state: str
+    state_label: str
+    recovered_at: datetime | None
+    recovered_by_name: str | None
+
+
 class PaymentItemOut(BaseModel):
     id: int
     method: Method
@@ -77,6 +98,7 @@ class PaymentItemOut(BaseModel):
     account_name: str | None
     account_kind: str | None
     cheque_id: int | None
+    cheque: PaymentChequeOut | None
     amount: Money
     reference: str | None
 

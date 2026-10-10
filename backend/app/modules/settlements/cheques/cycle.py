@@ -57,6 +57,7 @@ from app.modules.settlements.delivery import idempotency
 from app.modules.settlements.delivery.models import Settlement
 from app.modules.settlements.delivery.service import Created, money
 from app.modules.settlements.ledger import service as ledger
+from app.modules.settlements.payments.models import Payment, PaymentItem
 from app.modules.settlements.pending import service as pendings
 from app.modules.settlements.pending.models import PendingCollection
 from app.platform.audit.service import record_change
@@ -121,7 +122,7 @@ def deposit(db: Session, actor: User, body: s.DepositIn) -> Created:
     replay = _replay(db, ChequeDeposit, body.client_request_id, fingerprint, "deposit_id")
     if replay is not None:
         return replay
-    cheques = _lock_cheques(db, cheque_ids)
+    cheques = lock_cheques(db, cheque_ids)
     replay = _replay(db, ChequeDeposit, body.client_request_id, fingerprint, "deposit_id")
     if replay is not None:
         return replay
@@ -228,7 +229,7 @@ def credit(db: Session, actor: User, body: s.CreditIn) -> Created:
     replay = _replay(db, ChequeCredit, body.client_request_id, fingerprint, "credit_id")
     if replay is not None:
         return replay
-    cheques = _lock_cheques(db, cheque_ids)
+    cheques = lock_cheques(db, cheque_ids)
     replay = _replay(db, ChequeCredit, body.client_request_id, fingerprint, "credit_id")
     if replay is not None:
         return replay
@@ -334,7 +335,7 @@ def reject(db: Session, actor: User, cheque_id: int, body: s.RejectionIn) -> Cre
     replay = _replay(db, ChequeRejection, body.client_request_id, fingerprint, "rejection_id")
     if replay is not None:
         return replay
-    cheque = _lock_cheques(db, [cheque_id])[0]
+    cheque = lock_cheques(db, [cheque_id])[0]
     replay = _replay(db, ChequeRejection, body.client_request_id, fingerprint, "rejection_id")
     if replay is not None:
         return replay
@@ -458,7 +459,7 @@ def give_back(db: Session, actor: User, cheque_id: int, body: s.ReturnIn) -> Cre
     replay = _replay(db, ChequeReturn, body.client_request_id, fingerprint, "return_id")
     if replay is not None:
         return replay
-    cheque = _lock_cheques(db, [cheque_id])[0]
+    cheque = lock_cheques(db, [cheque_id])[0]
     replay = _replay(db, ChequeReturn, body.client_request_id, fingerprint, "return_id")
     if replay is not None:
         return replay
@@ -584,7 +585,7 @@ def _reverse(
     found = cast(Document | None, db.get(model, document_id))
     if found is None:
         raise AppError(404, "cheque_document_not_found", f"{kind.label} no existe.")
-    cheques = _lock_cheques(db, cheque_ids_of(db, found))
+    cheques = lock_cheques(db, cheque_ids_of(db, found))
     document = cast(
         Document,
         db.scalars(
@@ -697,11 +698,26 @@ def credit_items_in_effect(db: Session, cheque_ids: Sequence[int]) -> dict[int, 
 
 def outcomes(db: Session, cheque_ids: Sequence[int]) -> dict[int, Outcome]:
     """What took each cheque out of the company's hands, by the documents in effect: a return, a rejection
-    (in transit or after crediting) or a crediting."""
+    (in transit or after crediting), a crediting, or a payment that delivered it to a third party (R6-2).
+    A delivered cheque has no deposit nor return in effect (it left the portfolio once), so DELIVERED never
+    competes with the others."""
     result: dict[int, Outcome] = dict.fromkeys(credit_items_in_effect(db, cheque_ids), "CREDITED")
     result.update(dict.fromkeys(_live(db, ChequeRejection, cheque_ids), "REJECTED"))
     result.update(dict.fromkeys(_live(db, ChequeReturn, cheque_ids), "RETURNED"))
+    result.update(dict.fromkeys(deliveries_in_effect(db, cheque_ids), "DELIVERED"))
     return result
+
+
+def deliveries_in_effect(db: Session, cheque_ids: Sequence[int]) -> dict[int, Payment]:
+    """The payment in effect that delivered each cheque, if any (at most one: 0020)."""
+    if not cheque_ids:
+        return {}
+    rows = db.execute(
+        select(PaymentItem.cheque_id, Payment)
+        .join(Payment, Payment.id == PaymentItem.payment_id)
+        .where(PaymentItem.cheque_id.in_(cheque_ids), Payment.reversal_operation_id.is_(None))
+    )
+    return {cheque_id: payment for cheque_id, payment in rows.all() if cheque_id is not None}
 
 
 def cheque_ids_of(db: Session, document: Document) -> list[int]:
@@ -774,7 +790,7 @@ def _replay(db: Session, model: type[Document], request_id: UUID, fingerprint: s
     return Created(existing.id, created=False)
 
 
-def _lock_cheques(db: Session, cheque_ids: Sequence[int]) -> list[Cheque]:
+def lock_cheques(db: Session, cheque_ids: Sequence[int]) -> list[Cheque]:
     ids = sorted(set(cheque_ids))
     rows = list(
         db.scalars(

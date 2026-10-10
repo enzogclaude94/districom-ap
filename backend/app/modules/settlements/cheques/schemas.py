@@ -141,6 +141,11 @@ class ChequeOut(BaseModel):
     deposit_bank_account_name: str | None = None
     credit_id: int | None = None
     credit_business_date: date | None = None
+    # The payment in effect that delivered it (DELIVERED, R6-2): to whom and on which business date.
+    delivery_payment_id: int | None = None
+    delivery_third_party_id: int | None = None
+    delivery_third_party_name: str | None = None
+    delivery_business_date: date | None = None
     drawer_name: str
     drawer_tax_id: str | None
     delivered_by_name: str
@@ -189,6 +194,8 @@ class ChequeEventOut(BaseModel):
     settlement_version: int | None
     close_operation_id: int | None
     operation_id: int | None
+    # DELIVERED / RECOVERED_FROM_PAYMENT: the payment (R6-2).
+    payment_id: int | None = None
     created_by: int
     created_by_name: str
     created_at: datetime
@@ -359,7 +366,7 @@ class ReturnOut(BaseModel):
 class ChequeDocumentOut(BaseModel):
     """One document of a cheque's cycle, as its history shows it."""
 
-    type: Literal["DEPOSIT", "CREDIT", "REJECTION", "RETURN", "PENDING_RECEIPT"]
+    type: Literal["DEPOSIT", "CREDIT", "REJECTION", "RETURN", "PENDING_RECEIPT", "PAYMENT"]
     id: int
     business_date: date
     operation_id: int
@@ -367,6 +374,9 @@ class ChequeDocumentOut(BaseModel):
     reversal_operation_id: int | None
     # The pending a rejection or a return created, or the one a receipt collected.
     pending_id: int | None
+    # PAYMENT (R6-2): the third party it was delivered to.
+    third_party_id: int | None = None
+    third_party_name: str | None = None
 
 
 class ChequeReceiptIn(InstrumentIn):

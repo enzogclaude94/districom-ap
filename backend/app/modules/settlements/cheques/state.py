@@ -21,6 +21,18 @@ R4-2 adds the financial cycle, from the same ledger position and the documents i
   new pending collection is owed by who delivered it.
 - RETURNED ("Devuelto"): given back from the portfolio to who delivered it (a return in effect), with a new
   pending collection.
+
+R6-2 adds the delivery to a third party as a means of payment:
+
+- DELIVERED ("Entregado"): a payment in effect delivered it (its item, its PAYMENT operation): it left the
+  portfolio towards that third party. Never stored; it disappears when the payment is reversed with the
+  cheque physically recovered, and the reversal puts it back in the portfolio.
+
+Precedence, highest first: IN_PORTFOLIO, DEPOSITED (the ledger position says where it is), then what took
+it out of the company's hands (REJECTED over CREDITED; RETURNED; DELIVERED), then VOIDED, the verification
+states of an ECHEQ and RECEIVED. A cheque leaves the portfolio at most once in effect (deposit, return or
+payment; the position check of migration 0012 refuses a second exit), so DELIVERED never coexists with
+DEPOSITED, CREDITED, REJECTED or RETURNED: it can never show as two of them.
 """
 
 from decimal import Decimal
@@ -35,10 +47,11 @@ State = Literal[
     "CREDITED",
     "REJECTED",
     "RETURNED",
+    "DELIVERED",
     "VOIDED",
 ]
 # What the cycle did to a cheque that is no longer held: the document in effect that took it out.
-Outcome = Literal["CREDITED", "REJECTED", "RETURNED"]
+Outcome = Literal["CREDITED", "REJECTED", "RETURNED", "DELIVERED"]
 LoadChange = Literal["ADDED", "MARKED_FOR_REMOVAL"]
 
 LABELS: dict[str, str] = {
@@ -50,6 +63,7 @@ LABELS: dict[str, str] = {
     "CREDITED": "Acreditado",
     "REJECTED": "Rechazado",
     "RETURNED": "Devuelto",
+    "DELIVERED": "Entregado",
     "VOIDED": "Anulado",
 }
 LOAD_CHANGE_DETAIL: dict[str, str] = {

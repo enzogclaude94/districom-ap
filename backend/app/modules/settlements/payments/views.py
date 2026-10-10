@@ -9,6 +9,8 @@ from sqlalchemy.orm import Session
 
 from app.core.errors import AppError
 from app.modules.settlements.cash.schemas import EntryOut, OperationOut
+from app.modules.settlements.cheques import views as cheque_views
+from app.modules.settlements.cheques.models import Cheque, ChequeEvent
 from app.modules.settlements.delivery.models import ExpenseCategory
 from app.modules.settlements.ledger import service as ledger
 from app.modules.settlements.payments import schemas as s
@@ -102,6 +104,7 @@ def outs(db: Session, payments: Sequence[Payment]) -> list[s.PaymentOut]:
     # Names and kinds of the accounts, read through the ledger service (its models are its own).
     accounts = {a.account_id: a for a in ledger.account_balances(db, include_inactive=True)}
     by_code = {a.code: a.name for a in accounts.values() if a.code}
+    cheques = _cheques(db, [(i.payment_id, i.cheque_id) for rows in items.values() for i in rows if i.cheque_id])
     users = _users(db, {p.created_by for p in payments} | {p.reversed_by for p in payments if p.reversed_by})
     result = []
     for payment in payments:
@@ -132,6 +135,7 @@ def outs(db: Session, payments: Sequence[Payment]) -> list[s.PaymentOut]:
                         account_name=accounts[item.account_id].name if item.account_id in accounts else None,
                         account_kind=accounts[item.account_id].kind if item.account_id in accounts else None,
                         cheque_id=item.cheque_id,
+                        cheque=cheques.get((payment.id, item.cheque_id)) if item.cheque_id is not None else None,
                         amount=item.amount,
                         reference=item.reference,
                     )
@@ -146,6 +150,42 @@ def outs(db: Session, payments: Sequence[Payment]) -> list[s.PaymentOut]:
                 reversed_at=payment.reversed_at,
                 reversal_reason=payment.reversal_reason,
             )
+        )
+    return result
+
+
+def _cheques(db: Session, pairs: list[tuple[int, int]]) -> dict[tuple[int, int], s.PaymentChequeOut]:
+    """Each delivered cheque as it is now, by (payment, cheque), with who confirmed its recovery and when."""
+    if not pairs:
+        return {}
+    cheque_ids = {cheque_id for _, cheque_id in pairs}
+    now = {c.id: c for c in cheque_views.items(db, list(db.scalars(select(Cheque).where(Cheque.id.in_(cheque_ids)))))}
+    recoveries = {
+        (e.payment_id, e.cheque_id): e
+        for e in db.scalars(
+            select(ChequeEvent).where(
+                ChequeEvent.payment_id.in_({payment_id for payment_id, _ in pairs}),
+                ChequeEvent.event_type == "RECOVERED_FROM_PAYMENT",
+            )
+        )
+    }
+    names = _users(db, {e.created_by for e in recoveries.values()})
+    result = {}
+    for pair in pairs:
+        c, event = now[pair[1]], recoveries.get(pair)
+        result[pair] = s.PaymentChequeOut(
+            cheque_id=c.id,
+            kind=c.kind,
+            payment_type=c.payment_type,
+            cheque_number=c.cheque_number,
+            bank_name=c.bank_name,
+            drawer_name=c.drawer_name,
+            delivered_by_name=c.delivered_by_name,
+            payable_from=c.payable_from,
+            state=c.state,
+            state_label=c.state_label,
+            recovered_at=event.created_at if event else None,
+            recovered_by_name=names.get(event.created_by) if event else None,
         )
     return result
 
