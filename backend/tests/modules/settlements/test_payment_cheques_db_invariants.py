@@ -281,6 +281,29 @@ def test_8_never_a_cheque_out_of_the_portfolio(db: Session, world) -> None:  # t
     assert "partial or negative position" in message or "was not in the portfolio" in message
 
 
+def test_8_never_a_cheque_expired_for_presentation_on_the_payment_date(db: Session, world) -> None:  # type: ignore[no-untyped-def]
+    """The rule of a deposit (0013), on the payment's date: its last presentation day still delivers."""
+    issued = T - timedelta(days=31)  # last presentation day: T - 1
+    old = entered(world["admin"], "5000", on=T - timedelta(days=20), issue_date=issued.isoformat())
+    message = _refused(db, lambda: _publish(db, world, [(old, 5000)]))
+    assert "expired for presentation" in message
+    _publish(db, world, [(old, 5000)], on=T - timedelta(days=1))
+    db.commit()
+
+
+def test_8_a_deferred_cheque_not_yet_payable_is_delivered(db: Session, world) -> None:  # type: ignore[no-untyped-def]
+    later = entered(
+        world["admin"],
+        "6000",
+        on=T - timedelta(days=2),
+        issue_date=(T - timedelta(days=5)).isoformat(),
+        payment_type="DEFERRED",
+        payment_date=(T + timedelta(days=20)).isoformat(),
+    )
+    _publish(db, world, [(later, 6000)])
+    db.commit()
+
+
 # --- 9: a reversal only with every cheque recovered and back -----------------------------------------------
 
 
