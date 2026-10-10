@@ -37,6 +37,26 @@ def list_payments(db: DbSession, _: Viewer, q: Annotated[s.PaymentListQuery, Que
     return views.list_payments(db, q)
 
 
+@router.get(
+    "/payments/third-parties/{third_party_id}/summary",
+    response_model=s.ThirdPartyPaymentSummary,
+    summary="Lo pagado a un tercero: pagos vigentes por concepto y por medio (no es un saldo)",
+)
+def third_party_summary(third_party_id: int, db: DbSession, _: Viewer) -> s.ThirdPartyPaymentSummary:
+    return views.third_party_summary(db, third_party_id)
+
+
+@router.get(
+    "/payments/third-parties/{third_party_id}/cheques",
+    response_model=s.DeliveredChequePage,
+    summary="Cheques entregados a un tercero en pagos, con su estado actual",
+)
+def third_party_cheques(
+    third_party_id: int, db: DbSession, _: Viewer, q: Annotated[s.PageQuery, Query()]
+) -> s.DeliveredChequePage:
+    return views.delivered_cheques(db, third_party_id, q)
+
+
 @router.get("/payments/{payment_id}", response_model=s.PaymentDetail, summary="Un pago con su operación e historia")
 def get_payment(payment_id: int, db: DbSession, _: Viewer) -> s.PaymentDetail:
     return views.detail(db, payment_id)
