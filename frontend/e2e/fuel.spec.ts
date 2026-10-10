@@ -1,6 +1,6 @@
 import { expect, test, type APIRequestContext } from "@playwright/test";
 
-import { adminEmail, adminPassword, login } from "./helpers";
+import { adminEmail, adminPassword, businessDay, login } from "./helpers";
 
 const operatorEmail = process.env.E2E_OPERATOR_EMAIL ?? "e2e-operator@districom.local";
 const operatorPassword = process.env.E2E_OPERATOR_PASSWORD ?? "operator-password-123";
@@ -13,11 +13,8 @@ async function post<T>(request: APIRequestContext, path: string, data: unknown) 
   return (await response.json()) as T;
 }
 
-function yesterday() {
-  const date = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
-  return local.toISOString().slice(0, 10);
-}
+/** Yesterday in the business calendar, resolved when used: never a future date for the backend. */
+const yesterday = () => businessDay(-1);
 
 test("an operator loads fuel in a settlement; the backend computes the amount and a correction follows", async ({
   page,

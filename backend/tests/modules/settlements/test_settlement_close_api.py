@@ -4,7 +4,7 @@ The numbers in brackets are the tests Enzo asked for R2-2. Concurrency ([15], [2
 in `test_settlement_close_concurrency.py`; the database rules in `test_settlement_close_db_invariants.py`.
 """
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -13,13 +13,12 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
-from app.core.clock import business_today
 from app.core.errors import AppError
 from app.modules.settlements.ledger import service as ledger
 from app.platform.auth.models import User
+from tests.modules.settlements.days import yesterday
 
 BASE = "/api/v1/settlements"
-DAY = business_today() - timedelta(days=1)
 REASON = "Faltaba cargar un billete de $500"
 
 
@@ -31,7 +30,7 @@ def create(client: TestClient, employee_id: int, expected: str) -> int:
         f"{BASE}/deliveries",
         json={
             "client_request_id": str(uuid4()),
-            "business_date": DAY.isoformat(),
+            "business_date": yesterday().isoformat(),
             "employee_id": employee_id,
             "expected_amount": expected,
         },
@@ -211,7 +210,7 @@ def test_balanced_close_publishes_one_balanced_operation(as_role, ids, balanced,
         text("SELECT type, business_date, source_type, source_id FROM settlements.financial_operations WHERE id = :o"),
         {"o": operation_id},
     ).one()
-    assert tuple(operation) == ("SETTLEMENT_CLOSE", DAY, "settlement", balanced)
+    assert tuple(operation) == ("SETTLEMENT_CLOSE", yesterday(), "settlement", balanced)
     assert balances(operator)["main_cash"] == "40000.00"
 
 
@@ -533,7 +532,7 @@ def test_new_close_publishes_reversal_and_new_close(as_role, ids, million, pedro
         (original + 1, "REVERSAL", original),
         (replacement, "SETTLEMENT_CLOSE", None),
     ]
-    assert {r.business_date for r in rows} == {DAY}  # [23] the settlement's date, not the correction's
+    assert {r.business_date for r in rows} == {yesterday()}  # [23] the settlement's date, not the correction's
     assert all(r.created_at >= started for r in rows[1:])  # [24] when the correction really happened
     assert legs(db, replacement)["main_cash"] == "1000500.00"
     assert legs(db, original + 1) == {

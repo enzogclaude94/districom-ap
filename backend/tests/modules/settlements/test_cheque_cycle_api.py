@@ -17,16 +17,27 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.core.clock import business_today
 from app.modules.settlements.ledger.models import Account
+from tests.modules.settlements.days import days_ago, today
 from tests.modules.settlements.test_cheques_api import bank, closed, create, new, physical
 
 BASE = "/api/v1/settlements"
-T = business_today()
-ISSUED = T - timedelta(days=12)
-ENTERED = T - timedelta(days=10)
-DEPOSITED = T - timedelta(days=8)
-CREDITED = T - timedelta(days=6)
+
+
+def issued_on() -> date:
+    return days_ago(12)
+
+
+def entered_on() -> date:
+    return days_ago(10)
+
+
+def deposited_on() -> date:
+    return days_ago(8)
+
+
+def credited_on() -> date:
+    return days_ago(6)
 
 
 # --- helpers --------------------------------------------------------------------------------------
@@ -40,10 +51,12 @@ def instrument(bank_id: int, amount: str = "100000", **fields: Any) -> dict[str,
     return physical(bank_id, amount=amount, cheque_number=number, account_ref=f"77{number}", **fields)
 
 
-def entered(client: TestClient, amount: str = "100000", on: date = ENTERED, **fields: Any) -> int:
-    """A cheque of the portfolio (opening balance, as admin), issued on ISSUED unless said."""
+def entered(client: TestClient, amount: str = "100000", on: date | None = None, **fields: Any) -> int:
+    """A cheque of the portfolio (opening balance, as admin), issued on `issued_on()` unless said."""
+    if on is None:
+        on = entered_on()
     body = {
-        **instrument(bank(client), amount, **{"issue_date": ISSUED.isoformat(), **fields}),
+        **instrument(bank(client), amount, **{"issue_date": issued_on().isoformat(), **fields}),
         "business_date": on.isoformat(),
     }
     response = client.post(f"{BASE}/cheques/opening-balance", json=body)
@@ -51,7 +64,11 @@ def entered(client: TestClient, amount: str = "100000", on: date = ENTERED, **fi
     return response.json()["id"]  # type: ignore[no-any-return]
 
 
-def deposit(client: TestClient, ids: list[int], on: date = DEPOSITED, bank_id: int | None = None, **extra: Any) -> Any:
+def deposit(
+    client: TestClient, ids: list[int], on: date | None = None, bank_id: int | None = None, **extra: Any
+) -> Any:
+    if on is None:
+        on = deposited_on()
     return client.post(
         f"{BASE}/cheque-deposits",
         json={
@@ -64,13 +81,17 @@ def deposit(client: TestClient, ids: list[int], on: date = DEPOSITED, bank_id: i
     )
 
 
-def deposited(client: TestClient, ids: list[int], on: date = DEPOSITED) -> dict[str, Any]:
+def deposited(client: TestClient, ids: list[int], on: date | None = None) -> dict[str, Any]:
+    if on is None:
+        on = deposited_on()
     response = deposit(client, ids, on)
     assert response.status_code == 201, response.text
     return response.json()  # type: ignore[no-any-return]
 
 
-def credit(client: TestClient, ids: list[int], on: date = CREDITED, bank_id: int | None = None) -> Any:
+def credit(client: TestClient, ids: list[int], on: date | None = None, bank_id: int | None = None) -> Any:
+    if on is None:
+        on = credited_on()
     return client.post(
         f"{BASE}/cheque-credits",
         json={
@@ -82,7 +103,9 @@ def credit(client: TestClient, ids: list[int], on: date = CREDITED, bank_id: int
     )
 
 
-def credited(client: TestClient, ids: list[int], on: date = CREDITED) -> dict[str, Any]:
+def credited(client: TestClient, ids: list[int], on: date | None = None) -> dict[str, Any]:
+    if on is None:
+        on = credited_on()
     response = credit(client, ids, on)
     assert response.status_code == 201, response.text
     return response.json()  # type: ignore[no-any-return]
@@ -218,7 +241,7 @@ def test_a_deposit_slip_is_one_operation_with_a_pair_of_legs_per_cheque(admin: T
     op = operation(db, slip["operation_id"])
     assert (op["type"], op["business_date"], op["source_type"], op["source_id"]) == (
         "CHEQUE_DEPOSIT",
-        DEPOSITED,
+        deposited_on(),
         "cheque_deposit",
         slip["id"],
     )
@@ -241,7 +264,7 @@ def test_a_deposit_is_idempotent_and_never_deposits_a_cheque_twice(admin: TestCl
         "client_request_id": str(uuid4()),
         "bank_account_id": account_id(admin, "bank"),
         "cheque_ids": [cid],
-        "business_date": DEPOSITED.isoformat(),
+        "business_date": deposited_on().isoformat(),
     }
     first = admin.post(f"{BASE}/cheque-deposits", json=body)
     again = admin.post(f"{BASE}/cheque-deposits", json=body)
@@ -254,10 +277,10 @@ def test_a_deposit_is_idempotent_and_never_deposits_a_cheque_twice(admin: TestCl
 
 
 def test_an_expired_cheque_is_never_deposited_not_even_by_an_admin(admin: TestClient, ana: int) -> None:
-    issued = T - timedelta(days=35)
-    cid = entered(admin, issue_date=issued.isoformat(), on=T - timedelta(days=34))
+    issued = today() - timedelta(days=35)
+    cid = entered(admin, issue_date=issued.isoformat(), on=today() - timedelta(days=34))
     deadline = issued + timedelta(days=30)
-    late = deposit(admin, [cid], on=T)
+    late = deposit(admin, [cid], on=today())
     assert late.status_code == 422
     assert late.json()["code"] == "cheque_presentation_expired"
     assert late.json()["details"] == {"deadline": deadline.isoformat()}
@@ -268,16 +291,16 @@ def test_an_expired_cheque_is_never_deposited_not_even_by_an_admin(admin: TestCl
     assert slip.status_code == 201, slip.text
     assert reverse(admin, f"cheque-deposits/{slip.json()['id']}").status_code == 201
     # An expired cheque can be given back; out of a settlement, someone must answer for the new pending.
-    nobody = give_back(admin, cid, T)
+    nobody = give_back(admin, cid, today())
     assert (nobody.status_code, nobody.json()["code"]) == (422, "responsible_required")
-    assert give_back(admin, cid, T, responsible=ana).status_code == 201
+    assert give_back(admin, cid, today(), responsible=ana).status_code == 201
     assert cheque(admin, cid)["state"] == "RETURNED"
 
 
 def test_a_deferred_cheque_is_not_deposited_before_its_payment_date(admin: TestClient) -> None:
-    payment = T + timedelta(days=3)
-    cid = entered(admin, payment_type="DEFERRED", payment_date=payment.isoformat(), on=T - timedelta(days=1))
-    early = deposit(admin, [cid], on=T)
+    payment = today() + timedelta(days=3)
+    cid = entered(admin, payment_type="DEFERRED", payment_date=payment.isoformat(), on=today() - timedelta(days=1))
+    early = deposit(admin, [cid], on=today())
     assert (early.status_code, early.json()["code"]) == (422, "cheque_not_yet_payable")
     assert early.json()["details"]["payable_from"] == payment.isoformat()
 
@@ -286,9 +309,9 @@ def test_a_deposit_needs_an_active_bank_and_a_date_after_the_entry(admin: TestCl
     cid = entered(admin)
     wrong = deposit(admin, [cid], bank_id=accounts["main_cash"])
     assert (wrong.status_code, wrong.json()["code"]) == (422, "invalid_bank_account")
-    before = deposit(admin, [cid], on=ENTERED - timedelta(days=1))
+    before = deposit(admin, [cid], on=entered_on() - timedelta(days=1))
     assert (before.status_code, before.json()["code"]) == (422, "invalid_deposit_date")
-    future = deposit(admin, [cid], on=T + timedelta(days=1))
+    future = deposit(admin, [cid], on=today() + timedelta(days=1))
     assert (future.status_code, future.json()["code"]) == (422, "future_business_date")
     missing = deposit(admin, [cid, 999999])
     assert (missing.status_code, missing.json()["code"]) == (404, "cheque_not_found")
@@ -308,7 +331,7 @@ def test_a_crediting_moves_the_deposited_cheques_to_the_bank(admin: TestClient, 
         ("BANK", None, Decimal("140000.00")),
     ]
     assert balance(admin, "bank") == Decimal("140000.00")
-    assert balance(admin, "bank", on=CREDITED - timedelta(days=1)) == 0
+    assert balance(admin, "bank", on=credited_on() - timedelta(days=1)) == 0
     assert (cheque(admin, first)["state"], cheque(admin, first)["state_label"]) == ("CREDITED", "Acreditado")
     again = credit(admin, [first])
     assert (again.status_code, again.json()["code"]) == (409, "cheque_not_deposited")
@@ -323,7 +346,7 @@ def test_a_cheque_is_credited_in_the_bank_it_was_deposited_not_before(admin: Tes
     deposited(admin, [cid])
     mismatch = credit(admin, [cid], bank_id=other.id)
     assert (mismatch.status_code, mismatch.json()["code"]) == (422, "bank_account_mismatch")
-    early = credit(admin, [cid], on=DEPOSITED - timedelta(days=1))
+    early = credit(admin, [cid], on=deposited_on() - timedelta(days=1))
     assert (early.status_code, early.json()["code"]) == (422, "invalid_credit_date")
     portfolio = entered(admin)
     never = credit(admin, [portfolio])
@@ -338,7 +361,7 @@ def test_a_rejection_in_transit_leaves_the_bank_untouched_and_creates_a_new_pend
 ) -> None:
     cid = entered(admin, delivered_by_name="Almacén La Esquina")
     deposited(admin, [cid])
-    day = T - timedelta(days=5)
+    day = today() - timedelta(days=5)
     doc = rejected(admin, cid, day, responsible=ana)
     assert (doc["stage"], doc["bank_account_id"]) == ("IN_TRANSIT", None)
     assert legs(db, doc["operation_id"]) == [
@@ -375,9 +398,9 @@ def test_a_rejection_after_crediting_debits_the_bank_of_the_crediting(admin: Tes
     cid = entered(admin)
     deposited(admin, [cid])
     credited(admin, [cid])
-    early = reject(admin, cid, CREDITED - timedelta(days=1), responsible=ana)
+    early = reject(admin, cid, credited_on() - timedelta(days=1), responsible=ana)
     assert (early.status_code, early.json()["code"]) == (422, "invalid_rejection_date")
-    doc = rejected(admin, cid, T - timedelta(days=2), responsible=ana)
+    doc = rejected(admin, cid, today() - timedelta(days=2), responsible=ana)
     assert (doc["stage"], doc["bank_account_id"]) == ("AFTER_CREDIT", account_id(admin, "bank"))
     assert legs(db, doc["operation_id"]) == [
         ("BANK", None, Decimal("-100000.00")),
@@ -397,8 +420,8 @@ def test_the_responsible_of_a_rejection_is_the_driver_of_the_cheque_settlement(
     sid = create(operator, pedro, "50000")
     cid = new(operator, sid, physical(bank(operator)))
     closed(operator, sid)
-    deposited(operator, [cid], on=T)
-    doc = rejected(operator, cid, T)
+    deposited(operator, [cid], on=today())
+    doc = rejected(operator, cid, today())
     owed = pending(operator, doc["pending_id"])
     assert (owed["responsible_employee_id"], owed["customer_name"]) == (pedro, "Almacén Don José")
     assert owed["settlement_id"] is None  # a new pending, not the settlement's
@@ -407,9 +430,9 @@ def test_the_responsible_of_a_rejection_is_the_driver_of_the_cheque_settlement(
 def test_a_rejection_needs_a_responsible_when_the_cheque_had_no_settlement(admin: TestClient) -> None:
     cid = entered(admin)
     deposited(admin, [cid])
-    response = reject(admin, cid, T)
+    response = reject(admin, cid, today())
     assert (response.status_code, response.json()["code"]) == (422, "responsible_required")
-    inactive = reject(admin, cid, T, responsible=999999)
+    inactive = reject(admin, cid, today(), responsible=999999)
     assert (inactive.status_code, inactive.json()["code"]) == (422, "employee_not_found")
 
 
@@ -424,12 +447,12 @@ def test_a_return_is_admin_only_with_a_reason_and_creates_a_new_pending(
     admin = as_role("admin")
     cid = entered(admin)
     operator = as_role("operator")
-    forbidden = give_back(operator, cid, T, responsible=ana)
+    forbidden = give_back(operator, cid, today(), responsible=ana)
     assert forbidden.status_code == 403
     admin = as_role("admin")
-    blank = give_back(admin, cid, T, responsible=ana, reason="  ")
+    blank = give_back(admin, cid, today(), responsible=ana, reason="  ")
     assert (blank.status_code, blank.json()["code"]) == (422, "reason_required")
-    response = give_back(admin, cid, T, responsible=ana)
+    response = give_back(admin, cid, today(), responsible=ana)
     assert response.status_code == 201, response.text
     doc = response.json()
     assert legs(db, doc["operation_id"]) == [
@@ -443,11 +466,11 @@ def test_a_return_is_admin_only_with_a_reason_and_creates_a_new_pending(
         "OPEN",
     )
     assert cheque(admin, cid)["state"] == "RETURNED"
-    again = give_back(admin, cid, T, responsible=ana)
+    again = give_back(admin, cid, today(), responsible=ana)
     assert (again.status_code, again.json()["code"]) == (409, "cheque_not_in_portfolio")
     deposited_cheque = entered(admin)
     deposited(admin, [deposited_cheque])
-    not_held = give_back(admin, deposited_cheque, T, responsible=ana)
+    not_held = give_back(admin, deposited_cheque, today(), responsible=ana)
     assert (not_held.status_code, not_held.json()["code"]) == (409, "cheque_not_in_portfolio")
     assert_cheque_accounts_invariant(admin, db)
 
@@ -466,7 +489,7 @@ def test_reversing_a_deposit_keeps_its_date_and_puts_the_cheques_back(admin: Tes
     original = operation(db, slip["operation_id"])
     assert (op["type"], op["business_date"], op["reverses_operation_id"]) == (
         "REVERSAL",
-        DEPOSITED,
+        deposited_on(),
         slip["operation_id"],
     )
     assert op["created_at"] > original["created_at"]
@@ -480,7 +503,7 @@ def test_reversing_a_deposit_keeps_its_date_and_puts_the_cheques_back(admin: Tes
     other = reverse(admin, f"cheque-deposits/{slip['id']}")
     assert (other.status_code, other.json()["code"]) == (409, "deposit_already_reversed")
     # Deposited again on another slip: the history keeps both.
-    deposited(admin, [cid], on=T)
+    deposited(admin, [cid], on=today())
     assert [(d["type"], d["reversed"]) for d in cheque(admin, cid)["documents"]] == [
         ("DEPOSIT", True),
         ("DEPOSIT", False),
@@ -507,7 +530,7 @@ def test_a_document_with_a_later_one_in_effect_is_not_reversed(admin: TestClient
     statement = credited(admin, [cid])
     blocked = reverse(admin, f"cheque-deposits/{slip['id']}")
     assert (blocked.status_code, blocked.json()["code"]) == (409, "cheque_has_activity")
-    doc = rejected(admin, cid, T, responsible=ana)
+    doc = rejected(admin, cid, today(), responsible=ana)
     blocked_credit = reverse(admin, f"cheque-credits/{statement['id']}")
     assert (blocked_credit.status_code, blocked_credit.json()["code"]) == (409, "cheque_has_activity")
     # Undone in reverse order, each document on its own date.
@@ -524,7 +547,7 @@ def test_a_document_with_a_later_one_in_effect_is_not_reversed(admin: TestClient
 def test_reversing_a_rejection_voids_its_pending_unless_it_has_activity(admin: TestClient, ana: int) -> None:
     cid = entered(admin)
     deposited(admin, [cid])
-    doc = rejected(admin, cid, T, responsible=ana)
+    doc = rejected(admin, cid, today(), responsible=ana)
     receipt = admin.post(
         f"{BASE}/pending-collections/{doc['pending_id']}/receipts",
         json={
@@ -532,7 +555,7 @@ def test_reversing_a_rejection_voids_its_pending_unless_it_has_activity(admin: T
             "amount": "1000",
             "method": "CASH",
             "destination_account_id": account_id(admin, "main_cash"),
-            "business_date": T.isoformat(),
+            "business_date": today().isoformat(),
         },
     )
     assert receipt.status_code == 201, receipt.text
@@ -551,7 +574,7 @@ def test_reversing_a_rejection_voids_its_pending_unless_it_has_activity(admin: T
     assert owed["events"][-1]["event_type"] == "VOIDED"
     assert cheque(admin, cid)["state"] == "DEPOSITED"
     # Rejected again: a NEW pending, never the voided one reopened.
-    again = rejected(admin, cid, T, responsible=ana)
+    again = rejected(admin, cid, today(), responsible=ana)
     assert again["pending_id"] != doc["pending_id"]
 
 
@@ -559,10 +582,10 @@ def test_reversing_a_return_puts_the_cheque_back_and_voids_the_pending(
     admin: TestClient, db: Session, ana: int
 ) -> None:
     cid = entered(admin)
-    doc = give_back(admin, cid, T, responsible=ana).json()
+    doc = give_back(admin, cid, today(), responsible=ana).json()
     response = reverse(admin, f"cheque-returns/{doc['id']}")
     assert response.status_code == 201, response.text
-    assert operation(db, response.json()["reversal"]["operation_id"])["business_date"] == T
+    assert operation(db, response.json()["reversal"]["operation_id"])["business_date"] == today()
     assert cheque(admin, cid)["state"] == "IN_PORTFOLIO"
     assert pending(admin, doc["pending_id"])["state"] == "VOIDED"
     assert_cheque_accounts_invariant(admin, db)
@@ -574,10 +597,12 @@ def test_reversing_a_return_puts_the_cheque_back_and_voids_the_pending(
 def _rejected_pending(admin: TestClient, ana: int, amount: str = "100000") -> int:
     cid = entered(admin, amount)
     deposited(admin, [cid])
-    return rejected(admin, cid, T - timedelta(days=1), responsible=ana)["pending_id"]  # type: ignore[no-any-return]
+    return rejected(admin, cid, today() - timedelta(days=1), responsible=ana)["pending_id"]  # type: ignore[no-any-return]
 
 
-def receive(client: TestClient, pid: int, body: dict[str, Any], on: date = T) -> Any:
+def receive(client: TestClient, pid: int, body: dict[str, Any], on: date | None = None) -> Any:
+    if on is None:
+        on = today()
     return client.post(
         f"{BASE}/pending-collections/{pid}/cheque-receipts", json={**body, "business_date": on.isoformat()}
     )
@@ -587,7 +612,7 @@ def test_a_physical_cheque_collects_the_pending_and_enters_the_portfolio(
     admin: TestClient, db: Session, ana: int
 ) -> None:
     pid = _rejected_pending(admin, ana)
-    body = instrument(bank(admin), "100000", issue_date=(T - timedelta(days=1)).isoformat())
+    body = instrument(bank(admin), "100000", issue_date=(today() - timedelta(days=1)).isoformat())
     response = receive(admin, pid, body)
     assert response.status_code == 201, response.text
     owed = response.json()
@@ -610,16 +635,16 @@ def test_a_physical_cheque_collects_the_pending_and_enters_the_portfolio(
     replay = receive(admin, pid, body)
     assert (replay.status_code, len(replay.json()["receipts"])) == (200, 1)
     # The cheque of the receipt goes on through the cycle like any other.
-    assert deposit(admin, [cid], on=T).status_code == 201
+    assert deposit(admin, [cid], on=today()).status_code == 201
     assert_cheque_accounts_invariant(admin, db)
 
 
 def test_a_cheque_larger_than_the_balance_is_refused_whole(admin: TestClient, ana: int) -> None:
     pid = _rejected_pending(admin, ana, "100000")
-    larger = receive(admin, pid, instrument(bank(admin), "100000.01", issue_date=T.isoformat()))
+    larger = receive(admin, pid, instrument(bank(admin), "100000.01", issue_date=today().isoformat()))
     assert (larger.status_code, larger.json()["code"]) == (409, "pending_amount_exceeds_balance")
     assert admin.get(f"{BASE}/cheques", params={"origin_type": "PENDING_RECEIPT"}).json()["total"] == 0
-    partial = receive(admin, pid, instrument(bank(admin), "30000", issue_date=T.isoformat()))
+    partial = receive(admin, pid, instrument(bank(admin), "30000", issue_date=today().isoformat()))
     assert partial.status_code == 201
     assert (partial.json()["state"], partial.json()["balance"]) == ("PARTIAL", "70000.00")
 
@@ -629,7 +654,7 @@ def test_a_declared_echeq_lowers_nothing_until_verified_and_is_revalidated(
 ) -> None:
     pid = _rejected_pending(admin, ana, "100000")
     body = {
-        **instrument(bank(admin), "80000", issue_date=T.isoformat()),
+        **instrument(bank(admin), "80000", issue_date=today().isoformat()),
         "kind": "ECHEQ",
         "physical_receipt_confirmed": False,
         "branch_code": None,
@@ -653,7 +678,7 @@ def test_a_declared_echeq_lowers_nothing_until_verified_and_is_revalidated(
             "amount": "30000",
             "method": "CASH",
             "destination_account_id": account_id(admin, "main_cash"),
-            "business_date": T.isoformat(),
+            "business_date": today().isoformat(),
         },
     )
     assert cash.status_code == 201, cash.text
@@ -685,7 +710,7 @@ def test_a_declared_echeq_lowers_nothing_until_verified_and_is_revalidated(
 def test_a_rejected_echeq_verification_is_recorded_on_the_pending(admin: TestClient, ana: int) -> None:
     pid = _rejected_pending(admin, ana)
     body = {
-        **instrument(bank(admin), "50000", issue_date=T.isoformat()),
+        **instrument(bank(admin), "50000", issue_date=today().isoformat()),
         "kind": "ECHEQ",
         "physical_receipt_confirmed": False,
         "drawer_tax_id": "30712345678",
@@ -707,10 +732,10 @@ def test_reversing_a_receipt_with_a_cheque_voids_the_cheque_while_in_the_portfol
     admin: TestClient, db: Session, ana: int
 ) -> None:
     pid = _rejected_pending(admin, ana)
-    owed = receive(admin, pid, instrument(bank(admin), "60000", issue_date=T.isoformat())).json()
+    owed = receive(admin, pid, instrument(bank(admin), "60000", issue_date=today().isoformat())).json()
     receipt = owed["receipts"][0]
     cid = receipt["cheque_id"]
-    slip = deposited(admin, [cid], on=T)
+    slip = deposited(admin, [cid], on=today())
     path = f"{BASE}/pending-collections/{pid}/receipts/{receipt['id']}/reverse"
     blocked = admin.post(path, json={"client_request_id": str(uuid4()), "reason": "Error"})
     assert (blocked.status_code, blocked.json()["code"]) == (409, "cheque_has_activity")

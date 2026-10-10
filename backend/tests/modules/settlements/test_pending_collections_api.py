@@ -17,10 +17,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.core.clock import business_today
+from tests.modules.settlements.days import yesterday
 
 BASE = "/api/v1/settlements"
-DAY = business_today() - timedelta(days=1)
 CUSTOMER = "Almacén Don José"
 
 
@@ -32,7 +31,7 @@ def create(client: TestClient, employee_id: int, expected: str) -> int:
         f"{BASE}/deliveries",
         json={
             "client_request_id": str(uuid4()),
-            "business_date": DAY.isoformat(),
+            "business_date": yesterday().isoformat(),
             "employee_id": employee_id,
             "expected_amount": expected,
         },
@@ -251,10 +250,10 @@ def test_expected_date_is_optional(as_role, million) -> None:  # type: ignore[no
     operator = as_role("operator")
     without = pending_of(operator, million, new_pending(operator, million))
     assert without["expected_date"] is None
-    later = (DAY + timedelta(days=3)).isoformat()
+    later = (yesterday() + timedelta(days=3)).isoformat()
     pid = new_pending(operator, million, "1000", expected_date=later)
     assert pending_of(operator, million, pid)["expected_date"] == later
-    before = (DAY - timedelta(days=1)).isoformat()
+    before = (yesterday() - timedelta(days=1)).isoformat()
     assert error(add_pending(operator, million, expected_date=before)) == (422, "invalid_expected_date")
     assert patch_pending(operator, million, pid, expected_date=None).status_code == 200
     assert pending_of(operator, million, pid)["expected_date"] is None
@@ -571,7 +570,7 @@ def test_responsible_reason_and_date_events(as_role, million, pedro, juan, db: S
     """[16] Each changed field is its own event, with before and after; nothing else is recorded."""
     operator = as_role("operator")
     pid = new_pending(operator, million)
-    later = (DAY + timedelta(days=2)).isoformat()
+    later = (yesterday() + timedelta(days=2)).isoformat()
     response = patch_pending(
         operator, million, pid, responsible_employee_id=juan, reason="Paga el viernes", expected_date=later
     )

@@ -5,7 +5,6 @@ workers need; once released, the database must end in one valid state: a close t
 import threading
 import time
 from collections.abc import Callable, Iterator
-from datetime import timedelta
 from decimal import Decimal
 from uuid import uuid4
 
@@ -13,13 +12,12 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.core.clock import business_today
 from app.core.errors import AppError
 from app.modules.settlements.delivery import closing, expenses, schemas, service
 from app.platform.auth.models import User
+from tests.modules.settlements.days import yesterday
 from tests.modules.settlements.fuel_support import fuel_category, vehicle
 
-DAY = business_today() - timedelta(days=1)
 WAIT = 0.5
 
 
@@ -84,7 +82,7 @@ def setup(db: Session, actor, driver) -> dict[str, object]:  # type: ignore[no-u
         db,
         operator,
         schemas.SettlementIn(
-            client_request_id=uuid4(), business_date=DAY, employee_id=pedro, expected_amount=Decimal("10000")
+            client_request_id=uuid4(), business_date=yesterday(), employee_id=pedro, expected_amount=Decimal("10000")
         ),
     ).id
     body = schemas.ExpenseIn(

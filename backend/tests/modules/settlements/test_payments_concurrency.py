@@ -11,15 +11,13 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.core.clock import business_today
 from app.modules.settlements.payments import schemas as s
 from app.modules.settlements.payments import service
 from app.platform.third_parties import service as third_parties
 from app.platform.third_parties.models import ThirdParty
 from app.platform.third_parties.schemas import ThirdPartyPatch
+from tests.modules.settlements.days import today
 from tests.modules.settlements.test_direct_expenses_concurrency import _codes, _hold, _in_session, _race, _scalar
-
-T = business_today()
 
 
 @pytest.fixture
@@ -51,7 +49,7 @@ def world(db: Session, actor, accounts, post) -> dict[str, Any]:  # type: ignore
 def _payment(world: dict[str, Any], amount: str, request: Any = None) -> s.PaymentIn:
     return s.PaymentIn(
         client_request_id=request or uuid4(),
-        business_date=T,
+        business_date=today(),
         third_party_id=world["perez"],
         concept="MERCHANDISE",
         items=[s.PaymentItemIn(method="CASH", account_id=world["main_cash"], amount=Decimal(amount))],

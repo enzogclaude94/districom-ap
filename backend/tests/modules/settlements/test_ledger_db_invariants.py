@@ -4,13 +4,15 @@ These tests write raw SQL on purpose: application code must never do this (singl
 """
 
 from collections.abc import Iterator
-from datetime import date, timedelta
+from datetime import timedelta
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import Connection, text
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session
+
+from tests.modules.settlements.days import today
 
 FINGERPRINT = "0" * 64
 
@@ -39,7 +41,7 @@ def _insert_operation(conn: Connection, *legs: tuple[str, str], type: str = "CAS
         "client_request_id": uuid4(),
         "fingerprint": FINGERPRINT,
         "user": _user_id(conn),
-        "business_date": date.today(),
+        "business_date": today(),
         **columns,
     }
     op_id = int(
@@ -226,7 +228,7 @@ def test_concurrent_raw_withdrawals_cannot_overdraw(db: Session, conn: Connectio
 
 def test_retroactive_raw_withdrawal_cannot_leave_a_past_day_negative(conn: Connection) -> None:
     """Enzo's example: +100.000, -80.000, +200.000 on three days; -50.000 on day 2 is rejected."""
-    day1, day2, day3 = (date.today() - timedelta(days=n) for n in (3, 2, 1))
+    day1, day2, day3 = (today() - timedelta(days=n) for n in (3, 2, 1))
     _committed(
         conn, ("main_cash", "100000"), ("opening_balance", "-100000"), type="OPENING_BALANCE", business_date=day1
     )

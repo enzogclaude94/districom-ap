@@ -9,11 +9,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.core.clock import business_today
 from tests.conftest import PASSWORD
+from tests.modules.settlements.days import today
 
 BASE = "/api/v1/settlements"
-TODAY = business_today()
 
 
 @pytest.fixture
@@ -68,7 +67,9 @@ def test_viewer_reads_accounts_with_balances_as_decimal_strings(as_role, funded)
     ]
     one = viewer.get(f"{BASE}/accounts/{funded['main_cash']}").json()
     assert one["balance"] == "100000.00"
-    past = viewer.get(f"{BASE}/accounts/{funded['main_cash']}", params={"on": (TODAY - timedelta(days=1)).isoformat()})
+    past = viewer.get(
+        f"{BASE}/accounts/{funded['main_cash']}", params={"on": (today() - timedelta(days=1)).isoformat()}
+    )
     assert past.json()["balance"] == "0.00"
 
 
@@ -115,9 +116,11 @@ def test_movements_filters_and_pagination(as_role, funded) -> None:  # type: ign
     url = f"{BASE}/accounts/{funded['change_cash']}/movements"
     page = admin.get(url, params={"limit": 2}).json()
     assert (page["total"], [m["amount"] for m in page["items"]]) == (3, ["3.00", "2.00"])
-    assert admin.get(url, params={"date_to": (TODAY - timedelta(days=1)).isoformat()}).json()["total"] == 0
+    assert admin.get(url, params={"date_to": (today() - timedelta(days=1)).isoformat()}).json()["total"] == 0
 
-    bad = admin.get(url, params={"date_from": TODAY.isoformat(), "date_to": (TODAY - timedelta(days=1)).isoformat()})
+    bad = admin.get(
+        url, params={"date_from": today().isoformat(), "date_to": (today() - timedelta(days=1)).isoformat()}
+    )
     assert (bad.status_code, bad.json()["code"]) == (422, "invalid_date_range")
     assert admin.get(url, params={"limit": 500}).status_code == 422
 
@@ -318,7 +321,7 @@ def test_idempotency_over_http(as_role, funded) -> None:  # type: ignore[no-unty
         "to_account_id": funded["change_cash"],
         "amount": "500000.00",
         "client_request_id": str(uuid4()),
-        "business_date": TODAY.isoformat(),
+        "business_date": today().isoformat(),
     }
     op(as_role("admin"), "opening-balance", account_id=funded["main_cash"], amount="1000000")
     operator = as_role("operator")
@@ -341,7 +344,7 @@ def test_idempotency_over_http(as_role, funded) -> None:  # type: ignore[no-unty
         bank_account_id=funded["bank"],
         amount="500000.00",
         client_request_id=body["client_request_id"],
-        business_date=TODAY.isoformat(),
+        business_date=today().isoformat(),
     )
     assert other_endpoint.json()["code"] == "idempotency_conflict"
     assert balances(operator)["change_cash"] == "500000.00"
@@ -368,10 +371,10 @@ def test_insufficient_funds_now_and_historically(as_role, funded) -> None:  # ty
         from_account_id=funded["main_cash"],
         to_account_id=funded["change_cash"],
         amount="1",
-        business_date=TODAY - timedelta(days=1),
+        business_date=today() - timedelta(days=1),
     )
     assert (past.status_code, past.json()["code"]) == (409, "insufficient_funds")
-    assert past.json()["details"]["business_date"] == (TODAY - timedelta(days=1)).isoformat()
+    assert past.json()["details"]["business_date"] == (today() - timedelta(days=1)).isoformat()
 
 
 def test_inactive_account(db: Session, as_role, funded) -> None:  # type: ignore[no-untyped-def]

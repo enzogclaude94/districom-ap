@@ -13,7 +13,8 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
-from tests.modules.settlements.direct_support import BASE, T, account_id, fund
+from tests.modules.settlements.days import today
+from tests.modules.settlements.direct_support import BASE, account_id, fund
 from tests.modules.settlements.fuel_support import fuel_category
 from tests.modules.settlements.payment_support import THIRD_PARTIES, cash, paid, reverse_payment, third_party
 
@@ -43,8 +44,8 @@ def world(as_role, db: Session) -> dict[str, Any]:  # type: ignore[no-untyped-de
     published payment of $500 from the cash box."""
     as_role("operator")
     admin: TestClient = as_role("admin")
-    fund(admin, "main_cash", "100000", T - timedelta(days=5))
-    fund(admin, "bank", "100000", T - timedelta(days=5))
+    fund(admin, "main_cash", "100000", today() - timedelta(days=5))
+    fund(admin, "bank", "100000", today() - timedelta(days=5))
     perez = third_party(admin)
     gone = third_party(admin, "Proveedor viejo", None)
     admin.patch(f"{THIRD_PARTIES}/{gone}", json={"active": False})
@@ -74,7 +75,7 @@ def _payment(db: Session, w: dict[str, Any], **values: Any) -> int:
     """A payment row (no items, no operation yet) with sensible defaults, inside the current transaction."""
     row = {
         "third_party_id": w["perez"],
-        "business_date": T,
+        "business_date": today(),
         "concept": "MERCHANDISE",
         "expense_category_id": None,
         "amount": 100,
@@ -116,9 +117,11 @@ def _operation(
     legs: list[tuple[int, int]],
     *,
     type: str = "PAYMENT",
-    business_date: Any = T,
+    business_date: Any = None,
     reverses: int | None = None,
 ) -> int:
+    if business_date is None:
+        business_date = today()
     op_id = int(
         _sql(
             db,
@@ -163,7 +166,9 @@ def _publish(
         payment.get("concept", "MERCHANDISE")
     ]
     expected = [(account, -amount) for account, amount in items] + [(w[counter], total)]
-    op = _operation(db, w, pid, legs if legs is not None else expected, business_date=payment.get("business_date", T))
+    op = _operation(
+        db, w, pid, legs if legs is not None else expected, business_date=payment.get("business_date", today())
+    )
     _sql(db, "UPDATE settlements.payments SET operation_id = :o WHERE id = :p", o=op, p=pid)
     return pid
 
@@ -276,7 +281,11 @@ def test_14_the_operation_is_owned_by_its_payment(db: Session, world) -> None:  
         pid = _payment(db, world, amount=100)
         _item(db, pid, world["cash"], 100)
         op = _operation(
-            db, world, pid, [(world["cash"], -100), (world["merchandise"], 100)], business_date=T - timedelta(days=1)
+            db,
+            world,
+            pid,
+            [(world["cash"], -100), (world["merchandise"], 100)],
+            business_date=today() - timedelta(days=1),
         )
         _sql(db, "UPDATE settlements.payments SET operation_id = :o WHERE id = :p", o=op, p=pid)
 

@@ -12,7 +12,8 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from tests.modules.settlements.direct_support import T, account_id, fund
+from tests.modules.settlements.days import today
+from tests.modules.settlements.direct_support import account_id, fund
 from tests.modules.settlements.payment_support import third_party
 from tests.modules.settlements.test_cheque_cycle_api import deposited, entered
 from tests.modules.settlements.test_payments_db_invariants import FINGERPRINT, _payment, _refused, _sql, _user
@@ -25,7 +26,7 @@ def world(as_role, db: Session) -> dict[str, Any]:  # type: ignore[no-untyped-de
     """Cash box with $100.000, a third party and three cheques of the portfolio (since T-10): A $1.000,
     B $2.000 and C $3.000."""
     admin: TestClient = as_role("admin")
-    fund(admin, "main_cash", "100000", T - timedelta(days=10))
+    fund(admin, "main_cash", "100000", today() - timedelta(days=10))
     return {
         "admin": admin,
         "cash": account_id(admin, "main_cash"),
@@ -54,8 +55,16 @@ def _cheque_item(db: Session, pid: int, cheque_id: int | None, amount: int, acco
 
 
 def _operation(
-    db: Session, w: dict[str, Any], legs: list[Leg], *, source: int | None, on: date = T, reverses: int | None = None
+    db: Session,
+    w: dict[str, Any],
+    legs: list[Leg],
+    *,
+    source: int | None,
+    on: date | None = None,
+    reverses: int | None = None,
 ) -> int:
+    if on is None:
+        on = today()
     op_id = int(
         _sql(
             db,
@@ -109,10 +118,12 @@ def _publish(
     cash: int = 0,
     legs: list[Leg] | None = None,
     events: list[int] | None = None,
-    on: date = T,
+    on: date | None = None,
 ) -> tuple[int, int]:
     """A payment with cheques (and cash) in the current transaction, as the service writes it; or with other
     legs or DELIVERED events. Returns the payment and its operation."""
+    if on is None:
+        on = today()
     total = sum(amount for _, amount in cheques) + cash
     pid = _payment(db, w, amount=total, business_date=on)
     if cash:
@@ -270,8 +281,8 @@ def test_a_delivered_event_names_its_payment(db: Session, world) -> None:  # typ
 
 
 def test_8_never_a_cheque_received_after_the_payment_date(db: Session, world) -> None:  # type: ignore[no-untyped-def]
-    late = entered(world["admin"], "4000", on=T - timedelta(days=3))
-    message = _refused(db, lambda: _publish(db, world, [(late, 4000)], on=T - timedelta(days=5)))
+    late = entered(world["admin"], "4000", on=today() - timedelta(days=3))
+    message = _refused(db, lambda: _publish(db, world, [(late, 4000)], on=today() - timedelta(days=5)))
     assert "was not in the portfolio" in message
 
 
@@ -283,11 +294,11 @@ def test_8_never_a_cheque_out_of_the_portfolio(db: Session, world) -> None:  # t
 
 def test_8_never_a_cheque_expired_for_presentation_on_the_payment_date(db: Session, world) -> None:  # type: ignore[no-untyped-def]
     """The rule of a deposit (0013), on the payment's date: its last presentation day still delivers."""
-    issued = T - timedelta(days=31)  # last presentation day: T - 1
-    old = entered(world["admin"], "5000", on=T - timedelta(days=20), issue_date=issued.isoformat())
+    issued = today() - timedelta(days=31)  # last presentation day: T - 1
+    old = entered(world["admin"], "5000", on=today() - timedelta(days=20), issue_date=issued.isoformat())
     message = _refused(db, lambda: _publish(db, world, [(old, 5000)]))
     assert "expired for presentation" in message
-    _publish(db, world, [(old, 5000)], on=T - timedelta(days=1))
+    _publish(db, world, [(old, 5000)], on=today() - timedelta(days=1))
     db.commit()
 
 
@@ -295,10 +306,10 @@ def test_8_a_deferred_cheque_not_yet_payable_is_delivered(db: Session, world) ->
     later = entered(
         world["admin"],
         "6000",
-        on=T - timedelta(days=2),
-        issue_date=(T - timedelta(days=5)).isoformat(),
+        on=today() - timedelta(days=2),
+        issue_date=(today() - timedelta(days=5)).isoformat(),
         payment_type="DEFERRED",
-        payment_date=(T + timedelta(days=20)).isoformat(),
+        payment_date=(today() + timedelta(days=20)).isoformat(),
     )
     _publish(db, world, [(later, 6000)])
     db.commit()

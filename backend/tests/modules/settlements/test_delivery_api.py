@@ -14,17 +14,15 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.core.clock import business_today
+from tests.modules.settlements.days import today, yesterday
 
 BASE = "/api/v1/settlements"
-TODAY = business_today()
-DAY = TODAY - timedelta(days=1)
 
 
 def create(client: TestClient, employee_id: int, expected: str = "100000", **body: Any) -> Any:
     body = {
         "client_request_id": str(uuid4()),
-        "business_date": DAY.isoformat(),
+        "business_date": yesterday().isoformat(),
         "employee_id": employee_id,
         "expected_amount": expected,
         **body,
@@ -84,7 +82,7 @@ def test_operator_creates_a_settlement_numbered_1(as_role, pedro) -> None:  # ty
         "185000.50",
         "MANUAL",
     )
-    assert body["business_date"] == DAY.isoformat()
+    assert body["business_date"] == yesterday().isoformat()
     assert body["same_day_settlement_ids"] == []
     assert body["summary"]["difference"] == "-185000.50"
 
@@ -120,12 +118,14 @@ def test_a_driver_can_have_rendicion_1_and_2_the_same_day(as_role, pedro, driver
     first = create(operator, pedro).json()
     second = create(operator, pedro).json()
     other_driver = create(operator, juan).json()
-    other_day = create(operator, pedro, business_date=(DAY - timedelta(days=1)).isoformat()).json()
+    other_day = create(operator, pedro, business_date=(yesterday() - timedelta(days=1)).isoformat()).json()
     assert [first["sequence_number"], second["sequence_number"]] == [1, 2]
     assert other_driver["sequence_number"] == 1
     assert other_day["sequence_number"] == 1
     assert second["same_day_settlement_ids"] == [first["id"]]
-    listed = operator.get(f"{BASE}/deliveries", params={"employee_id": pedro, "date_from": DAY.isoformat()}).json()
+    listed = operator.get(
+        f"{BASE}/deliveries", params={"employee_id": pedro, "date_from": yesterday().isoformat()}
+    ).json()
     assert [(i["sequence_number"], i["employee_name"]) for i in listed["items"]] == [
         (1, "Pedro Gómez"),
         (2, "Pedro Gómez"),
@@ -141,14 +141,14 @@ def test_only_drivers_of_that_day_can_be_chosen(as_role, driver, db: Session) ->
     """[5] Without `settlements.delivery_driver` on the settlement's date: not listed, not accepted."""
     operator = as_role("operator")
     active = driver("Ana Activa")
-    expired = driver("Ernesto Ex", valid_from=date(2026, 1, 1), valid_to=DAY - timedelta(days=1))
-    future = driver("Fabio Futuro", valid_from=TODAY)
+    expired = driver("Ernesto Ex", valid_from=date(2026, 1, 1), valid_to=yesterday() - timedelta(days=1))
+    future = driver("Fabio Futuro", valid_from=today())
     salesperson = driver("Sara Ventas", function="settlements.other")
     inactive = driver("Iván Inactivo")
     db.execute(text("UPDATE employees SET active = false WHERE id = :id"), {"id": inactive})
     db.commit()
 
-    listed = operator.get(f"{BASE}/drivers", params={"on": DAY.isoformat()}).json()
+    listed = operator.get(f"{BASE}/drivers", params={"on": yesterday().isoformat()}).json()
     assert listed == [{"id": active, "full_name": "Ana Activa"}]
     for employee_id in (expired, future, salesperson, inactive):
         response = create(operator, employee_id)
@@ -156,7 +156,7 @@ def test_only_drivers_of_that_day_can_be_chosen(as_role, driver, db: Session) ->
         assert response.json()["code"] == "employee_not_driver"
     assert create(operator, 999_999).json()["code"] == "employee_not_found"
     # The function that expired yesterday was valid two days ago.
-    assert create(operator, expired, business_date=(DAY - timedelta(days=1)).isoformat()).status_code == 201
+    assert create(operator, expired, business_date=(yesterday() - timedelta(days=1)).isoformat()).status_code == 201
 
 
 def test_any_active_employee_can_be_listed_for_a_difference(as_role, driver, db: Session) -> None:  # type: ignore[no-untyped-def]
@@ -171,7 +171,7 @@ def test_any_active_employee_can_be_listed_for_a_difference(as_role, driver, db:
 
 
 def test_business_date_cannot_be_future(as_role, pedro) -> None:  # type: ignore[no-untyped-def]
-    response = create(as_role("operator"), pedro, business_date=(TODAY + timedelta(days=1)).isoformat())
+    response = create(as_role("operator"), pedro, business_date=(today() + timedelta(days=1)).isoformat())
     assert (response.status_code, response.json()["code"]) == (422, "future_business_date")
 
 

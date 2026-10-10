@@ -12,12 +12,10 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
-from app.core.clock import business_today
 from app.modules.settlements.cheques import schemas as cs
 from app.modules.settlements.cheques import service as cheques
 from app.modules.settlements.delivery import closing, schemas, service
-
-DAY = business_today() - timedelta(days=1)
+from tests.modules.settlements.days import yesterday
 
 
 def _bank(db: Session) -> int:
@@ -32,7 +30,10 @@ def closed(db: Session, actor, driver) -> dict[str, int]:  # type: ignore[no-unt
         db,
         operator,
         schemas.SettlementIn(
-            client_request_id=uuid4(), business_date=DAY, employee_id=driver("Pedro"), expected_amount=Decimal(50000)
+            client_request_id=uuid4(),
+            business_date=yesterday(),
+            employee_id=driver("Pedro"),
+            expected_amount=Decimal(50000),
         ),
     ).id
     cheques.create(
@@ -48,7 +49,7 @@ def closed(db: Session, actor, driver) -> dict[str, int]:  # type: ignore[no-unt
             branch_code="123",
             account_ref="4567890",
             cheque_number="12345",
-            issue_date=DAY - timedelta(days=3),
+            issue_date=yesterday() - timedelta(days=3),
             drawer_name="Distribuidora Sur SA",
             delivered_by_name="Almacén Don José",
             physical_receipt_confirmed=True,
@@ -126,7 +127,7 @@ def test_a_closed_settlement_freezes_its_cheques_load(db: Session, closed) -> No
         "created_by) VALUES ('PHYSICAL', 'COMMON', 1, :b, '1', :d, 'x', 'x', 'SETTLEMENT', :s, :d, :u, now(), :k, "
         ":f, :u)",
         b=_bank(db),
-        d=DAY,
+        d=yesterday(),
         s=closed["settlement"],
         u=closed["user"],
         k=uuid4(),
@@ -149,8 +150,8 @@ def test_a_deferred_cheque_pays_within_360_days_of_its_issue(db: Session, closed
         "created_by) VALUES ('PHYSICAL', 'DEFERRED', 1, :b, '1', :d, :p, 'x', 'x', 'SETTLEMENT', :s, :d, :u, "
         "now(), :k, :f, :u)",
         b=_bank(db),
-        d=DAY,
-        p=DAY + timedelta(days=361),
+        d=yesterday(),
+        p=yesterday() + timedelta(days=361),
         s=closed["settlement"],
         u=closed["user"],
         k=uuid4(),
@@ -178,7 +179,14 @@ def _take_out(db: Session, closed: dict[str, int], *amounts: str) -> str:
         for amount in amounts:
             db.execute(
                 text(_RAW_ADJUSTMENT),
-                {"d": DAY, "k": uuid4(), "f": "a" * 64, "u": closed["user"], "c": closed["cheque"], "amount": amount},
+                {
+                    "d": yesterday(),
+                    "k": uuid4(),
+                    "f": "a" * 64,
+                    "u": closed["user"],
+                    "c": closed["cheque"],
+                    "amount": amount,
+                },
             )
         db.commit()
 
@@ -213,7 +221,7 @@ def test_a_leg_names_a_cheque_only_on_a_cheque_account(db: Session, closed) -> N
         "SELECT op.id, a.id, CASE a.code WHEN 'main_cash' THEN 10 ELSE -10 END, "
         "CASE a.code WHEN 'main_cash' THEN :c END FROM op, settlements.accounts a "
         "WHERE a.code IN ('main_cash', 'adjustment')",
-        d=DAY,
+        d=yesterday(),
         k=uuid4(),
         f="a" * 64,
         u=closed["user"],

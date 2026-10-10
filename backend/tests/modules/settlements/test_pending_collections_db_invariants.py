@@ -3,7 +3,6 @@ with raw SQL: [18] append-only events and snapshots, a load frozen once its sett
 responsible, [45] of R3-2), what a close published always equal to its "Pendientes de cobro" leg, receipts and
 resolutions append-only and tied to their operations, and no orphan reversal ([34] of R3-2)."""
 
-from datetime import timedelta
 from decimal import Decimal
 from uuid import uuid4
 
@@ -12,13 +11,11 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
-from app.core.clock import business_today
 from app.modules.settlements.delivery import closing, schemas, service
 from app.modules.settlements.pending import applications
 from app.modules.settlements.pending import schemas as ps
 from app.modules.settlements.pending import service as pending_service
-
-DAY = business_today() - timedelta(days=1)
+from tests.modules.settlements.days import yesterday
 
 
 def _closed_with_pending(db: Session, actor, driver, accounts, name: str) -> dict[str, int]:  # type: ignore[no-untyped-def]
@@ -29,7 +26,7 @@ def _closed_with_pending(db: Session, actor, driver, accounts, name: str) -> dic
         db,
         operator,
         schemas.SettlementIn(
-            client_request_id=uuid4(), business_date=DAY, employee_id=pedro, expected_amount=Decimal(1500)
+            client_request_id=uuid4(), business_date=yesterday(), employee_id=pedro, expected_amount=Decimal(1500)
         ),
     ).id
     line = schemas.CountLineIn(denomination_code="ARS_1000", quantity=1, destination_account_id=accounts["main_cash"])
@@ -137,7 +134,10 @@ def test_a_close_publishes_only_live_pendings_of_its_settlement(db: Session, clo
         db,
         operator,
         schemas.SettlementIn(
-            client_request_id=uuid4(), business_date=DAY, employee_id=driver("Juan"), expected_amount=Decimal(100)
+            client_request_id=uuid4(),
+            business_date=yesterday(),
+            employee_id=driver("Juan"),
+            expected_amount=Decimal(100),
         ),
     ).id
     foreign = pending_service.create(
@@ -251,7 +251,7 @@ REVERSE_BY_HAND = (
 def test_no_orphan_reversal_of_a_receipt_or_resolution(db: Session, applied) -> None:  # type: ignore[no-untyped-def]
     """[34] A REVERSAL written by hand, without its row marked reversed in the same commit, is refused."""
     for original in (applied["receipt_op"], applied["resolution_op"]):
-        message = _refused(db, REVERSE_BY_HAND, d=DAY, k=uuid4(), f="a" * 64, o=original, u=applied["admin"])
+        message = _refused(db, REVERSE_BY_HAND, d=yesterday(), k=uuid4(), f="a" * 64, o=original, u=applied["admin"])
         assert "without its row marked reversed" in message
 
 
@@ -263,7 +263,7 @@ def test_no_receipt_or_resolution_operation_without_its_row(db: Session, applied
         "'pending_collection', :p, :u) RETURNING id) "
         "INSERT INTO settlements.ledger_entries (operation_id, account_id, amount) "
         "SELECT op.id, a, v FROM op, (VALUES (:pc, -10), (:cash, 10)) AS legs(a, v)",
-        d=DAY,
+        d=yesterday(),
         k=uuid4(),
         f="a" * 64,
         p=applied["pending"],
@@ -321,7 +321,7 @@ def test_only_the_responsible_changes_after_the_close(db: Session, applied, driv
         p=applied["pending"],
     )
     assert "CLOSED" in message
-    for column, value in (("expected_date", DAY), ("customer_name", "Otro"), ("amount", 400)):
+    for column, value in (("expected_date", yesterday()), ("customer_name", "Otro"), ("amount", 400)):
         message = _refused(
             db,
             f"UPDATE settlements.pending_collections SET {column} = :v WHERE id = :p",  # noqa: S608
@@ -335,7 +335,7 @@ def test_applied_never_exceeds_the_amount_in_effect(db: Session, applied, actor,
     """$300 of $500 applied: a $201 receipt written by hand, operation and row together, is refused at commit,
     even with room in "Pendientes de cobro" (another settlement's $500)."""
     _closed_with_pending(db, actor, driver, accounts, "Luis")
-    params = {"d": DAY, "k": uuid4(), "f": "a" * 64, "p": applied["pending"], "u": applied["admin"]}
+    params = {"d": yesterday(), "k": uuid4(), "f": "a" * 64, "p": applied["pending"], "u": applied["admin"]}
     operation_id = db.execute(
         text(
             "INSERT INTO settlements.financial_operations (type, business_date, client_request_id, "

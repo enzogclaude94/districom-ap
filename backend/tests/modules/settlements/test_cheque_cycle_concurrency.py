@@ -3,7 +3,7 @@ cheque whole and in one place, and never a double deposit, a credit balance on a
 debit deepening an overdraft."""
 
 from collections.abc import Callable, Iterator
-from datetime import timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -11,7 +11,6 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.core.clock import business_today
 from app.core.errors import AppError
 from app.modules.settlements.cash import schemas as cash_schemas
 from app.modules.settlements.cash import use_cases as cash
@@ -19,9 +18,8 @@ from app.modules.settlements.cheques import collections, cycle
 from app.modules.settlements.cheques import schemas as cs
 from app.modules.settlements.cheques import service as cheques
 from app.platform.auth.models import User
+from tests.modules.settlements.days import days_ago, today
 from tests.modules.settlements.test_cheques_concurrency import _bank, _in_session, _race
-
-T = business_today()
 
 
 @pytest.fixture
@@ -39,7 +37,9 @@ def new_session(db: Session) -> Iterator[Callable[[], Session]]:
         session.close()
 
 
-ISSUED = T - timedelta(days=12)
+def issued_on() -> date:
+    return days_ago(12)
+
 
 _numbers = iter(range(50000, 90000))
 
@@ -55,11 +55,11 @@ def _entry(db: Session, admin: User, amount: str = "100000") -> int:
         branch_code="123",
         account_ref=f"88{number}",
         cheque_number=number,
-        issue_date=ISSUED,
+        issue_date=issued_on(),
         drawer_name="Distribuidora Sur SA",
         delivered_by_name="Almacén Don José",
         physical_receipt_confirmed=True,
-        business_date=T - timedelta(days=10),
+        business_date=today() - timedelta(days=10),
     )
     return cheques.opening_balance(db, admin, body).id
 
@@ -73,7 +73,7 @@ def _deposit_body(db: Session, ids: list[int], request: UUID | None = None) -> c
         client_request_id=request or uuid4(),
         bank_account_id=_bank_account(db),
         cheque_ids=ids,
-        business_date=T - timedelta(days=8),
+        business_date=today() - timedelta(days=8),
     )
 
 
@@ -154,7 +154,7 @@ def test_a_rejection_racing_the_reversal_of_its_crediting_ends_valid(
             client_request_id=uuid4(),
             bank_account_id=_bank_account(db),
             cheque_ids=[cid],
-            business_date=T - timedelta(days=6),
+            business_date=today() - timedelta(days=6),
         ),
     ).id
     holder = new_session()
@@ -162,7 +162,7 @@ def test_a_rejection_racing_the_reversal_of_its_crediting_ends_valid(
 
     def _reject(session: Session, user: User) -> object:
         body = cs.RejectionIn(
-            client_request_id=uuid4(), reason="Sin fondos", business_date=T, responsible_employee_id=ana
+            client_request_id=uuid4(), reason="Sin fondos", business_date=today(), responsible_employee_id=ana
         )
         return cycle.reject(session, user, cid, body)
 
@@ -213,7 +213,7 @@ def test_two_echeqs_verified_at_once_never_exceed_the_balance(
                 cs.RejectionIn(
                     client_request_id=uuid4(),
                     reason="Sin fondos",
-                    business_date=T,
+                    business_date=today(),
                     responsible_employee_id=driver("Ana"),
                 ),
             ).id
@@ -231,18 +231,18 @@ def test_two_echeqs_verified_at_once_never_exceed_the_balance(
             account_ref=f"99{number}",
             cheque_number=number,
             echeq_external_id=external,
-            issue_date=T,
+            issue_date=today(),
             drawer_name="Cliente SA",
             drawer_tax_id="30712345678",
             delivered_by_name="Almacén Don José",
-            business_date=T,
+            business_date=today(),
         )
         echeqs.append(collections.receive(db, operator, pending_id, body).id)
     holder = new_session()
     holder.execute(text("SELECT 1 FROM settlements.pending_collections WHERE id = :p FOR UPDATE"), {"p": pending_id})
 
     def _verify(echeq_id: int) -> Callable[[Session, User], object]:
-        body = cs.PendingEcheqVerificationIn(status="VERIFIED", business_date=T)
+        body = cs.PendingEcheqVerificationIn(status="VERIFIED", business_date=today())
         return lambda session, user: collections.decide_echeq(session, user, pending_id, echeq_id, body) or "ok"
 
     results = _race(holder, [_in_session(new_session, operator, _verify(e)) for e in echeqs])
@@ -279,7 +279,7 @@ def test_a_withdrawal_racing_a_rejection_never_deepens_the_overdraft(
             client_request_id=uuid4(),
             bank_account_id=_bank_account(db),
             cheque_ids=[cid],
-            business_date=T - timedelta(days=6),
+            business_date=today() - timedelta(days=6),
         ),
     )
     bank = _bank_account(db)
@@ -290,7 +290,7 @@ def test_a_withdrawal_racing_a_rejection_never_deepens_the_overdraft(
         cash_id = session.execute(text("SELECT id FROM settlements.accounts WHERE code = 'main_cash'")).scalar_one()
         body = cash_schemas.BankWithdrawalIn(
             client_request_id=uuid4(),
-            business_date=T,
+            business_date=today(),
             bank_account_id=bank,
             cash_account_id=cash_id,
             amount=Decimal(100000),
@@ -299,7 +299,7 @@ def test_a_withdrawal_racing_a_rejection_never_deepens_the_overdraft(
 
     def _reject(session: Session, user: User) -> object:
         body = cs.RejectionIn(
-            client_request_id=uuid4(), reason="Sin fondos", business_date=T, responsible_employee_id=ana
+            client_request_id=uuid4(), reason="Sin fondos", business_date=today(), responsible_employee_id=ana
         )
         return cycle.reject(session, user, cid, body)
 

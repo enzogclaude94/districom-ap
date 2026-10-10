@@ -13,9 +13,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from tests.modules.settlements.days import today
 from tests.modules.settlements.direct_support import (
     BASE,
-    T,
     account_id,
     balance,
     counts,
@@ -38,13 +38,13 @@ def admin(as_role) -> TestClient:  # type: ignore[no-untyped-def]
 
 @pytest.fixture
 def cash(admin: TestClient) -> int:
-    fund(admin, "main_cash", "100000", T - timedelta(days=10))
+    fund(admin, "main_cash", "100000", today() - timedelta(days=10))
     return account_id(admin, "main_cash")
 
 
 @pytest.fixture
 def bank(admin: TestClient) -> int:
-    fund(admin, "bank", "200000", T - timedelta(days=10))
+    fund(admin, "bank", "200000", today() - timedelta(days=10))
     return account_id(admin, "bank")
 
 
@@ -87,7 +87,11 @@ def test_an_ordinary_expense_from_the_cash_box(as_role, cash, tolls, db: Session
     operator = as_role("operator")
     expense = spent(operator, cash, tolls, "5000", description="Peaje autopista")
     assert (expense["origin"], expense["state"]) == ("DIRECT", "IN_EFFECT")
-    assert (expense["amount"], expense["business_date"], expense["settlement_id"]) == ("5000.00", T.isoformat(), None)
+    assert (expense["amount"], expense["business_date"], expense["settlement_id"]) == (
+        "5000.00",
+        today().isoformat(),
+        None,
+    )
     assert (expense["paid_from_account_name"], expense["paid_from_account_kind"]) == ("Caja principal", "CASH_BOX")
     operation = expense["operation"]
     assert (operation["type"], operation["source_type"], operation["source_id"]) == (
@@ -95,7 +99,7 @@ def test_an_ordinary_expense_from_the_cash_box(as_role, cash, tolls, db: Session
         "expense",
         expense["id"],
     )
-    assert operation["business_date"] == T.isoformat()
+    assert operation["business_date"] == today().isoformat()
     assert legs(db, operation["id"]) == [("main_cash", Decimal("-5000.00")), ("expense", Decimal("5000.00"))]
     assert balance(operator, "main_cash") == Decimal("95000.00")
     assert balance(operator, "expense") == Decimal("5000.00")
@@ -204,12 +208,12 @@ def test_a_deactivated_fuel_category_takes_no_direct_fuel(as_role, admin, cash, 
 
 
 def test_never_a_future_date(as_role, cash, tolls) -> None:  # type: ignore[no-untyped-def]
-    response = spend(as_role("operator"), cash, tolls, "10", business_date=T + timedelta(days=1))
+    response = spend(as_role("operator"), cash, tolls, "10", business_date=today() + timedelta(days=1))
     assert error(response) == (422, "future_business_date")
 
 
 def test_a_past_date_with_funds_then(as_role, cash, tolls, db: Session) -> None:  # type: ignore[no-untyped-def]
-    day = T - timedelta(days=3)
+    day = today() - timedelta(days=3)
     expense = spent(as_role("operator"), cash, tolls, "40000", business_date=day)
     assert expense["business_date"] == day.isoformat()
     assert expense["operation"]["business_date"] == day.isoformat()
@@ -218,12 +222,12 @@ def test_a_past_date_with_funds_then(as_role, cash, tolls, db: Session) -> None:
 
 def test_a_past_date_without_funds_then_is_refused_even_if_today_has_them(as_role, admin, tolls, db) -> None:  # type: ignore[no-untyped-def]
     """Enzo's example: today the box has the money, three days ago it did not."""
-    fund(admin, "main_cash", "100000", T)
+    fund(admin, "main_cash", "100000", today())
     cash = account_id(admin, "main_cash")
     before = counts(db)
-    response = spend(as_role("operator"), cash, tolls, "50000", business_date=T - timedelta(days=3))
+    response = spend(as_role("operator"), cash, tolls, "50000", business_date=today() - timedelta(days=3))
     assert error(response) == (409, "insufficient_funds")
-    assert response.json()["details"]["business_date"] == (T - timedelta(days=3)).isoformat()
+    assert response.json()["details"]["business_date"] == (today() - timedelta(days=3)).isoformat()
     assert counts(db) == before
     assert spend(as_role("operator"), cash, tolls, "50000").status_code == 201
 
@@ -235,17 +239,19 @@ def test_a_past_date_that_would_leave_a_later_day_negative_is_refused(as_role, a
         f"{BASE}/operations/cash-transfer",
         json={
             "client_request_id": str(uuid4()),
-            "business_date": (T - timedelta(days=1)).isoformat(),
+            "business_date": (today() - timedelta(days=1)).isoformat(),
             "from_account_id": cash,
             "to_account_id": account_id(admin, "change_cash"),
             "amount": "80000",
         },
     )
     assert out.status_code == 201, out.text
-    response = spend(as_role("operator"), cash, tolls, "30000", business_date=T - timedelta(days=3))
+    response = spend(as_role("operator"), cash, tolls, "30000", business_date=today() - timedelta(days=3))
     assert error(response) == (409, "insufficient_funds")
-    assert response.json()["details"]["business_date"] == (T - timedelta(days=1)).isoformat()
-    assert spend(as_role("operator"), cash, tolls, "20000", business_date=T - timedelta(days=3)).status_code == 201
+    assert response.json()["details"]["business_date"] == (today() - timedelta(days=1)).isoformat()
+    assert (
+        spend(as_role("operator"), cash, tolls, "20000", business_date=today() - timedelta(days=3)).status_code == 201
+    )
 
 
 def test_the_cash_box_is_never_negative(as_role, cash, tolls) -> None:  # type: ignore[no-untyped-def]
@@ -275,7 +281,7 @@ def test_a_bank_at_zero_does_not_go_into_an_overdraft(as_role, tolls) -> None:  
 
 
 def test_a_reversal_undoes_the_operation_on_the_original_date(as_role, cash, tolls, db: Session) -> None:  # type: ignore[no-untyped-def]
-    day = T - timedelta(days=4)
+    day = today() - timedelta(days=4)
     expense = spent(as_role("operator"), cash, tolls, "50000", business_date=day)
     assert balance(as_role("viewer"), "main_cash") == Decimal("50000.00")
     admin = as_role("admin")
@@ -293,7 +299,7 @@ def test_a_reversal_undoes_the_operation_on_the_original_date(as_role, cash, tol
         day.isoformat(),
         expense["operation_id"],
     )
-    assert reversal["created_at"][:10] == T.isoformat() or reversal["created_at"] > expense["created_at"]
+    assert reversal["created_at"][:10] == today().isoformat() or reversal["created_at"] > expense["created_at"]
     assert legs(db, reversal["id"]) == [("expense", Decimal("-50000.00")), ("main_cash", Decimal("50000.00"))]
     assert balance(admin, "main_cash") == Decimal("100000.00")
     assert balance(admin, "main_cash", day) == Decimal("100000.00")
@@ -394,7 +400,7 @@ def test_the_correction_never_touches_money(as_role, cash, bank, tolls) -> None:
         ("amount", "50"),
         ("paid_from_account_id", bank),
         ("category_id", expense["category_id"]),
-        ("business_date", T.isoformat()),
+        ("business_date", today().isoformat()),
         ("liters", "1"),
         ("vehicle_id", 1),
     ):
@@ -481,9 +487,9 @@ def test_permissions(as_role, client: TestClient, make_user, cash, tolls) -> Non
 
 def test_the_list_filters_and_pages(as_role, admin, cash, bank, tolls, fuel_id, truck, juan, driver) -> None:  # type: ignore[no-untyped-def]
     operator = as_role("operator")
-    old = spent(operator, cash, tolls, "100", business_date=T - timedelta(days=5))
+    old = spent(operator, cash, tolls, "100", business_date=today() - timedelta(days=5))
     fuel_bank = spent(operator, bank, fuel_id, fuel=load(truck, juan))
-    gone = spent(operator, cash, tolls, "300", business_date=T - timedelta(days=1))
+    gone = spent(operator, cash, tolls, "300", business_date=today() - timedelta(days=1))
     reverse(as_role("admin"), gone["id"])
     sid = create(operator, driver("Pedro Gómez"), "100000")
     operator.post(
@@ -503,8 +509,8 @@ def test_the_list_filters_and_pages(as_role, admin, cash, bank, tolls, fuel_id, 
     assert ids(origin="SETTLEMENT") == [i for i in ids() if i not in direct]
     assert ids(origin="DIRECT", category_id=fuel_id) == [fuel_bank["id"]]
     assert ids(origin="DIRECT", account_id=cash) == [gone["id"], old["id"]]
-    assert ids(origin="DIRECT", date_from=(T - timedelta(days=2)).isoformat()) == [fuel_bank["id"], gone["id"]]
-    assert ids(origin="DIRECT", date_to=(T - timedelta(days=2)).isoformat()) == [old["id"]]
+    assert ids(origin="DIRECT", date_from=(today() - timedelta(days=2)).isoformat()) == [fuel_bank["id"], gone["id"]]
+    assert ids(origin="DIRECT", date_to=(today() - timedelta(days=2)).isoformat()) == [old["id"]]
     assert ids(origin="DIRECT", state="REVERSED") == [gone["id"]]
     assert ids(origin="DIRECT", state="IN_EFFECT") == [fuel_bank["id"], old["id"]]
     page = viewer.get(f"{BASE}/expenses", params={"origin": "DIRECT", "limit": 1, "offset": 1}).json()

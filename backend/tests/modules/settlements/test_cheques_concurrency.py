@@ -13,14 +13,13 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.core.clock import business_today
 from app.core.errors import AppError
 from app.modules.settlements.cheques import schemas as cs
 from app.modules.settlements.cheques import service as cheques
 from app.modules.settlements.delivery import closing, schemas, service
 from app.platform.auth.models import User
+from tests.modules.settlements.days import yesterday
 
-DAY = business_today() - timedelta(days=1)
 WAIT = 0.5
 
 
@@ -75,7 +74,7 @@ def _bank(db: Session) -> int:
 
 def _settlement(db: Session, actor: User, employee_id: int, expected: str) -> int:
     body = schemas.SettlementIn(
-        client_request_id=uuid4(), business_date=DAY, employee_id=employee_id, expected_amount=Decimal(expected)
+        client_request_id=uuid4(), business_date=yesterday(), employee_id=employee_id, expected_amount=Decimal(expected)
     )
     return service.create(db, actor, body).id
 
@@ -90,7 +89,7 @@ def _cheque(bank_id: int, number: str = "12345", amount: str = "50000") -> cs.Ch
         branch_code="123",
         account_ref="4567890",
         cheque_number=number,
-        issue_date=DAY - timedelta(days=3),
+        issue_date=yesterday() - timedelta(days=3),
         drawer_name="Distribuidora Sur SA",
         delivered_by_name="Almacén Don José",
         physical_receipt_confirmed=True,
