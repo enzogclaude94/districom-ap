@@ -39,7 +39,8 @@ NEW_REASON_EVENTS = OLD_REASON_EVENTS + ", 'RECOVERED_FROM_PAYMENT'"
 # Items of a payment. Written with their payment, before its operation, and never changed after: only their
 # reference (an admin's descriptive correction, while the payment is in effect). CASH leaves an active cash
 # box, TRANSFER an active bank account. A CHEQUE item (R6-2) is one live cheque that justifies (paper, or a
-# VERIFIED ECHEQ) for exactly its face amount: a cheque is never split. Its row is locked FOR UPDATE, so two
+# VERIFIED ECHEQ) for exactly its face amount, not expired for presentation on the payment's date: a cheque
+# is never split. Its row is locked FOR UPDATE, so two
 # payments, or a payment and a deposit or a return of the service, serialize on it; where the cheque is (in
 # the portfolio on the payment's date and ever since) is checked at commit (`verify_payment`).
 PAYMENT_ITEM = """
@@ -49,7 +50,8 @@ DECLARE
     account_kind text;
     c settlements.cheques%ROWTYPE;
 BEGIN
-    SELECT operation_id, reversal_operation_id INTO payment FROM settlements.payments WHERE id = NEW.payment_id;
+    SELECT operation_id, reversal_operation_id, business_date INTO payment
+        FROM settlements.payments WHERE id = NEW.payment_id;
     IF TG_OP = 'UPDATE' THEN
         IF (NEW.payment_id, NEW.method, NEW.account_id, NEW.cheque_id, NEW.amount, NEW.created_at)
             IS DISTINCT FROM (OLD.payment_id, OLD.method, OLD.account_id, OLD.cheque_id, OLD.amount, OLD.created_at)
@@ -74,6 +76,14 @@ BEGIN
         THEN
             RAISE EXCEPTION 'payment_items: cheque % is voided, unverified or not paid for its whole amount',
                 NEW.cheque_id USING ERRCODE = 'check_violation';
+        END IF;
+        -- The rule of a deposit (0013): never after its last presentation day, on the payment's date (which
+        -- never changes). A deferred cheque not yet payable can be delivered.
+        IF payment.business_date
+            > (CASE c.payment_type WHEN 'DEFERRED' THEN c.payment_date ELSE c.issue_date END) + 30
+        THEN
+            RAISE EXCEPTION 'payment_items: cheque % expired for presentation before payment % (%)',
+                NEW.cheque_id, NEW.payment_id, payment.business_date USING ERRCODE = 'check_violation';
         END IF;
         RETURN NEW;
     END IF;

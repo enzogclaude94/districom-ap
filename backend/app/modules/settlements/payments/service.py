@@ -47,6 +47,7 @@ from sqlalchemy.orm import Session
 from app.core.clock import business_today
 from app.core.errors import AppError
 from app.modules.settlements.cheques import cycle as cheque_cycle
+from app.modules.settlements.cheques import terms
 from app.modules.settlements.cheques.models import Cheque, ChequeEvent
 from app.modules.settlements.cheques.service import record_event
 from app.modules.settlements.delivery import idempotency
@@ -494,7 +495,9 @@ def _cheque_ids(items: list[s.PaymentItemIn]) -> list[int]:
 
 def _check_cheques(db: Session, cheques: dict[int, Cheque], items: list[s.PaymentItemIn], business_date: date) -> None:
     """Each cheque (already locked) is in the portfolio, held there without interruption since the payment's
-    business date, and paid for exactly its face amount: never split, no change given back."""
+    business date, not expired for presentation on that date (the rule of a deposit, no override for any
+    role; a deferred cheque not yet payable can be delivered), and paid for exactly its face amount: never
+    split, no change given back."""
     if not cheques:
         return
     ids = sorted(cheques)
@@ -518,6 +521,15 @@ def _check_cheques(db: Session, cheques: dict[int, Cheque], items: list[s.Paymen
                 f"El cheque #{cheque.id} está en cartera desde el {since:%d/%m/%Y}: el pago no puede tener una "
                 "fecha anterior.",
                 {"cheque_id": cheque.id, "in_portfolio_since": since.isoformat()},
+            )
+        deadline = terms.presentation_deadline(cheque.payment_type, cheque.issue_date, cheque.payment_date)
+        if business_date > deadline:
+            raise AppError(
+                422,
+                "cheque_presentation_expired",
+                f"El cheque #{cheque.id} venció para su presentación el {deadline:%d/%m/%Y}: no se entrega en un "
+                f"pago del {business_date:%d/%m/%Y}.",
+                {"cheque_id": cheque.id, "deadline": deadline.isoformat()},
             )
         if item.amount != cheque.amount:
             raise AppError(
