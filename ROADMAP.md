@@ -43,7 +43,7 @@ DistriCom es una plataforma modular (ADR 006). Este roadmap tiene tres carriles:
 | R3 | Pendientes de cobro | **DONE** (2026-10-07; R3‑1, R3‑2 y R3‑3 aprobados y mergeados, PRs #13, #14 y #16) | R2 |
 | R4 | Cartera de cheques | **DONE** (aprobada por Enzo el 2026-10-09; PRs #17, #18 y #19) | R2 · R3 |
 | R5 | Combustible y vehículos | **DONE** (R5‑1 a R5‑4; `0014`–`0017` congeladas) | R2 |
-| R6 | Pagos a proveedores y terceros | IN_PROGRESS (R6‑1 y R6‑2 DONE; R6‑3 IN_REVIEW) | R1 · R4 |
+| R6 | Pagos a proveedores y terceros | **DONE** (2026-10-11) | R1 · R4 |
 | R7 | Boca de expendio | PLANNED | R2–R5 |
 | R8 | Cuenta interna de empleados y liquidación semanal | PLANNED | R1 · R2 |
 | R9 | Endurecimiento | PLANNED | todas |
@@ -227,7 +227,9 @@ Propuesta `PROPUESTA_R6_PAGOS_Y_TERCEROS.md` **aprobada** por Enzo el 2026-10-09
 |---|---|---|
 | R6‑1 | Terceros + pagos con efectivo y transferencia (cheque rechazado con `payment_method_not_enabled`); `0018` y `0019` | **DONE** (PR #29, aprobada por Enzo el 2026-10-10 con sus desvíos documentados; `0018` y `0019` congeladas) |
 | R6‑2 | Entrega de cheques de cartera como medio de pago (`DELIVERED`, «Entregar», reverso con recuperación física por cheque, cheque vencido no se entrega); `0020` | **DONE** (PR #31, aprobada por Enzo el 2026-10-10 con dos ajustes —cheque vencido bloqueado y `CREDITED` confirmado—; mergeado `f9847c8`; `0020` congelada) |
-| R6‑3 | Consolidación y cierre: ficha del tercero (totales vigentes, por concepto y por medio, cheques entregados), filtros completos de Pagos en la base, fecha de negocio en tests resuelta al usarla, E2E final de R6; sin migración | IN_REVIEW (espera aprobación de Enzo; R7 no empieza sin ella) |
+| R6‑3 | Consolidación y cierre: ficha del tercero (totales vigentes, por concepto y por medio, cheques entregados), filtros completos de Pagos en la base, fecha de negocio en tests resuelta al usarla, E2E final de R6; sin migración | **DONE** (PR #32, aprobada por Enzo el 2026-10-11; mergeado `17c02f5`; sin migración) |
+
+R6 **DONE** el 2026-10-11: aprobada por Enzo (R6‑1, R6‑2 y R6‑3) con las deudas conocidas documentadas (cheque entregado que vuelve rechazado, adjuntos); PR #32 mergeado (`17c02f5`); `0018`, `0019` y `0020` congeladas. R7: Enzo pidió primero la propuesta completa (boca como maestro de plataforma, responsables con vigencia, diferencias con la misma semántica que reparto, más de una rendición por día, entregas parciales); sin código hasta su aprobación.
 
 ### R7 — Boca de expendio
 **Alcance:** boca como punto que rinde (`outlets`), una rendición diaria con entregas parciales, misma lógica de rendición.
