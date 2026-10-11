@@ -8,8 +8,8 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from app.core.clock import business_today
 from app.platform.settings.service import set_setting
+from tests.modules.settlements.days import today
 from tests.modules.settlements.test_cheque_cycle_api import (
     BASE,
     account_id,
@@ -18,8 +18,6 @@ from tests.modules.settlements.test_cheque_cycle_api import (
     entered,
     rejected,
 )
-
-T = business_today()
 
 
 @pytest.fixture
@@ -43,7 +41,7 @@ def test_the_list_filters_by_derived_state(admin: TestClient, driver) -> None:  
     in_portfolio, in_transit, credited_one, rejected_one = (entered(admin) for _ in range(4))
     deposited(admin, [in_transit, credited_one, rejected_one])
     credited(admin, [credited_one])
-    rejected(admin, rejected_one, T, responsible=driver("Ana"))
+    rejected(admin, rejected_one, today(), responsible=driver("Ana"))
     assert ids(admin, state="IN_PORTFOLIO") == {in_portfolio}
     assert ids(admin, state="DEPOSITED") == {in_transit}
     assert ids(admin, state="CREDITED") == {credited_one}
@@ -79,13 +77,13 @@ def test_location_deposit_and_crediting_of_each_cheque(admin: TestClient) -> Non
 
 def test_payable_expired_and_expiring_soon(admin: TestClient) -> None:
     fresh = entered(admin)  # issued T-12: presented until T+18
-    expiring = entered(admin, issue_date=(T - timedelta(days=25)).isoformat())  # until T+5
-    expired = entered(admin, on=T - timedelta(days=35), issue_date=(T - timedelta(days=40)).isoformat())
+    expiring = entered(admin, issue_date=(today() - timedelta(days=25)).isoformat())  # until T+5
+    expired = entered(admin, on=today() - timedelta(days=35), issue_date=(today() - timedelta(days=40)).isoformat())
     deferred = entered(
         admin,
         payment_type="DEFERRED",
-        issue_date=(T - timedelta(days=12)).isoformat(),
-        payment_date=(T + timedelta(days=20)).isoformat(),
+        issue_date=(today() - timedelta(days=12)).isoformat(),
+        payment_date=(today() + timedelta(days=20)).isoformat(),
     )
     assert ids(admin, payable=False) == {deferred}
     assert ids(admin, payable=True) == {fresh, expiring, expired}
@@ -95,7 +93,7 @@ def test_payable_expired_and_expiring_soon(admin: TestClient) -> None:
     assert (rows[expiring]["expires_in_days"], rows[expiring]["expiring_soon"]) == (5, True)
     assert (rows[fresh]["expires_in_days"], rows[fresh]["expiring_soon"]) == (18, False)
     assert (rows[expired]["presentation_expired"], rows[expired]["expires_in_days"]) == (True, None)
-    assert rows[deferred]["payable_from"] == (T + timedelta(days=20)).isoformat()
+    assert rows[deferred]["payable_from"] == (today() + timedelta(days=20)).isoformat()
 
 
 def test_the_expiring_soon_window_is_a_setting(admin: TestClient, db: Session) -> None:
@@ -124,14 +122,14 @@ def test_an_overdrawn_bank_names_the_rejections_that_caused_it(admin: TestClient
         f"{BASE}/operations/bank-withdrawal",
         json={
             "client_request_id": "6b0d3c2a-1f2e-4a5b-9c8d-7e6f5a4b3c2d",
-            "business_date": (T - timedelta(days=5)).isoformat(),
+            "business_date": (today() - timedelta(days=5)).isoformat(),
             "bank_account_id": bank_id,
             "cash_account_id": account_id(admin, "main_cash"),
             "amount": "100000",
         },
     )
     assert withdrawal.status_code == 201, withdrawal.text
-    rejection = rejected(admin, cid, T, responsible=driver("Ana"))
+    rejection = rejected(admin, cid, today(), responsible=driver("Ana"))
     bank = admin.get(f"{BASE}/accounts/{bank_id}").json()
     assert bank["overdrawn"] is True
     assert bank["overdraft_causes"] == [
@@ -139,10 +137,10 @@ def test_an_overdrawn_bank_names_the_rejections_that_caused_it(admin: TestClient
             "rejection_id": rejection["id"],
             "cheque_id": cid,
             "operation_id": rejection["operation_id"],
-            "business_date": T.isoformat(),
+            "business_date": today().isoformat(),
             "amount": "100000.00",
         }
     ]
     # Before the rejection the bank was not overdrawn: no causes.
-    before = admin.get(f"{BASE}/accounts/{bank_id}", params={"on": (T - timedelta(days=1)).isoformat()}).json()
+    before = admin.get(f"{BASE}/accounts/{bank_id}", params={"on": (today() - timedelta(days=1)).isoformat()}).json()
     assert (before["overdrawn"], before["overdraft_causes"]) == (False, [])

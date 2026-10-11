@@ -19,13 +19,11 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.core.clock import business_today
 from app.modules.settlements.pending import listing
 from app.platform.settings.service import set_setting
+from tests.modules.settlements.days import today, yesterday
 
 BASE = "/api/v1/settlements"
-TODAY = business_today()
-DAY = TODAY - timedelta(days=1)
 CUSTOMER = "Almacén Don José"
 D = Decimal
 
@@ -38,7 +36,7 @@ def create(client: TestClient, employee_id: int, expected: str) -> int:
         f"{BASE}/deliveries",
         json={
             "client_request_id": str(uuid4()),
-            "business_date": DAY.isoformat(),
+            "business_date": yesterday().isoformat(),
             "employee_id": employee_id,
             "expected_amount": expected,
         },
@@ -349,11 +347,11 @@ def test_partial_receipts_sixty_then_forty(as_role, ids, pending, db: Session) -
 def test_cash_receipt_enters_the_cash_box(as_role, ids, pending, db: Session) -> None:  # type: ignore[no-untyped-def]
     """[3] CASH: Pendientes -X, the chosen cash box +X, on the day the customer paid, from the pending."""
     operator = as_role("operator")
-    body = received(operator, pending, "30000", ids["change_cash"], business_date=DAY)
+    body = received(operator, pending, "30000", ids["change_cash"], business_date=yesterday())
     op = operation(db, body["receipts"][0]["operation_id"])
     assert op["type"] == "PENDING_COLLECTION"
     assert op["legs"] == {"pending_collections": "-30000.00", "change_cash": "30000.00"}
-    assert (op["business_date"], op["source_type"], op["source_id"]) == (DAY, "pending_collection", pending)
+    assert (op["business_date"], op["source_type"], op["source_id"]) == (yesterday(), "pending_collection", pending)
 
 
 def test_transfer_receipt_enters_the_bank(as_role, ids, pending, db: Session) -> None:  # type: ignore[no-untyped-def]
@@ -398,13 +396,17 @@ def test_receipt_above_the_balance_is_rejected(as_role, ids, pending, db: Sessio
 
 def test_receipt_before_the_settlement_is_rejected(as_role, ids, pending) -> None:  # type: ignore[no-untyped-def]
     """[8] Enzo's D1: not before the settlement date."""
-    response = receipt(as_role("operator"), pending, "10000", ids["main_cash"], business_date=DAY - timedelta(days=1))
+    response = receipt(
+        as_role("operator"), pending, "10000", ids["main_cash"], business_date=yesterday() - timedelta(days=1)
+    )
     assert error(response) == (422, "invalid_receipt_date")
 
 
 def test_future_receipt_is_rejected(as_role, ids, pending) -> None:  # type: ignore[no-untyped-def]
     """[9] Nor in the future."""
-    response = receipt(as_role("operator"), pending, "10000", ids["main_cash"], business_date=TODAY + timedelta(days=1))
+    response = receipt(
+        as_role("operator"), pending, "10000", ids["main_cash"], business_date=today() + timedelta(days=1)
+    )
     assert error(response) == (422, "future_business_date")
 
 
@@ -495,14 +497,14 @@ def test_receipt_is_reversed_once(as_role, ids, pending, db: Session) -> None:  
 
 def test_receipt_reversal_keeps_the_original_date(as_role, ids, pending, db: Session) -> None:  # type: ignore[no-untyped-def]
     """[16] [17] The reversal is dated like the receipt (it was wrong then); created_at is when it happened."""
-    body = received(as_role("operator"), pending, "60000", ids["main_cash"], business_date=DAY)
+    body = received(as_role("operator"), pending, "60000", ids["main_cash"], business_date=yesterday())
     original = operation(db, body["receipts"][0]["operation_id"])
     started = datetime.now(UTC)
     response = reverse(as_role("admin"), pending, "receipts", body["receipts"][0]["id"])
     assert response.status_code == 201, response.text
     reversal = response.json()["receipts"][0]["reversal"]
     op = operation(db, reversal["operation_id"])
-    assert original["business_date"] == op["business_date"] == DAY
+    assert original["business_date"] == op["business_date"] == yesterday()
     assert op["created_at"] >= started > original["created_at"]
     assert datetime.fromisoformat(reversal["reversed_at"]) >= started
 
@@ -511,7 +513,7 @@ def test_historical_reversal_cannot_leave_a_cash_box_negative(as_role, ids, pend
     """[18] $100.000 entered Caja de cambio yesterday and were moved to Caja principal today: reversing the
     receipt on its own date would leave Caja de cambio negative today. Refused; nothing changes."""
     operator = as_role("operator")
-    rid = received(operator, pending, "100000", ids["change_cash"], business_date=DAY)["receipts"][0]["id"]
+    rid = received(operator, pending, "100000", ids["change_cash"], business_date=yesterday())["receipts"][0]["id"]
     moved = operator.post(
         f"{BASE}/operations/cash-transfer",
         json={
@@ -526,7 +528,7 @@ def test_historical_reversal_cannot_leave_a_cash_box_negative(as_role, ids, pend
     admin = as_role("admin")
     response = reverse(admin, pending, "receipts", rid)
     assert error(response) == (409, "insufficient_funds")
-    assert response.json()["details"]["business_date"] == TODAY.isoformat()
+    assert response.json()["details"]["business_date"] == today().isoformat()
     assert operations_count(db) == operations
     assert detail(admin, pending)["receipts"][0]["reversal"] is None
     assert_invariants(admin, db)
@@ -696,11 +698,11 @@ def test_resolution_reversal_restores_the_employee_account(as_role, ids, pending
 def test_resolution_reversal_keeps_the_original_date(as_role, pending, db: Session) -> None:  # type: ignore[no-untyped-def]
     """[31]"""
     admin = as_role("admin")
-    body = resolved(admin, pending, "100000", [(None, "100000")], business_date=DAY)
+    body = resolved(admin, pending, "100000", [(None, "100000")], business_date=yesterday())
     started = datetime.now(UTC)
     response = reverse(admin, pending, "resolutions", body["resolutions"][0]["id"])
     op = operation(db, response.json()["resolutions"][0]["reversal"]["operation_id"])
-    assert op["business_date"] == DAY
+    assert op["business_date"] == yesterday()
     assert op["created_at"] >= started
 
 
@@ -807,7 +809,7 @@ def test_customer_of_a_pending_with_activity_is_locked(as_role, ids, pending, se
     operator = as_role("operator")
     url = f"{BASE}/deliveries/{settlement}/pending-collections/{pending}"
     assert error(operator.patch(url, json={"customer_name": "Otro cliente"})) == (409, "pending_customer_locked")
-    allowed = operator.patch(url, json={"reason": "Pagará el lunes", "expected_date": TODAY.isoformat()})
+    allowed = operator.patch(url, json={"reason": "Pagará el lunes", "expected_date": today().isoformat()})
     assert allowed.status_code == 200, allowed.text
 
 
@@ -855,7 +857,7 @@ def test_other_fields_stay_frozen_after_the_close(as_role, pending, settlement) 
     url = f"{BASE}/deliveries/{settlement}/pending-collections/{pending}"
     for client in (as_role("operator"), as_role("admin")):
         assert error(client.patch(url, json={"amount": "90000"})) == (409, "settlement_closed")
-        assert error(client.patch(url, json={"expected_date": TODAY.isoformat()})) == (409, "settlement_closed")
+        assert error(client.patch(url, json={"expected_date": today().isoformat()})) == (409, "settlement_closed")
     response = as_role("admin").patch(
         f"{BASE}/pending-collections/{pending}/responsible", json={"responsible_employee_id": 999999}
     )
@@ -929,8 +931,8 @@ def test_alert_hours_come_from_the_setting(as_role, pending, later, db: Session)
 def test_overdue_expected_date_is_apart_from_the_alert(as_role, settlement) -> None:  # type: ignore[no-untyped-def]
     """[52] Expected yesterday and registered a moment ago: "Fecha esperada vencida", but no alert."""
     operator = as_role("operator")
-    pid = new_pending(operator, settlement, "60000", expected_date=DAY.isoformat())
-    other = new_pending(operator, settlement, "40000", customer_name="Kiosco Sur", expected_date=TODAY.isoformat())
+    pid = new_pending(operator, settlement, "60000", expected_date=yesterday().isoformat())
+    other = new_pending(operator, settlement, "40000", customer_name="Kiosco Sur", expected_date=today().isoformat())
     closed(operator, settlement)
     rows = listed(as_role("viewer"))
     assert (rows[pid]["expected_date_overdue"], rows[pid]["alert"]) == (True, False)
@@ -957,7 +959,7 @@ def test_list_shows_what_is_owed_by_default_and_filters(as_role, ids, pending, s
     row = listed(viewer)[pending]
     assert (row["driver_name"], row["settlement_business_date"], row["settlement_sequence_number"]) == (
         "Pedro Gómez",
-        DAY.isoformat(),
+        yesterday().isoformat(),
         1,
     )
     assert list(listed(viewer, state="COLLECTED")) == [collected]

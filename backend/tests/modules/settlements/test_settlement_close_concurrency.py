@@ -8,7 +8,6 @@ of the valid states: never two closes, never a stale close, never a negative cas
 import threading
 import time
 from collections.abc import Callable, Iterator
-from datetime import timedelta
 from decimal import Decimal
 from uuid import uuid4
 
@@ -16,7 +15,6 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.core.clock import business_today
 from app.core.errors import AppError
 from app.modules.settlements.delivery import closing, schemas, service
 from app.modules.settlements.ledger import service as ledger
@@ -24,8 +22,8 @@ from app.modules.settlements.pending import applications
 from app.modules.settlements.pending import schemas as ps
 from app.modules.settlements.pending import service as pending_service
 from app.platform.auth.models import User
+from tests.modules.settlements.days import yesterday
 
-DAY = business_today() - timedelta(days=1)
 WAIT = 0.5  # long enough for every worker to reach the lock
 
 
@@ -131,7 +129,7 @@ def _count(db: Session, actor: User, sid: int, *lines: tuple[str, int, int]) -> 
 
 def _settlement(db: Session, actor: User, employee_id: int, expected: str) -> int:
     body = schemas.SettlementIn(
-        client_request_id=uuid4(), business_date=DAY, employee_id=employee_id, expected_amount=Decimal(expected)
+        client_request_id=uuid4(), business_date=yesterday(), employee_id=employee_id, expected_amount=Decimal(expected)
     )
     return service.create(db, actor, body).id
 

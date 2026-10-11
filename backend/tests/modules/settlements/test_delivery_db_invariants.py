@@ -1,6 +1,5 @@
 """Rules of settlements that the database enforces whoever writes (migration 0007), checked with raw SQL."""
 
-from datetime import timedelta
 from decimal import Decimal
 from uuid import uuid4
 
@@ -9,10 +8,8 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
-from app.core.clock import business_today
 from app.modules.settlements.delivery import additions, closing, schemas, service, transfers
-
-DAY = business_today() - timedelta(days=1)
+from tests.modules.settlements.days import yesterday
 
 
 @pytest.fixture
@@ -23,7 +20,10 @@ def loaded(db: Session, actor, driver, accounts) -> dict[str, int]:  # type: ign
         db,
         operator,
         schemas.SettlementIn(
-            client_request_id=uuid4(), business_date=DAY, employee_id=driver("Pedro"), expected_amount=Decimal(100)
+            client_request_id=uuid4(),
+            business_date=yesterday(),
+            employee_id=driver("Pedro"),
+            expected_amount=Decimal(100),
         ),
     )
     sid = created.id

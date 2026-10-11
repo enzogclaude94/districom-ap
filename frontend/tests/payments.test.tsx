@@ -5,11 +5,12 @@ import { describe, expect, it, vi } from "vitest";
 import type { ThirdParty } from "@/lib/api/third-parties";
 import { todayIso } from "@/lib/format";
 import type { Account, Operation } from "@/modules/settlements/cash/api";
-import type { PaymentDetail } from "@/modules/settlements/payments/api";
+import type { DeliveredCheque, PaymentDetail, ThirdPartyPaymentSummary } from "@/modules/settlements/payments/api";
 import { paymentErrorView } from "@/modules/settlements/payments/errors";
 import { PaymentDetailView } from "@/modules/settlements/payments/payment-detail";
 import { paymentBalance } from "@/modules/settlements/payments/payment-dialog";
 import { PaymentList } from "@/modules/settlements/payments/payment-list";
+import { ThirdPartyPayments } from "@/modules/settlements/payments/third-party-payments";
 import { ApiError } from "@/lib/api/client";
 
 import { cheque, shift } from "./cheque-fixture";
@@ -239,7 +240,9 @@ describe("Pagos (R6-1)", () => {
       }),
     );
     renderWithQuery(<PaymentList />);
-    expect(await screen.findByTestId("payments-summary")).toHaveTextContent("1 pago · vigentes por $ 300.000,00");
+    expect(await screen.findByTestId("payments-summary")).toHaveTextContent(
+      "1 pago con estos filtros · total vigente $ 300.000,00",
+    );
     expect(screen.getAllByText("Caja principal $ 100.000,00 · Banco $ 200.000,00")[0]).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Registrar pago" })).not.toBeInTheDocument();
   });
@@ -847,5 +850,143 @@ describe("payment errors", () => {
     expect(paymentErrorView(missing).message).toBe(
       "Para revertir el pago confirmá que recuperaste cada cheque: falta el n.º 00012345.",
     );
+  });
+});
+
+describe("Pagos y terceros (R6-3)", () => {
+  const SUMMARY: ThirdPartyPaymentSummary = {
+    third_party_id: 5,
+    payments_in_effect: 2,
+    amount_in_effect: "360000.00",
+    payments_reversed: 1,
+    by_concept: [
+      { concept: "MERCHANDISE", count: 1, amount: "300000.00" },
+      { concept: "EXPENSE", count: 1, amount: "60000.00" },
+      { concept: "REFUND", count: 0, amount: "0.00" },
+      { concept: "OTHER", count: 0, amount: "0.00" },
+    ],
+    by_method: [
+      { method: "CASH", count: 1, amount: "100000.00" },
+      { method: "TRANSFER", count: 1, amount: "200000.00" },
+      { method: "CHEQUE", count: 1, amount: "60000.00" },
+    ],
+    cheques_delivered: 1,
+    cheques_delivered_amount: "60000.00",
+  };
+  const delivered = (changes: Partial<DeliveredCheque> = {}): DeliveredCheque => ({
+    cheque_id: 21,
+    cheque_number: "00012345",
+    bank_name: "Banco Galicia",
+    amount: "60000.00",
+    delivered_on: "2026-10-09",
+    payment_id: 9,
+    payment_state: "IN_EFFECT",
+    recovered: false,
+    recovered_at: null,
+    state: "DELIVERED",
+    state_label: "Entregado",
+    ...changes,
+  });
+  const CHEQUES = [
+    delivered(),
+    delivered({
+      cheque_id: 22,
+      cheque_number: "00099999",
+      payment_id: 7,
+      payment_state: "REVERSED",
+      recovered: true,
+      recovered_at: "2026-10-09T16:00:00Z",
+      state: "IN_PORTFOLIO",
+      state_label: "En cartera",
+    }),
+  ];
+  const thirdPartyRoutes = (role: Role) =>
+    routes(role, {
+      "GET /settlements/payments/third-parties/5/summary": () => jsonResponse(200, SUMMARY),
+      "GET /settlements/payments/third-parties/5/cheques": () =>
+        jsonResponse(200, { items: CHEQUES, total: CHEQUES.length }),
+      "GET /settlements/payments": () =>
+        jsonResponse(200, { items: [payment()], total: 1, amount_in_effect: "300000.00" }),
+    });
+
+  it("shows the totals in effect by concept and by means, saying it is not a debt", async () => {
+    mockApi(thirdPartyRoutes("viewer"));
+    renderWithQuery(<ThirdPartyPayments thirdPartyId={5} />);
+    const card = await screen.findByTestId("third-party-payments");
+    expect(await within(card).findByTestId("total-count")).toHaveTextContent("2");
+    expect(within(card).getByTestId("total-amount")).toHaveTextContent("360.000,00");
+    expect(within(card).getByTestId("total-reversed")).toHaveTextContent("1");
+    expect(within(card).getByTestId("third-party-not-a-debt")).toHaveTextContent(
+      "Estos importes muestran pagos registrados. DistriCom no está calculando deuda pendiente con este tercero.",
+    );
+    expect(within(card).getByTestId("by-concept-MERCHANDISE")).toHaveTextContent(/Mercadería.*300\.000,00/);
+    expect(within(card).getByTestId("by-concept-EXPENSE")).toHaveTextContent(/Gastos\/servicios.*60\.000,00/);
+    expect(within(card).getByTestId("by-concept-REFUND")).toHaveTextContent(/Devoluciones.*0,00/);
+    expect(within(card).getByTestId("by-concept-OTHER")).toHaveTextContent(/Otros/);
+    expect(within(card).getByTestId("by-method-CASH")).toHaveTextContent(/Efectivo.*100\.000,00/);
+    expect(within(card).getByTestId("by-method-TRANSFER")).toHaveTextContent(/Transferencia.*200\.000,00/);
+    expect(within(card).getByTestId("by-method-CHEQUE")).toHaveTextContent(/Cheques.*60\.000,00/);
+    // Never a balance, a debt owed or an account with the third party.
+    expect(card).not.toHaveTextContent(/saldo|cuenta corriente|\bdebe\b|adeudad|pendiente de proveedor/i);
+  });
+
+  it("lists the delivered cheques with links, the recovered one marked as such", async () => {
+    mockApi(thirdPartyRoutes("viewer"));
+    renderWithQuery(<ThirdPartyPayments thirdPartyId={5} />);
+    const section = await screen.findByTestId("third-party-cheques");
+    const live = await within(section).findByTestId("delivered-cheque-21");
+    expect(live).toHaveTextContent(/00012345.*Banco Galicia.*60\.000,00.*09\/10\/2026.*n\.º 9.*Entregado/);
+    expect(within(live).queryByText("Recuperado")).toBeNull();
+    expect(within(live).getByRole("link", { name: "Ver cheque n.º 00012345" })).toHaveAttribute(
+      "href",
+      "/rendiciones/cheques/21",
+    );
+    expect(within(live).getByRole("link", { name: "Ver pago n.º 9" })).toHaveAttribute("href", "/rendiciones/pagos/9");
+    const recovered = within(section).getByTestId("delivered-cheque-22");
+    expect(within(recovered).getByText("Recuperado")).toBeInTheDocument();
+    expect(recovered).toHaveTextContent("En cartera");
+  });
+
+  it("renders nothing for a user without Rendiciones", async () => {
+    const spy = mockApi({
+      "GET /auth/me": () => jsonResponse(200, { ...me("viewer"), modules: [] }),
+    });
+    const { container } = renderWithQuery(<ThirdPartyPayments thirdPartyId={5} />);
+    await waitFor(() => expect(spy).toHaveBeenCalled());
+    expect(container).toBeEmptyDOMElement();
+    expect(spy.mock.calls.some(([input]) => String(input).includes("/payments"))).toBe(false);
+  });
+
+  it("sends every filter of Pagos to the backend and explains the summary", async () => {
+    const spy = mockApi(
+      routes("viewer", {
+        "GET /settlements/payments": () =>
+          jsonResponse(200, { items: [payment()], total: 1, amount_in_effect: "300000.00" }),
+      }),
+    );
+    renderWithQuery(<PaymentList />);
+    expect(await screen.findByTestId("payments-summary")).toHaveTextContent(
+      /1 pago con estos filtros · total vigente.*300\.000,00.*revertidos se listan pero no suman/,
+    );
+    await userEvent.selectOptions(screen.getByLabelText("Medio"), "CHEQUE");
+    await userEvent.selectOptions(await screen.findByLabelText("Categoría de gasto"), "1");
+    expect(
+      within(screen.getByLabelText("Categoría de gasto")).queryByRole("option", { name: "Combustible" }),
+    ).toBeNull();
+    await userEvent.type(screen.getByLabelText("N.º de cheque"), "00012345");
+    await userEvent.type(screen.getByLabelText("Referencia"), "FC A");
+    await waitFor(() => {
+      const last = spy.mock.calls
+        .map(([input]) => new URL(String(input), "http://l"))
+        .filter((url) => url.pathname === "/api/v1/settlements/payments")
+        .at(-1);
+      expect(Object.fromEntries(last?.searchParams ?? [])).toMatchObject({
+        method: "CHEQUE",
+        expense_category_id: "1",
+        cheque_number: "00012345",
+        reference: "FC A",
+        offset: "0",
+      });
+    });
   });
 });

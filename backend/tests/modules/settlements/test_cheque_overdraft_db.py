@@ -19,18 +19,25 @@ from sqlalchemy import Connection, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
-from app.core.clock import business_today
 from app.modules.settlements.cash import schemas as cash_schemas
 from app.modules.settlements.cash import use_cases as cash
 from app.modules.settlements.cheques import cycle
 from app.modules.settlements.cheques import schemas as cs
 from app.platform.auth.models import User
+from tests.modules.settlements.days import days_ago, today
 from tests.modules.settlements.test_cheque_cycle_db_invariants import _account, _deposit, _entry
 
-T = business_today()
-CREDITED = T - timedelta(days=6)
-SPENT = T - timedelta(days=5)
-REJECTED = T - timedelta(days=4)
+
+def credited_on() -> date:
+    return days_ago(6)
+
+
+def spent_on() -> date:
+    return days_ago(5)
+
+
+def rejected_on() -> date:
+    return days_ago(4)
 
 
 @pytest.fixture
@@ -49,11 +56,13 @@ def _rejected_cheques(db: Session, actor: Callable[[str], User], ana: int, count
     for cid in cids:
         _deposit(db, operator, cid)
     bank_id = _account(db, "bank")
-    credit = cs.CreditIn(client_request_id=uuid4(), bank_account_id=bank_id, cheque_ids=cids, business_date=CREDITED)
+    credit = cs.CreditIn(
+        client_request_id=uuid4(), bank_account_id=bank_id, cheque_ids=cids, business_date=credited_on()
+    )
     cycle.credit(db, operator, credit)
     withdrawal = cash_schemas.BankWithdrawalIn(
         client_request_id=uuid4(),
-        business_date=SPENT,
+        business_date=spent_on(),
         bank_account_id=bank_id,
         cash_account_id=_account(db, "main_cash"),
         amount=Decimal(100000 * count),
@@ -63,7 +72,7 @@ def _rejected_cheques(db: Session, actor: Callable[[str], User], ana: int, count
         body = cs.RejectionIn(
             client_request_id=uuid4(),
             reason="Sin fondos",
-            business_date=REJECTED if index == 0 else T,
+            business_date=rejected_on() if index == 0 else today(),
             responsible_employee_id=ana,
         )
         cycle.reject(db, operator, cid, body)
@@ -90,11 +99,15 @@ def _write(conn: Connection, type_: str, on: date, legs: dict[str, str]) -> None
     conn.commit()
 
 
-def income(conn: Connection, amount: str, on: date = T) -> None:
+def income(conn: Connection, amount: str, on: date | None = None) -> None:
+    if on is None:
+        on = today()
     _write(conn, "ADJUSTMENT", on, {"adjustment": f"-{amount}", "bank": amount})
 
 
-def debit(conn: Connection, amount: str, on: date = T) -> None:
+def debit(conn: Connection, amount: str, on: date | None = None) -> None:
+    if on is None:
+        on = today()
     _write(conn, "BANK_WITHDRAWAL", on, {"bank": f"-{amount}", "main_cash": amount})
 
 
@@ -105,7 +118,9 @@ def refused(conn: Connection, write: Callable[[], None]) -> str:
     return str(excinfo.value.orig)
 
 
-def bank(conn: Connection, on: date = T) -> Decimal:
+def bank(conn: Connection, on: date | None = None) -> Decimal:
+    if on is None:
+        on = today()
     return conn.execute(  # type: ignore[no-any-return]
         text(
             "SELECT coalesce(sum(e.amount), 0) FROM settlements.ledger_entries e "
@@ -153,10 +168,10 @@ def test_5_a_retroactive_debit_deepening_a_negative_day_is_refused(conn: Connect
     # Today the bank is back in the black, but the debit is dated inside the overdraft.
     income(conn, "200000")
     assert bank(conn) == Decimal("100000.00")
-    message = refused(conn, lambda: debit(conn, "1000", REJECTED))
+    message = refused(conn, lambda: debit(conn, "1000", rejected_on()))
     assert "cannot have a negative balance" in message
     # Dated before the overdraft, with the money there that day, it would deepen the later negative days too.
-    assert "cannot have a negative balance" in refused(conn, lambda: debit(conn, "1000", CREDITED))
+    assert "cannot have a negative balance" in refused(conn, lambda: debit(conn, "1000", credited_on()))
     # Dated after the overdraft ended, within what is there, it is an ordinary debit.
     debit(conn, "1000")
     assert bank(conn) == Decimal("99000.00")
@@ -164,16 +179,16 @@ def test_5_a_retroactive_debit_deepening_a_negative_day_is_refused(conn: Connect
 
 @pytest.mark.usefixtures("overdrawn")
 def test_6_a_retroactive_income_that_reduces_but_does_not_end_the_overdraft_is_accepted(conn: Connection) -> None:
-    income(conn, "30000", REJECTED + timedelta(days=1))
-    assert bank(conn, REJECTED) == Decimal("-100000.00")
-    assert bank(conn, REJECTED + timedelta(days=1)) == Decimal("-70000.00")
+    income(conn, "30000", rejected_on() + timedelta(days=1))
+    assert bank(conn, rejected_on()) == Decimal("-100000.00")
+    assert bank(conn, rejected_on() + timedelta(days=1)) == Decimal("-70000.00")
     assert bank(conn) == Decimal("-70000.00")
 
 
 def test_7_a_second_rejection_may_deepen_it(db: Session, conn: Connection, actor, driver) -> None:  # type: ignore[no-untyped-def]
     _rejected_cheques(db, actor, driver("Ana"), count=2)
     conn.rollback()
-    assert bank(conn, REJECTED) == Decimal("-100000.00")
+    assert bank(conn, rejected_on()) == Decimal("-100000.00")
     assert bank(conn) == Decimal("-200000.00")
 
 
@@ -181,10 +196,10 @@ def test_7_a_second_rejection_may_deepen_it(db: Session, conn: Connection, actor
 def test_8_raw_sql_cannot_pass_an_ordinary_debit_that_deepens_the_overdraft(conn: Connection) -> None:
     # Any ordinary type, not only a withdrawal: an adjustment, a reversal-like debit, a payment out.
     for type_, counterpart in (("ADJUSTMENT", "adjustment"), ("OWNER_WITHDRAWAL", "opening_balance")):
-        message = refused(conn, lambda t=type_, c=counterpart: _write(conn, t, T, {"bank": "-1", c: "1"}))
+        message = refused(conn, lambda t=type_, c=counterpart: _write(conn, t, today(), {"bank": "-1", c: "1"}))
         assert "cannot have a negative balance" in message
     # Nor by labelling it a rejection on a non-bank account: the exception is BANK + CHEQUE_REJECTION only.
-    _write(conn, "ADJUSTMENT", T, {"adjustment": "-10", "main_cash": "10"})
-    message = refused(conn, lambda: _write(conn, "CHEQUE_REJECTION", T, {"main_cash": "-20", "adjustment": "20"}))
+    _write(conn, "ADJUSTMENT", today(), {"adjustment": "-10", "main_cash": "10"})
+    message = refused(conn, lambda: _write(conn, "CHEQUE_REJECTION", today(), {"main_cash": "-20", "adjustment": "20"}))
     assert "negative balance" in message or "no document" in message
     assert bank(conn) == Decimal("-100000.00")

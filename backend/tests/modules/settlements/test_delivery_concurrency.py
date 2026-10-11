@@ -8,7 +8,6 @@ number nor a unique-constraint error.
 import threading
 import time
 from collections.abc import Callable, Iterator
-from datetime import timedelta
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -16,11 +15,10 @@ import pytest
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.core.clock import business_today
 from app.modules.settlements.delivery import schemas, service
 from app.platform.auth.models import User
+from tests.modules.settlements.days import yesterday
 
-DAY = business_today() - timedelta(days=1)
 WAIT = 0.5  # long enough for every worker to reach the lock
 
 
@@ -42,7 +40,7 @@ def new_session(db: Session) -> Iterator[Callable[[], Session]]:
 def _body(employee_id: int, key: UUID | None = None, expected: str = "1000") -> schemas.SettlementIn:
     return schemas.SettlementIn(
         client_request_id=key or uuid4(),
-        business_date=DAY,
+        business_date=yesterday(),
         employee_id=employee_id,
         expected_amount=Decimal(expected),
     )
@@ -83,7 +81,7 @@ def test_simultaneous_creations_get_distinct_numbers(db: Session, new_session, a
     operator = actor("operator")
     pedro = driver("Pedro Gómez")
     holder = new_session()
-    lock_key = f"settlements.sequence:DELIVERY:{pedro}:{DAY.isoformat()}"
+    lock_key = f"settlements.sequence:DELIVERY:{pedro}:{yesterday().isoformat()}"
     holder.execute(select(func.pg_advisory_xact_lock(func.hashtextextended(lock_key, 0))))
 
     started = _run([_create(new_session, operator, _body(pedro)) for _ in range(5)])

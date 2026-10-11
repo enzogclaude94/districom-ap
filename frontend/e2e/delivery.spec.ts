@@ -1,6 +1,6 @@
 import { expect, test, type APIRequestContext, type Locator, type Page } from "@playwright/test";
 
-import { adminEmail, adminPassword, login } from "./helpers";
+import { adminEmail, adminPassword, businessDay, login } from "./helpers";
 
 const operatorEmail = process.env.E2E_OPERATOR_EMAIL ?? "e2e-operator@districom.local";
 const operatorPassword = process.env.E2E_OPERATOR_PASSWORD ?? "operator-password-123";
@@ -16,12 +16,8 @@ interface Account {
   balance: string;
 }
 
-/** Yesterday in the browser's calendar: never a future business date for the backend's time zone. */
-function yesterday() {
-  const date = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
-  return local.toISOString().slice(0, 10);
-}
+/** Yesterday in the business calendar, resolved when used: never a future date for the backend. */
+const yesterday = () => businessDay(-1);
 
 const cents = (amount: string) => Math.round(Number(amount) * 100);
 

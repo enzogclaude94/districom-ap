@@ -13,7 +13,6 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.core.clock import business_today
 from app.core.errors import AppError
 from app.modules.settlements.cash import schemas as cash_schemas
 from app.modules.settlements.cash import use_cases
@@ -23,9 +22,9 @@ from app.modules.settlements.expenses import direct
 from app.modules.settlements.expenses import schemas as s
 from app.platform.auth.models import User
 from tests.conftest import PASSWORD
+from tests.modules.settlements.days import today
 from tests.modules.settlements.test_cheque_overdraft import credited_cheque
 
-T = business_today()
 WAIT = 0.5
 
 
@@ -108,7 +107,7 @@ def world(db: Session, actor, accounts, post) -> dict[str, Any]:  # type: ignore
 def _expense(world: dict[str, Any], amount: str, account: str = "main_cash", request: Any = None) -> s.DirectExpenseIn:
     return s.DirectExpenseIn(
         client_request_id=request or uuid4(),
-        business_date=T,
+        business_date=today(),
         category_id=world["category"],
         paid_from_account_id=world[account],
         amount=Decimal(amount),
@@ -222,7 +221,7 @@ def test_an_expense_racing_a_rejection_never_deepens_the_overdraft(  # type: ign
     ana = driver("Ana Cobranzas")
     holder = _lock_account(new_session, world["bank"])
     rejection = cheque_schemas.RejectionIn(
-        client_request_id=uuid4(), reason="Sin fondos", business_date=T, responsible_employee_id=ana
+        client_request_id=uuid4(), reason="Sin fondos", business_date=today(), responsible_employee_id=ana
     )
     results = _race(
         holder,

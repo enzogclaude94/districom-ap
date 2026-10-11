@@ -3,8 +3,9 @@ with its operation, reversal and history."""
 
 from collections.abc import Sequence
 from decimal import Decimal
+from typing import get_args
 
-from sqlalchemy import exists, func, select
+from sqlalchemy import ColumnElement, exists, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.errors import AppError
@@ -17,6 +18,7 @@ from app.modules.settlements.payments import schemas as s
 from app.modules.settlements.payments.models import COUNTER_ACCOUNTS, Payment, PaymentItem
 from app.platform.audit.models import AuditEvent
 from app.platform.auth.models import User
+from app.platform.third_parties import service as third_parties
 from app.platform.third_parties import tax_ids
 from app.platform.third_parties.models import ThirdParty
 
@@ -31,9 +33,24 @@ def list_payments(db: Session, q: s.PaymentListQuery) -> s.PaymentPage:
         query = query.where(Payment.business_date >= q.date_from)
     if q.date_to is not None:
         query = query.where(Payment.business_date <= q.date_to)
+    if q.expense_category_id is not None:
+        query = query.where(Payment.expense_category_id == q.expense_category_id)
     if q.account_id is not None:
+        query = query.where(_has_item(PaymentItem.account_id == q.account_id))
+    if q.method is not None:
+        query = query.where(_has_item(PaymentItem.method == q.method))
+    if q.cheque_id is not None:
+        query = query.where(_has_item(PaymentItem.cheque_id == q.cheque_id))
+    if q.cheque_number is not None and q.cheque_number.strip():
+        numbered = select(Cheque.id).where(Cheque.cheque_number == q.cheque_number.strip())
+        query = query.where(_has_item(PaymentItem.cheque_id.in_(numbered)))
+    if q.reference is not None and q.reference.strip():
+        reference = q.reference.strip()
         query = query.where(
-            exists().where(PaymentItem.payment_id == Payment.id, PaymentItem.account_id == q.account_id)
+            or_(
+                Payment.reference.icontains(reference, autoescape=True),
+                _has_item(PaymentItem.reference.icontains(reference, autoescape=True)),
+            )
         )
     if q.state == "IN_EFFECT":
         query = query.where(Payment.reversal_operation_id.is_(None))
@@ -50,6 +67,96 @@ def list_payments(db: Session, q: s.PaymentListQuery) -> s.PaymentPage:
         db.scalars(query.order_by(Payment.business_date.desc(), Payment.id.desc()).limit(q.limit).offset(q.offset))
     )
     return s.PaymentPage(items=outs(db, rows), total=total, amount_in_effect=Decimal(amount))
+
+
+def _has_item(condition: ColumnElement[bool]) -> ColumnElement[bool]:
+    """The payment has at least one item matching: a mixed payment is kept whole, never split."""
+    return exists().where(PaymentItem.payment_id == Payment.id, condition)
+
+
+def third_party_summary(db: Session, third_party_id: int) -> s.ThirdPartyPaymentSummary:
+    """Totals of what was paid to the third party, from the payments in effect only (R6-3). By concept each
+    payment adds its amount once; by means each item adds its own amount, so a mixed payment is split among
+    its means and their sum is the total in effect. Never a balance: there is no debt to compare it with."""
+    third_parties.get(db, third_party_id)
+    of_party = Payment.third_party_id == third_party_id
+    in_effect = Payment.reversal_operation_id.is_(None)
+    concepts = {
+        concept: (count, amount)
+        for concept, count, amount in db.execute(
+            select(Payment.concept, func.count(), func.sum(Payment.amount))
+            .where(of_party, in_effect)
+            .group_by(Payment.concept)
+        )
+    }
+    methods = {
+        method: (count, amount)
+        for method, count, amount in db.execute(
+            select(PaymentItem.method, func.count(), func.sum(PaymentItem.amount))
+            .join(Payment, Payment.id == PaymentItem.payment_id)
+            .where(of_party, in_effect)
+            .group_by(PaymentItem.method)
+        )
+    }
+    reversed_count = db.scalar(select(func.count()).select_from(Payment).where(of_party, ~in_effect)) or 0
+    zero = (0, Decimal(0))
+    by_concept = [
+        s.ConceptTotal(concept=c, count=concepts.get(c, zero)[0], amount=concepts.get(c, zero)[1])
+        for c in get_args(s.Concept)
+    ]
+    by_method = [
+        s.MethodTotal(method=m, count=methods.get(m, zero)[0], amount=methods.get(m, zero)[1])
+        for m in get_args(s.Method)
+    ]
+    cheques = methods.get("CHEQUE", zero)
+    return s.ThirdPartyPaymentSummary(
+        third_party_id=third_party_id,
+        payments_in_effect=sum(t.count for t in by_concept),
+        amount_in_effect=sum((t.amount for t in by_concept), Decimal(0)),
+        payments_reversed=reversed_count,
+        by_concept=by_concept,
+        by_method=by_method,
+        cheques_delivered=cheques[0],
+        cheques_delivered_amount=cheques[1],
+    )
+
+
+def delivered_cheques(db: Session, third_party_id: int, q: s.PageQuery) -> s.DeliveredChequePage:
+    """Every cheque given to the third party in a payment, newest first, with its current state. One
+    recovered after a reversal stays here, marked as recovered, and is not counted as delivered."""
+    third_parties.get(db, third_party_id)
+    query = (
+        select(PaymentItem, Payment)
+        .join(Payment, Payment.id == PaymentItem.payment_id)
+        .where(Payment.third_party_id == third_party_id, PaymentItem.cheque_id.is_not(None))
+    )
+    total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
+    rows = db.execute(
+        query.order_by(Payment.business_date.desc(), PaymentItem.id.desc()).limit(q.limit).offset(q.offset)
+    ).all()
+    current = _cheques(db, [(payment.id, item.cheque_id) for item, payment in rows if item.cheque_id is not None])
+    result = []
+    for item, payment in rows:
+        assert item.cheque_id is not None
+        c = current[(payment.id, item.cheque_id)]
+        reversed_ = payment.reversal_operation_id is not None
+        result.append(
+            s.DeliveredChequeOut(
+                cheque_id=c.cheque_id,
+                cheque_number=c.cheque_number,
+                bank_name=c.bank_name,
+                amount=item.amount,
+                delivered_on=payment.business_date,
+                payment_id=payment.id,
+                payment_state="REVERSED" if reversed_ else "IN_EFFECT",
+                # A payment with cheques is reversed only after every cheque was recovered (R6-2).
+                recovered=reversed_,
+                recovered_at=c.recovered_at,
+                state=c.state,
+                state_label=c.state_label,
+            )
+        )
+    return s.DeliveredChequePage(items=result, total=total)
 
 
 def detail(db: Session, payment_id: int) -> s.PaymentDetail:

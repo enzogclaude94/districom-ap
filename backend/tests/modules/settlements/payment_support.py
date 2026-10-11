@@ -8,7 +8,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from tests.modules.settlements.direct_support import BASE, T
+from tests.modules.settlements.days import today
+from tests.modules.settlements.direct_support import BASE
 
 THIRD_PARTIES = "/api/v1/third-parties"
 
@@ -33,9 +34,11 @@ def pay(
     third_party_id: int,
     items: list[dict[str, Any]],
     concept: str = "MERCHANDISE",
-    on: date = T,
+    on: date | None = None,
     **extra: Any,
 ) -> Any:
+    if on is None:
+        on = today()
     body: dict[str, Any] = {
         "client_request_id": str(uuid4()),
         "business_date": on.isoformat(),

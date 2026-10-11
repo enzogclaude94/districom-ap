@@ -36,3 +36,21 @@ const EVENT_LABELS: Record<string, string> = {
 };
 
 export const eventLabel = (type: string) => EVENT_LABELS[type] ?? type;
+
+/** Concepts as the third party's ficha groups them (R6-3). */
+export const BREAKDOWN_CONCEPT_LABELS: Record<PaymentConcept, string> = {
+  MERCHANDISE: "Mercadería",
+  EXPENSE: "Gastos/servicios",
+  REFUND: "Devoluciones",
+  OTHER: "Otros",
+};
+
+export const BREAKDOWN_METHOD_LABELS: Record<PaymentMethod, string> = {
+  CASH: "Efectivo",
+  TRANSFER: "Transferencia",
+  CHEQUE: "Cheques",
+};
+
+/** Said wherever totals of a third party are shown: they are payments made, never a debt. */
+export const NOT_A_DEBT =
+  "Estos importes muestran pagos registrados. DistriCom no está calculando deuda pendiente con este tercero.";

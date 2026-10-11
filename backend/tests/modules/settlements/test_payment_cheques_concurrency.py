@@ -13,7 +13,6 @@ from uuid import uuid4
 import pytest
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.core.clock import business_today
 from app.core.errors import AppError
 from app.modules.settlements.cheques import cycle
 from app.modules.settlements.cheques import schemas as cs
@@ -21,6 +20,7 @@ from app.modules.settlements.payments import schemas as s
 from app.modules.settlements.payments import service
 from app.platform.auth.models import User
 from app.platform.third_parties.models import ThirdParty
+from tests.modules.settlements.days import today
 from tests.modules.settlements.test_cheque_cycle_concurrency import (
     _bank_account,
     _check_whole,
@@ -29,8 +29,6 @@ from tests.modules.settlements.test_cheque_cycle_concurrency import (
     _lock_cheques,
 )
 from tests.modules.settlements.test_direct_expenses_concurrency import _codes, _hold, _race, _scalar
-
-T = business_today()
 
 
 def _in_session(
@@ -84,7 +82,7 @@ def world(db: Session, actor, driver) -> dict[str, Any]:  # type: ignore[no-unty
 def _with_cheque(world: dict[str, Any], cheque_id: int, request: Any = None) -> s.PaymentIn:
     return s.PaymentIn(
         client_request_id=request or uuid4(),
-        business_date=T,
+        business_date=today(),
         third_party_id=world["perez"],
         concept="MERCHANDISE",
         items=[s.PaymentItemIn(method="CHEQUE", cheque_id=cheque_id, amount=Decimal("100000"))],
@@ -164,7 +162,7 @@ def test_c_a_payment_racing_a_return_of_the_cheque(new_session, world, db: Sessi
     holder = new_session()
     _lock_cheques(holder, [world["cheque"]])
     body = cs.ReturnIn(
-        client_request_id=uuid4(), reason="Lo reemplaza", business_date=T, responsible_employee_id=world["ana"]
+        client_request_id=uuid4(), reason="Lo reemplaza", business_date=today(), responsible_employee_id=world["ana"]
     )
     give_back = lambda ses, user: cycle.give_back(ses, user, world["cheque"], body)  # noqa: E731
     results = _race(
@@ -232,12 +230,12 @@ def test_f_a_payment_racing_a_rejection_after_crediting_never_deepens_the_overdr
         "OPENING_BALANCE",
         (bank, "100000"),
         (accounts["opening_balance"], "-100000"),
-        business_date=T - timedelta(days=10),
+        business_date=today() - timedelta(days=10),
     )
     cheque = world["cheque"]
     cycle.deposit(db, world["operator"], _deposit_body(db, [cheque]))
     credit = cs.CreditIn(
-        client_request_id=uuid4(), bank_account_id=bank, cheque_ids=[cheque], business_date=T - timedelta(days=6)
+        client_request_id=uuid4(), bank_account_id=bank, cheque_ids=[cheque], business_date=today() - timedelta(days=6)
     )
     cycle.credit(db, world["operator"], credit)
     holder = _hold(new_session, "SELECT 1 FROM settlements.accounts WHERE id = :a FOR NO KEY UPDATE", a=bank)
@@ -245,7 +243,7 @@ def test_f_a_payment_racing_a_rejection_after_crediting_never_deepens_the_overdr
     def pay(session: Session, user: User) -> object:
         body = s.PaymentIn(
             client_request_id=uuid4(),
-            business_date=T,
+            business_date=today(),
             third_party_id=world["perez"],
             concept="MERCHANDISE",
             items=[s.PaymentItemIn(method="TRANSFER", account_id=bank, amount=Decimal("150000"))],
@@ -254,7 +252,7 @@ def test_f_a_payment_racing_a_rejection_after_crediting_never_deepens_the_overdr
 
     def reject(session: Session, user: User) -> object:
         body = cs.RejectionIn(
-            client_request_id=uuid4(), reason="Sin fondos", business_date=T, responsible_employee_id=world["ana"]
+            client_request_id=uuid4(), reason="Sin fondos", business_date=today(), responsible_employee_id=world["ana"]
         )
         return cycle.reject(session, user, cheque, body)
 

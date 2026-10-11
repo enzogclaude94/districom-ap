@@ -14,7 +14,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from tests.modules.settlements.direct_support import BASE, T, account_id, balance, error, fund
+from tests.modules.settlements.days import today
+from tests.modules.settlements.direct_support import BASE, account_id, balance, error, fund
 from tests.modules.settlements.payment_support import cash, counts, paid, pay, reverse_payment, third_party, transfer
 from tests.modules.settlements.test_cheque_cycle_api import (
     assert_cheque_accounts_invariant,
@@ -56,13 +57,13 @@ def r(as_role) -> Roles:  # type: ignore[no-untyped-def]
 
 @pytest.fixture
 def box(r: Roles) -> int:
-    fund(r.admin, "main_cash", "500000", T - timedelta(days=10))
+    fund(r.admin, "main_cash", "500000", today() - timedelta(days=10))
     return account_id(r.admin, "main_cash")
 
 
 @pytest.fixture
 def bank(r: Roles) -> int:
-    fund(r.admin, "bank", "1000000", T - timedelta(days=10))
+    fund(r.admin, "bank", "1000000", today() - timedelta(days=10))
     return account_id(r.admin, "bank")
 
 
@@ -127,7 +128,7 @@ def test_a_single_cheque_pays_a_supplier(r, perez, db: Session) -> None:  # type
     assert (now["delivery_payment_id"], now["delivery_third_party_id"], now["delivery_business_date"]) == (
         payment["id"],
         perez,
-        T.isoformat(),
+        today().isoformat(),
     )
     assert balance(r.admin, "cheque_portfolio") == Decimal(0)
     assert_cheque_accounts_invariant(r.admin, db)
@@ -230,7 +231,7 @@ def test_a_deposited_cheque_is_not_delivered(r, perez, db: Session) -> None:  # 
 
 def test_a_returned_cheque_is_not_delivered(r, perez, ana) -> None:  # type: ignore[no-untyped-def]
     a = entered(r.admin, "100000")
-    assert give_back(r.admin, a, T, ana).status_code == 201
+    assert give_back(r.admin, a, today(), ana).status_code == 201
     assert error(pay(r.operator, perez, [by_cheque(a, "100000")])) == (409, "cheque_not_in_portfolio")
 
 
@@ -244,29 +245,29 @@ def test_a_cheque_not_yet_published_is_not_delivered(r, perez, ana) -> None:  # 
 
 def test_a_cheque_received_after_the_payment_date_is_refused(r, perez, db: Session) -> None:  # type: ignore[no-untyped-def]
     """Enzo's example: a payment dated the 5th with a cheque received on the 7th."""
-    a = entered(r.admin, "100000", on=T - timedelta(days=3))
+    a = entered(r.admin, "100000", on=today() - timedelta(days=3))
     before = counts(db)
-    response = pay(r.operator, perez, [by_cheque(a, "100000")], on=T - timedelta(days=5))
+    response = pay(r.operator, perez, [by_cheque(a, "100000")], on=today() - timedelta(days=5))
     assert error(response) == (422, "cheque_not_in_portfolio_on_date")
-    assert response.json()["details"]["in_portfolio_since"] == (T - timedelta(days=3)).isoformat()
+    assert response.json()["details"]["in_portfolio_since"] == (today() - timedelta(days=3)).isoformat()
     assert counts(db) == before
     # From the day it entered on, it is fine.
-    assert pay(r.operator, perez, [by_cheque(a, "100000")], on=T - timedelta(days=3)).status_code == 201
+    assert pay(r.operator, perez, [by_cheque(a, "100000")], on=today() - timedelta(days=3)).status_code == 201
 
 
 def test_the_portfolio_is_continuous_since_the_payment_date(r, perez) -> None:  # type: ignore[no-untyped-def]
     """A deposit reversed (it was wrong) never took the cheque out: the payment may be dated before it."""
     a = entered(r.admin, "100000")
-    slip = deposited(r.admin, [a], on=T - timedelta(days=8))
+    slip = deposited(r.admin, [a], on=today() - timedelta(days=8))
     assert reverse(r.admin, f"cheque-deposits/{slip['id']}").status_code == 201
-    assert pay(r.operator, perez, [by_cheque(a, "100000")], on=T - timedelta(days=9)).status_code == 201
+    assert pay(r.operator, perez, [by_cheque(a, "100000")], on=today() - timedelta(days=9)).status_code == 201
 
 
 def test_a_delivered_cheque_cannot_be_deposited_returned_nor_delivered_again(r, perez, ana) -> None:  # type: ignore[no-untyped-def]
     a = entered(r.admin, "100000")
     paid(r.operator, perez, [by_cheque(a, "100000")])
     assert error(deposit(r.admin, [a])) == (409, "cheque_not_in_portfolio")
-    assert error(give_back(r.admin, a, T, ana)) == (409, "cheque_not_in_portfolio")
+    assert error(give_back(r.admin, a, today(), ana)) == (409, "cheque_not_in_portfolio")
     assert error(pay(r.operator, perez, [by_cheque(a, "100000")])) == (409, "cheque_not_in_portfolio")
 
 
@@ -293,7 +294,7 @@ def test_delivered_is_derived_listed_and_in_the_history(r, perez, db: Session) -
         "payment_id": payment["id"],
         "third_party_id": perez,
         "third_party_name": "Distribuidora Pérez S.A.",
-        "business_date": T.isoformat(),
+        "business_date": today().isoformat(),
         "operation_id": payment["operation_id"],
     }
     detail = cheque(r.admin, a)
@@ -302,7 +303,7 @@ def test_delivered_is_derived_listed_and_in_the_history(r, perez, db: Session) -
     (document,) = [d for d in detail["documents"] if d["type"] == "PAYMENT"]
     assert (document["id"], document["business_date"], document["third_party_name"], document["reversed"]) == (
         payment["id"],
-        T.isoformat(),
+        today().isoformat(),
         "Distribuidora Pérez S.A.",
         False,
     )
@@ -382,7 +383,7 @@ def test_with_every_cheque_recovered_the_payment_is_reversed_whole(r, box, perez
     assert items[a]["recovered_at"] is not None
     assert_cheque_accounts_invariant(r.admin, db)
     # Back in the portfolio: it can be deposited or delivered again.
-    assert deposit(r.admin, [a], on=T).status_code == 201
+    assert deposit(r.admin, [a], on=today()).status_code == 201
     assert pay(r.operator, perez, [by_cheque(b, "60000")]).status_code == 201
 
 
@@ -417,7 +418,7 @@ def test_the_same_payment_request_delivers_once(r, perez, db: Session) -> None: 
     a = entered(r.admin, "100000")
     body = {
         "client_request_id": str(uuid4()),
-        "business_date": T.isoformat(),
+        "business_date": today().isoformat(),
         "third_party_id": perez,
         "concept": "MERCHANDISE",
         "items": [by_cheque(a, "100000")],
@@ -474,15 +475,15 @@ def _expired_refusal(response: Any, cid: int, deadline: Any) -> None:
 
 
 def test_1_a_common_cheque_within_its_term_is_delivered(r, perez) -> None:  # type: ignore[no-untyped-def]
-    issued = T - timedelta(days=30)  # its last presentation day is today: it still goes
-    a = entered(r.admin, "70000", on=T - timedelta(days=20), issue_date=issued.isoformat())
+    issued = today() - timedelta(days=30)  # its last presentation day is today: it still goes
+    a = entered(r.admin, "70000", on=today() - timedelta(days=20), issue_date=issued.isoformat())
     paid(r.operator, perez, [by_cheque(a, "70000")])
     assert cheque(r.admin, a)["state"] == "DELIVERED"
 
 
 def test_2_and_6_an_expired_common_cheque_is_not_delivered_not_even_by_an_admin(r, perez, db: Session) -> None:  # type: ignore[no-untyped-def]
-    issued = T - timedelta(days=40)
-    a = entered(r.admin, "70000", on=T - timedelta(days=35), issue_date=issued.isoformat())
+    issued = today() - timedelta(days=40)
+    a = entered(r.admin, "70000", on=today() - timedelta(days=35), issue_date=issued.isoformat())
     before = counts(db)
     _expired_refusal(pay(r.operator, perez, [by_cheque(a, "70000")]), a, issued + timedelta(days=30))
     _expired_refusal(pay(r.admin, perez, [by_cheque(a, "70000")]), a, issued + timedelta(days=30))
@@ -491,12 +492,12 @@ def test_2_and_6_an_expired_common_cheque_is_not_delivered_not_even_by_an_admin(
 
 
 def test_3_a_deferred_cheque_not_yet_payable_is_delivered(r, perez) -> None:  # type: ignore[no-untyped-def]
-    payable = T + timedelta(days=20)
+    payable = today() + timedelta(days=20)
     a = entered(
         r.admin,
         "80000",
-        on=T - timedelta(days=2),
-        issue_date=(T - timedelta(days=5)).isoformat(),
+        on=today() - timedelta(days=2),
+        issue_date=(today() - timedelta(days=5)).isoformat(),
         payment_type="DEFERRED",
         payment_date=payable.isoformat(),
     )
@@ -509,22 +510,22 @@ def test_4_a_deferred_cheque_within_its_term_is_delivered(r, perez) -> None:  # 
     a = entered(
         r.admin,
         "80000",
-        on=T - timedelta(days=10),
-        issue_date=(T - timedelta(days=40)).isoformat(),
+        on=today() - timedelta(days=10),
+        issue_date=(today() - timedelta(days=40)).isoformat(),
         payment_type="DEFERRED",
-        payment_date=(T - timedelta(days=15)).isoformat(),
+        payment_date=(today() - timedelta(days=15)).isoformat(),
     )
     paid(r.operator, perez, [by_cheque(a, "80000")])
     assert cheque(r.admin, a)["state"] == "DELIVERED"
 
 
 def test_5_an_expired_deferred_cheque_is_not_delivered(r, perez) -> None:  # type: ignore[no-untyped-def]
-    payable = T - timedelta(days=40)
+    payable = today() - timedelta(days=40)
     a = entered(
         r.admin,
         "80000",
-        on=T - timedelta(days=35),
-        issue_date=(T - timedelta(days=50)).isoformat(),
+        on=today() - timedelta(days=35),
+        issue_date=(today() - timedelta(days=50)).isoformat(),
         payment_type="DEFERRED",
         payment_date=payable.isoformat(),
     )
@@ -534,9 +535,9 @@ def test_5_an_expired_deferred_cheque_is_not_delivered(r, perez) -> None:  # typ
 def test_10_the_term_is_judged_on_the_payment_date_not_today(r, perez) -> None:  # type: ignore[no-untyped-def]
     """A cheque whose last presentation day was yesterday: a payment dated the day before yesterday, recorded
     today, delivers it; one dated today does not. `created_at` plays no part."""
-    issued = T - timedelta(days=31)
+    issued = today() - timedelta(days=31)
     deadline = issued + timedelta(days=30)
-    a = entered(r.admin, "60000", on=T - timedelta(days=20), issue_date=issued.isoformat())
+    a = entered(r.admin, "60000", on=today() - timedelta(days=20), issue_date=issued.isoformat())
     _expired_refusal(pay(r.operator, perez, [by_cheque(a, "60000")]), a, deadline)
     _expired_refusal(pay(r.operator, perez, [by_cheque(a, "60000")], on=deadline + timedelta(days=1)), a, deadline)
     payment = paid(r.operator, perez, [by_cheque(a, "60000")], on=deadline)

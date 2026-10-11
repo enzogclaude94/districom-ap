@@ -1,7 +1,6 @@
 """Rules of closes, differences and internal accounts that the database enforces whoever writes
 (migration 0008), checked with raw SQL."""
 
-from datetime import timedelta
 from decimal import Decimal
 from uuid import uuid4
 
@@ -10,10 +9,9 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
-from app.core.clock import business_today
 from app.modules.settlements.delivery import closing, schemas, service
+from tests.modules.settlements.days import yesterday
 
-DAY = business_today() - timedelta(days=1)
 FINGERPRINT = "f" * 64
 
 
@@ -26,7 +24,7 @@ def closed(db: Session, actor, driver, accounts) -> dict[str, int]:  # type: ign
         db,
         operator,
         schemas.SettlementIn(
-            client_request_id=uuid4(), business_date=DAY, employee_id=pedro, expected_amount=Decimal(1500)
+            client_request_id=uuid4(), business_date=yesterday(), employee_id=pedro, expected_amount=Decimal(1500)
         ),
     ).id
     line = schemas.CountLineIn(denomination_code="ARS_1000", quantity=1, destination_account_id=accounts["main_cash"])
@@ -67,7 +65,7 @@ def _operation(db: Session, type: str, user: int, source_id: int | None = None, 
             ),
             {
                 "t": type,
-                "d": DAY,
+                "d": yesterday(),
                 "k": uuid4(),
                 "f": FINGERPRINT,
                 "st": "settlement" if source_id else None,

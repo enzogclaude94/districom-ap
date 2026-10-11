@@ -17,6 +17,7 @@ import { authApi, currentUserQueryKey, moduleRole, roleAtLeast } from "@/lib/api
 import { thirdPartiesApi, thirdPartiesQueryKey } from "@/lib/api/third-parties";
 import { formatMoney } from "@/lib/format";
 import { cashApi, cashQueryKey } from "@/modules/settlements/cash/api";
+import { deliveryApi, deliveryQueryKey, FUEL_CODE } from "@/modules/settlements/delivery/api";
 import { selectClass } from "@/modules/settlements/delivery/form";
 import { Pager } from "@/modules/settlements/fuel/fuel-loads-view";
 
@@ -26,16 +27,18 @@ import {
   paymentQueryKey,
   type PaymentConcept,
   type PaymentFilters,
+  type PaymentMethod,
   type PaymentState,
 } from "./api";
 import { PaymentDialog } from "./payment-dialog";
 import { PaymentCards, PaymentTable } from "./payment-rows";
-import { CONCEPT_LABELS, STATE_LABELS } from "./labels";
+import { CONCEPT_LABELS, ENABLED_METHODS, METHOD_LABELS, STATE_LABELS } from "./labels";
 
 const PAGE_SIZE = 20;
 
 /**
- * `/rendiciones/pagos` (R6-1): payments made to third parties, with filters and the sum of those in effect.
+ * `/rendiciones/pagos` (R6-1, filters completed in R6-3): payments made to third parties, filtered and paginated
+ * by the backend, with the sum of those in effect.
  * It is what was paid, never a balance owed: DistriCom records no debts with third parties.
  */
 export function PaymentList({
@@ -45,19 +48,35 @@ export function PaymentList({
   initialThirdParty?: number;
   initialCheque?: number;
 }) {
-  const ids = { thirdParty: useId(), concept: useId(), account: useId(), state: useId(), from: useId(), to: useId() };
+  const ids = {
+    thirdParty: useId(),
+    concept: useId(),
+    category: useId(),
+    account: useId(),
+    method: useId(),
+    chequeNumber: useId(),
+    reference: useId(),
+    state: useId(),
+    from: useId(),
+    to: useId(),
+  };
   const me = useQuery({ queryKey: currentUserQueryKey, queryFn: authApi.me });
   const role = moduleRole(me.data, "settlements");
   const canOperate = roleAtLeast(role, "operator");
   const isAdmin = roleAtLeast(role, "admin");
   const accounts = useQuery({ queryKey: [...cashQueryKey, "accounts"], queryFn: cashApi.accounts });
+  const categories = useQuery({ queryKey: [...deliveryQueryKey, "categories"], queryFn: deliveryApi.categories });
   const thirdParties = useQuery({
     queryKey: [...thirdPartiesQueryKey, "list", "all", ""],
     queryFn: () => thirdPartiesApi.list(true),
   });
   const [thirdPartyId, setThirdPartyId] = useState<number | undefined>(initialThirdParty);
   const [concept, setConcept] = useState<PaymentConcept | "">("");
+  const [categoryId, setCategoryId] = useState<number | undefined>();
   const [accountId, setAccountId] = useState<number | undefined>();
+  const [method, setMethod] = useState<PaymentMethod | "">("");
+  const [chequeNumber, setChequeNumber] = useState("");
+  const [reference, setReference] = useState("");
   const [state, setState] = useState<PaymentState | "">("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -69,7 +88,11 @@ export function PaymentList({
   const filters: PaymentFilters = {
     third_party_id: thirdPartyId,
     concept: concept || undefined,
+    expense_category_id: categoryId,
     account_id: accountId,
+    method: method || undefined,
+    cheque_number: chequeNumber || undefined,
+    reference: reference || undefined,
     state: state || undefined,
     date_from: dateFrom || undefined,
     date_to: dateTo || undefined,
@@ -81,6 +104,7 @@ export function PaymentList({
     queryFn: () => paymentApi.list(filters),
     placeholderData: keepPreviousData,
   });
+  const expenseCategories = (categories.data ?? []).filter((c) => c.code !== FUEL_CODE);
   const moneyAccounts = (accounts.data ?? []).filter((a) => a.kind === "CASH_BOX" || a.kind === "BANK");
   const filtered =
     <T,>(set: (value: T) => void) =>
@@ -151,6 +175,23 @@ export function PaymentList({
             </select>
           </div>
           <div className="space-y-1.5">
+            <Label htmlFor={ids.category}>Categoría de gasto</Label>
+            <select
+              id={ids.category}
+              className={selectClass}
+              value={categoryId ?? ""}
+              onChange={(e) => filtered(setCategoryId)(e.target.value ? Number(e.target.value) : undefined)}
+            >
+              <option value="">Todas</option>
+              {expenseCategories.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                  {c.active ? "" : " (desactivada)"}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-1.5">
             <Label htmlFor={ids.account}>Caja o banco</Label>
             <select
               id={ids.account}
@@ -165,6 +206,36 @@ export function PaymentList({
                 </option>
               ))}
             </select>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor={ids.method}>Medio</Label>
+            <select
+              id={ids.method}
+              className={selectClass}
+              value={method}
+              onChange={(e) => filtered(setMethod)(e.target.value as PaymentMethod | "")}
+            >
+              <option value="">Todos</option>
+              {ENABLED_METHODS.map((value) => (
+                <option key={value} value={value}>
+                  {METHOD_LABELS[value]}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor={ids.chequeNumber}>N.º de cheque</Label>
+            <Input
+              id={ids.chequeNumber}
+              inputMode="numeric"
+              className="tabular-nums"
+              value={chequeNumber}
+              onChange={(e) => filtered(setChequeNumber)(e.target.value)}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor={ids.reference}>Referencia</Label>
+            <Input id={ids.reference} value={reference} onChange={(e) => filtered(setReference)(e.target.value)} />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor={ids.state}>Estado</Label>
@@ -227,10 +298,11 @@ export function PaymentList({
         <Card>
           <CardContent className="space-y-3 pt-4">
             <p className="text-sm text-muted-foreground" data-testid="payments-summary">
-              {list.data.total} {list.data.total === 1 ? "pago" : "pagos"} · vigentes por{" "}
+              {list.data.total} {list.data.total === 1 ? "pago" : "pagos"} con estos filtros · total vigente{" "}
               <span className="font-medium text-foreground tabular-nums">
                 {formatMoney(list.data.amount_in_effect)}
               </span>
+              . Los pagos revertidos se listan pero no suman; un pago mixto suma su importe completo.
             </p>
             <PaymentTable rows={list.data.items} />
             <PaymentCards rows={list.data.items} />

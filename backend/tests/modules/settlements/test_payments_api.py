@@ -14,7 +14,8 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.modules.settlements.ledger.rules import DOCUMENT_TYPES, EXTERNAL_BANK_DEBITS, REVERSIBLE_DOCUMENT_TYPES
-from tests.modules.settlements.direct_support import BASE, T, account_id, balance, error, fund, legs
+from tests.modules.settlements.days import today
+from tests.modules.settlements.direct_support import BASE, account_id, balance, error, fund, legs
 from tests.modules.settlements.fuel_support import fuel_category
 from tests.modules.settlements.payment_support import (
     THIRD_PARTIES,
@@ -36,19 +37,19 @@ def admin(as_role) -> TestClient:  # type: ignore[no-untyped-def]
 
 @pytest.fixture
 def box(admin: TestClient) -> int:
-    fund(admin, "main_cash", "500000", T - timedelta(days=10))
+    fund(admin, "main_cash", "500000", today() - timedelta(days=10))
     return account_id(admin, "main_cash")
 
 
 @pytest.fixture
 def change(admin: TestClient) -> int:
-    fund(admin, "change_cash", "50000", T - timedelta(days=10))
+    fund(admin, "change_cash", "50000", today() - timedelta(days=10))
     return account_id(admin, "change_cash")
 
 
 @pytest.fixture
 def bank(admin: TestClient) -> int:
-    fund(admin, "bank", "1000000", T - timedelta(days=10))
+    fund(admin, "bank", "1000000", today() - timedelta(days=10))
     return account_id(admin, "bank")
 
 
@@ -95,7 +96,7 @@ def test_merchandise_paid_in_cash(as_role, box, perez, db: Session) -> None:  # 
         "PAYMENT",
         "payment",
         payment["id"],
-        T.isoformat(),
+        today().isoformat(),
     )
     assert legs(db, operation["id"]) == [
         ("main_cash", Decimal("-100000.00")),
@@ -281,11 +282,11 @@ def test_a_payment_never_creates_nor_deepens_an_overdraft(admin, perez, db: Sess
 
 
 def test_a_past_date_checks_the_funds_of_that_day_and_every_later_one(as_role, admin, perez, db) -> None:  # type: ignore[no-untyped-def]
-    fund(admin, "main_cash", "100000", T - timedelta(days=10))
+    fund(admin, "main_cash", "100000", today() - timedelta(days=10))
     box = account_id(admin, "main_cash")
     # Before the money existed.
     operator = as_role("operator")
-    assert error(pay(operator, perez, [cash(box, "1")], on=T - timedelta(days=11))) == (409, "insufficient_funds")
+    assert error(pay(operator, perez, [cash(box, "1")], on=today() - timedelta(days=11))) == (409, "insufficient_funds")
     # $80.000 left the box on T-2: a payment of $50.000 on T-5 would leave T-2 at -$30.000.
     change = account_id(admin, "change_cash")
     admin = as_role("admin")
@@ -293,7 +294,7 @@ def test_a_past_date_checks_the_funds_of_that_day_and_every_later_one(as_role, a
         f"{BASE}/operations/cash-transfer",
         json={
             "client_request_id": str(uuid4()),
-            "business_date": (T - timedelta(days=2)).isoformat(),
+            "business_date": (today() - timedelta(days=2)).isoformat(),
             "from_account_id": box,
             "to_account_id": change,
             "amount": "80000",
@@ -301,20 +302,20 @@ def test_a_past_date_checks_the_funds_of_that_day_and_every_later_one(as_role, a
     )
     assert moved.status_code == 201, moved.text
     operator = as_role("operator")
-    response = pay(operator, perez, [cash(box, "50000")], on=T - timedelta(days=5))
+    response = pay(operator, perez, [cash(box, "50000")], on=today() - timedelta(days=5))
     assert error(response) == (409, "insufficient_funds")
-    assert response.json()["details"]["business_date"] == (T - timedelta(days=2)).isoformat()
+    assert response.json()["details"]["business_date"] == (today() - timedelta(days=2)).isoformat()
     # $20.000 fits on every day from T-5 on.
-    payment = paid(operator, perez, [cash(box, "20000")], on=T - timedelta(days=5))
+    payment = paid(operator, perez, [cash(box, "20000")], on=today() - timedelta(days=5))
     assert (payment["business_date"], payment["operation"]["business_date"]) == (
-        (T - timedelta(days=5)).isoformat(),
+        (today() - timedelta(days=5)).isoformat(),
     ) * 2
-    assert balance(operator, "main_cash", T - timedelta(days=5)) == Decimal("80000.00")
+    assert balance(operator, "main_cash", today() - timedelta(days=5)) == Decimal("80000.00")
 
 
 def test_a_future_date_is_refused(as_role, box, perez, db: Session) -> None:  # type: ignore[no-untyped-def]
     before = counts(db)
-    response = pay(as_role("operator"), perez, [cash(box, "100")], on=T + timedelta(days=1))
+    response = pay(as_role("operator"), perez, [cash(box, "100")], on=today() + timedelta(days=1))
     assert error(response) == (422, "future_business_date")
     assert counts(db) == before
 
@@ -358,7 +359,7 @@ def test_the_same_request_is_one_payment(as_role, box, perez, db: Session) -> No
     operator = as_role("operator")
     body = {
         "client_request_id": str(uuid4()),
-        "business_date": T.isoformat(),
+        "business_date": today().isoformat(),
         "third_party_id": perez,
         "concept": "MERCHANDISE",
         "amount": "1000",
@@ -382,7 +383,7 @@ def test_the_same_request_is_one_payment(as_role, box, perez, db: Session) -> No
 
 def test_an_admin_reverses_the_whole_payment_on_its_original_date(admin, as_role, box, bank, perez, db) -> None:  # type: ignore[no-untyped-def]
     operator = as_role("operator")
-    on = T - timedelta(days=3)
+    on = today() - timedelta(days=3)
     payment = paid(operator, perez, [cash(box, "100000"), transfer(bank, "200000")], on=on)
     assert error(reverse_payment(operator, payment["id"])) == (403, "forbidden")
     admin = as_role("admin")
@@ -489,7 +490,7 @@ def test_a_descriptive_correction_never_touches_money(admin, box, perez, db: Ses
     for field, value in (
         ("amount", "200"),
         ("third_party_id", perez),
-        ("business_date", T.isoformat()),
+        ("business_date", today().isoformat()),
         ("concept", "REFUND"),
     ):
         assert error(admin.post(url, json={"reason": "x", field: value})) == (422, "validation_error"), field
@@ -522,7 +523,7 @@ def test_without_rendiciones_there_are_no_payments(client, login, box, perez) ->
 
 def test_the_list_filters_and_sums_only_what_is_in_effect(admin, as_role, box, bank, perez, tolls) -> None:  # type: ignore[no-untyped-def]
     other = third_party(admin, "Fletes Rodríguez", None)
-    a = paid(admin, perez, [cash(box, "100")], on=T - timedelta(days=2))
+    a = paid(admin, perez, [cash(box, "100")], on=today() - timedelta(days=2))
     b = paid(admin, perez, [transfer(bank, "200")], concept="EXPENSE", expense_category_id=tolls)
     c = paid(admin, other, [cash(box, "300"), transfer(bank, "400")])
     reverse_payment(admin, a["id"])
@@ -543,8 +544,8 @@ def test_the_list_filters_and_sums_only_what_is_in_effect(admin, as_role, box, b
     assert ids(state="REVERSED") == [a["id"]]
     assert ids(state="IN_EFFECT") == [c["id"], b["id"]]
     assert ids(account_id=box) == [c["id"], a["id"]]
-    assert ids(date_from=T.isoformat()) == [c["id"], b["id"]]
-    assert ids(date_to=(T - timedelta(days=1)).isoformat()) == [a["id"]]
+    assert ids(date_from=today().isoformat()) == [c["id"], b["id"]]
+    assert ids(date_to=(today() - timedelta(days=1)).isoformat()) == [a["id"]]
     assert ids(limit=1, offset=1) == [b["id"]]
 
 

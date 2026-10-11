@@ -17,7 +17,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
-from app.core.clock import business_today
+from tests.modules.settlements.days import days_ago, today
 from tests.modules.settlements.test_cheque_cycle_api import (
     BASE,
     account_id,
@@ -28,19 +28,30 @@ from tests.modules.settlements.test_cheque_cycle_api import (
     rejected,
 )
 
-T = business_today()
-CREDITED = T - timedelta(days=6)
-SPENT = T - timedelta(days=5)
-REJECTED = T - timedelta(days=4)
+
+def credited_on() -> date:
+    return days_ago(6)
 
 
-def cash_op(client: TestClient, kind: str, on: date = T, **body: object) -> object:
+def spent_on() -> date:
+    return days_ago(5)
+
+
+def rejected_on() -> date:
+    return days_ago(4)
+
+
+def cash_op(client: TestClient, kind: str, on: date | None = None, **body: object) -> object:
+    if on is None:
+        on = today()
     return client.post(
         f"{BASE}/operations/{kind}", json={"client_request_id": str(uuid4()), "business_date": on.isoformat(), **body}
     )
 
 
-def withdraw(client: TestClient, amount: str, on: date = T) -> object:
+def withdraw(client: TestClient, amount: str, on: date | None = None) -> object:
+    if on is None:
+        on = today()
     return cash_op(
         client,
         "bank-withdrawal",
@@ -51,8 +62,10 @@ def withdraw(client: TestClient, amount: str, on: date = T) -> object:
     )
 
 
-def bring(client: TestClient, amount: str, on: date = T) -> object:
+def bring(client: TestClient, amount: str, on: date | None = None) -> object:
     """An income: cash taken to the bank (the cash comes from an opening balance of the box)."""
+    if on is None:
+        on = today()
     funded = cash_op(client, "opening-balance", on, account_id=account_id(client, "change_cash"), amount=amount)
     assert funded.status_code == 201, funded.text  # type: ignore[attr-defined]
     return cash_op(
@@ -68,7 +81,7 @@ def bring(client: TestClient, amount: str, on: date = T) -> object:
 def credited_cheque(client: TestClient, amount: str = "100000") -> int:
     cid = entered(client, amount)
     deposited(client, [cid])
-    credited(client, [cid], on=CREDITED)
+    credited(client, [cid], on=credited_on())
     return cid
 
 
@@ -91,8 +104,8 @@ def _at_minus(admin: TestClient, ana: int, left: str) -> int:
     cid = credited_cheque(admin)
     spent = Decimal("100000") - Decimal(left)
     if spent:
-        assert withdraw(admin, str(spent), SPENT).status_code == 201  # type: ignore[attr-defined]
-    rejected(admin, cid, REJECTED, responsible=ana)
+        assert withdraw(admin, str(spent), spent_on()).status_code == 201  # type: ignore[attr-defined]
+    rejected(admin, cid, rejected_on(), responsible=ana)
     return cid
 
 
@@ -141,11 +154,11 @@ def test_6_a_payment_out_of_the_bank_never_deepens_an_overdraft(admin: TestClien
 def test_7_another_rejection_may_deepen_it(admin: TestClient, ana: int) -> None:
     first, second = entered(admin, "100000"), entered(admin, "30000")
     deposited(admin, [first, second])
-    credited(admin, [first, second], on=CREDITED)
-    assert withdraw(admin, "130000", SPENT).status_code == 201  # type: ignore[attr-defined]
-    rejected(admin, first, REJECTED, responsible=ana)
+    credited(admin, [first, second], on=credited_on())
+    assert withdraw(admin, "130000", spent_on()).status_code == 201  # type: ignore[attr-defined]
+    rejected(admin, first, rejected_on(), responsible=ana)
     assert balance(admin, "bank") == Decimal("-100000.00")
-    rejected(admin, second, T, responsible=ana)
+    rejected(admin, second, today(), responsible=ana)
     assert balance(admin, "bank") == Decimal("-130000.00")
 
 
@@ -154,7 +167,7 @@ def test_8_an_ordinary_operation_never_creates_an_overdraft(admin: TestClient, d
     response = withdraw(admin, "10000.01")
     assert (response.status_code, response.json()["code"]) == (409, "insufficient_funds")  # type: ignore[attr-defined]
     # Nor retroactively: a withdrawal dated before the income.
-    before = withdraw(admin, "1", T - timedelta(days=1))
+    before = withdraw(admin, "1", today() - timedelta(days=1))
     assert before.json()["code"] == "insufficient_funds"  # type: ignore[attr-defined]
     # And the database refuses it even to code that skips the service: the bank is not `allow_negative`.
     assert db.execute(text("SELECT allow_negative FROM settlements.accounts WHERE code = 'bank'")).scalar_one() is False
@@ -166,7 +179,7 @@ def test_8_an_ordinary_operation_never_creates_an_overdraft(admin: TestClient, d
                 "INSERT INTO settlements.financial_operations (type, business_date, client_request_id,"
                 " request_fingerprint, created_by) VALUES ('BANK_WITHDRAWAL', :d, :r, :f, :u) RETURNING id"
             ),
-            {"d": T, "r": uuid4(), "f": "0" * 64, "u": user_id},
+            {"d": today(), "r": uuid4(), "f": "0" * 64, "u": user_id},
         ).scalar_one()
         for code, amount in (("bank", "-20000"), ("main_cash", "20000")):
             connection.execute(
@@ -185,16 +198,16 @@ def test_8_an_ordinary_operation_never_creates_an_overdraft(admin: TestClient, d
 
 def test_9_the_history_by_business_date_is_right(admin: TestClient, ana: int) -> None:
     _at_minus(admin, ana, "50000")
-    assert bring(admin, "80000", T - timedelta(days=2)).status_code == 201  # type: ignore[attr-defined]
-    assert balance(admin, "bank", CREDITED) == Decimal("100000.00")
-    assert balance(admin, "bank", SPENT) == Decimal("50000.00")
-    assert balance(admin, "bank", REJECTED) == Decimal("-50000.00")
-    assert balance(admin, "bank", T - timedelta(days=3)) == Decimal("-50000.00")
-    assert balance(admin, "bank", T - timedelta(days=2)) == Decimal("30000.00")
+    assert bring(admin, "80000", today() - timedelta(days=2)).status_code == 201  # type: ignore[attr-defined]
+    assert balance(admin, "bank", credited_on()) == Decimal("100000.00")
+    assert balance(admin, "bank", spent_on()) == Decimal("50000.00")
+    assert balance(admin, "bank", rejected_on()) == Decimal("-50000.00")
+    assert balance(admin, "bank", today() - timedelta(days=3)) == Decimal("-50000.00")
+    assert balance(admin, "bank", today() - timedelta(days=2)) == Decimal("30000.00")
     # A debit dated inside the overdraft deepens a past day: refused, even if today's balance would cover it.
-    retroactive = withdraw(admin, "1000", T - timedelta(days=3))
+    retroactive = withdraw(admin, "1000", today() - timedelta(days=3))
     assert retroactive.json()["code"] == "insufficient_funds"  # type: ignore[attr-defined]
-    assert retroactive.json()["details"]["business_date"] == (T - timedelta(days=3)).isoformat()  # type: ignore[attr-defined]
+    assert retroactive.json()["details"]["business_date"] == (today() - timedelta(days=3)).isoformat()  # type: ignore[attr-defined]
     # One dated after the overdraft ended, within what is there, is fine.
     assert withdraw(admin, "30000").status_code == 201  # type: ignore[attr-defined]
     movements = admin.get(f"{BASE}/accounts/{account_id(admin, 'bank')}/movements").json()["items"]
@@ -211,5 +224,7 @@ def test_10_cajas_shows_the_bank_overdrawn(admin: TestClient, ana: int) -> None:
     )
     cash = next(a for a in admin.get(f"{BASE}/accounts").json() if a["code"] == "main_cash")
     assert (cash["overdrawn"], cash["overdrawn_label"]) == (False, None)
-    on_credit = admin.get(f"{BASE}/accounts/{account_id(admin, 'bank')}", params={"on": CREDITED.isoformat()}).json()
+    on_credit = admin.get(
+        f"{BASE}/accounts/{account_id(admin, 'bank')}", params={"on": credited_on().isoformat()}
+    ).json()
     assert on_credit["overdrawn"] is False

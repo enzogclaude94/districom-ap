@@ -90,15 +90,57 @@ export interface PaymentDetail extends Payment {
   history: PaymentEvent[];
 }
 
+/**
+ * Filters of `/rendiciones/pagos`, all applied by the backend. Those on items (account, method, cheque) keep a
+ * mixed payment whole when any of its items matches.
+ */
 export interface PaymentFilters {
   third_party_id?: number;
   concept?: PaymentConcept;
+  expense_category_id?: number;
   date_from?: string;
   date_to?: string;
   account_id?: number;
+  method?: PaymentMethod;
+  cheque_id?: number;
+  cheque_number?: string;
+  reference?: string;
   state?: PaymentState;
   limit: number;
   offset: number;
+}
+
+/** What was paid to a third party (R6-3): payments in effect only. Never a balance, a debt or an account. */
+export interface ThirdPartyPaymentSummary {
+  third_party_id: number;
+  payments_in_effect: number;
+  amount_in_effect: string;
+  payments_reversed: number;
+  by_concept: { concept: PaymentConcept; count: number; amount: string }[];
+  /** Each item adds to its own means: a mixed payment is split, and the methods sum the total in effect. */
+  by_method: { method: PaymentMethod; count: number; amount: string }[];
+  cheques_delivered: number;
+  cheques_delivered_amount: string;
+}
+
+/** A cheque given to the third party in a payment; `recovered` after that payment was reversed. */
+export interface DeliveredCheque {
+  cheque_id: number;
+  cheque_number: string;
+  bank_name: string;
+  amount: string;
+  delivered_on: string;
+  payment_id: number;
+  payment_state: PaymentState;
+  recovered: boolean;
+  recovered_at: string | null;
+  state: ChequeState;
+  state_label: string;
+}
+
+export interface DeliveredChequePage {
+  items: DeliveredCheque[];
+  total: number;
 }
 
 const BASE = "/settlements/payments";
@@ -106,7 +148,7 @@ const BASE = "/settlements/payments";
 function query(filters: PaymentFilters) {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(filters)) {
-    if (value !== undefined && value !== "") params.set(key, String(value));
+    if (value !== undefined && String(value).trim() !== "") params.set(key, String(value).trim());
   }
   return params.toString();
 }
@@ -116,6 +158,10 @@ export const paymentPath = (id: number, rest = "") => `/payments/${id}${rest}`;
 export const paymentApi = {
   list: (filters: PaymentFilters) => apiFetch<PaymentPage>(`${BASE}?${query(filters)}`),
   get: (id: number) => apiFetch<PaymentDetail>(`${BASE}/${id}`),
+  thirdPartySummary: (thirdPartyId: number) =>
+    apiFetch<ThirdPartyPaymentSummary>(`${BASE}/third-parties/${thirdPartyId}/summary`),
+  thirdPartyCheques: (thirdPartyId: number, limit: number, offset: number) =>
+    apiFetch<DeliveredChequePage>(`${BASE}/third-parties/${thirdPartyId}/cheques?limit=${limit}&offset=${offset}`),
   /** Create, reverse and correct answer with the whole payment, as the backend recorded it. */
   write: (path: string, body: unknown) =>
     apiFetch<PaymentDetail>(`/settlements${path}`, { method: "POST", body: JSON.stringify(body) }),

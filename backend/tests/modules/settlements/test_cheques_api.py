@@ -8,7 +8,7 @@ Every scenario that closes checks the invariant [31]: the balance of "Cartera de
 the cheques the ledger has in it.
 """
 
-from datetime import timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import uuid4
@@ -19,10 +19,13 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.clock import business_today
+from tests.modules.settlements.days import days_ago, yesterday
 
 BASE = "/api/v1/settlements"
-DAY = business_today() - timedelta(days=1)
-ISSUED = DAY - timedelta(days=5)
+
+
+def issued_on() -> date:
+    return days_ago(6)
 
 
 # --- helpers --------------------------------------------------------------------------------------
@@ -39,7 +42,7 @@ def create(client: TestClient, employee_id: int, expected: str) -> int:
         f"{BASE}/deliveries",
         json={
             "client_request_id": str(uuid4()),
-            "business_date": DAY.isoformat(),
+            "business_date": yesterday().isoformat(),
             "employee_id": employee_id,
             "expected_amount": expected,
         },
@@ -58,7 +61,7 @@ def physical(bank_id: int, **fields: Any) -> dict[str, Any]:
         "branch_code": "123",
         "account_ref": "4567890",
         "cheque_number": "00012345",
-        "issue_date": ISSUED.isoformat(),
+        "issue_date": issued_on().isoformat(),
         "drawer_name": "Distribuidora Sur SA",
         "delivered_by_name": "Almacén Don José",
         "physical_receipt_confirmed": True,
@@ -290,12 +293,12 @@ def test_common_and_deferred_are_different_and_deferred_needs_its_date(  # [8] [
     bank_id = bank(operator)
     common = cheque(operator, new(operator, sid, physical(bank_id)))
     assert common["payment_type"] == "COMMON"
-    assert common["payable_from"] == ISSUED.isoformat()
-    assert common["presentation_deadline"] == (ISSUED + timedelta(days=30)).isoformat()
+    assert common["payable_from"] == issued_on().isoformat()
+    assert common["presentation_deadline"] == (issued_on() + timedelta(days=30)).isoformat()
 
     missing = add(operator, sid, physical(bank_id, cheque_number="2", payment_type="DEFERRED"))
     assert missing.json()["code"] == "payment_date_required"
-    pays_on = DAY + timedelta(days=60)
+    pays_on = yesterday() + timedelta(days=60)
     deferred = cheque(
         operator,
         new(
@@ -313,30 +316,39 @@ def test_common_and_deferred_are_different_and_deferred_needs_its_date(  # [8] [
         operator,
         sid,
         physical(
-            bank_id, cheque_number="3", payment_type="DEFERRED", payment_date=(ISSUED - timedelta(days=1)).isoformat()
+            bank_id,
+            cheque_number="3",
+            payment_type="DEFERRED",
+            payment_date=(issued_on() - timedelta(days=1)).isoformat(),
         ),
     )
     assert before_issue.json()["code"] == "invalid_cheque_date"
     future_issue = add(operator, sid, physical(bank_id, cheque_number="3", issue_date=business_today().isoformat()))
     assert future_issue.json()["code"] == "invalid_cheque_date"
     expired = add(
-        operator, sid, physical(bank_id, cheque_number="3", issue_date=(DAY - timedelta(days=31)).isoformat())
+        operator, sid, physical(bank_id, cheque_number="3", issue_date=(yesterday() - timedelta(days=31)).isoformat())
     )
     assert expired.json()["code"] == "cheque_presentation_expired"
 
     # A deferred cheque is payable at most 360 days after its issue (a rule of the instrument, no setting).
     at_limit = physical(
-        bank_id, cheque_number="4", payment_type="DEFERRED", payment_date=(ISSUED + timedelta(days=360)).isoformat()
+        bank_id,
+        cheque_number="4",
+        payment_type="DEFERRED",
+        payment_date=(issued_on() + timedelta(days=360)).isoformat(),
     )
     assert (
         cheque(operator, new(operator, sid, at_limit))["presentation_deadline"]
-        == (ISSUED + timedelta(days=390)).isoformat()
+        == (issued_on() + timedelta(days=390)).isoformat()
     )
     too_far = add(
         operator,
         sid,
         physical(
-            bank_id, cheque_number="5", payment_type="DEFERRED", payment_date=(ISSUED + timedelta(days=361)).isoformat()
+            bank_id,
+            cheque_number="5",
+            payment_type="DEFERRED",
+            payment_date=(issued_on() + timedelta(days=361)).isoformat(),
         ),
     )
     assert too_far.json()["code"] == "deferred_term_exceeded"
@@ -485,7 +497,7 @@ def test_identity_amount_and_delivered_by_are_locked_after_publication(  # [20] 
         {"cheque_number": "1"},
         {"issuer_bank_id": bank(admin, 11)},
         {"account_ref": "1"},
-        {"payment_type": "DEFERRED", "payment_date": (DAY + timedelta(days=5)).isoformat()},
+        {"payment_type": "DEFERRED", "payment_date": (yesterday() + timedelta(days=5)).isoformat()},
         {"delivered_by_name": "Otro cliente"},
     ):
         response = admin.patch(f"{BASE}/deliveries/{sid}/cheques/{cid}", json=change)
@@ -582,7 +594,7 @@ def test_preview_token_changes_on_material_changes(operator: TestClient, pedro: 
     tokens.append(preview(operator, sid)["preview_token"])
     operator.patch(
         f"{BASE}/deliveries/{sid}/cheques/{cid}",
-        json={"payment_type": "DEFERRED", "payment_date": (DAY + timedelta(days=9)).isoformat()},
+        json={"payment_type": "DEFERRED", "payment_date": (yesterday() + timedelta(days=9)).isoformat()},
     )
     tokens.append(preview(operator, sid)["preview_token"])
     verify(operator, sid, cid)
@@ -629,7 +641,7 @@ def test_cheque_accounts_are_not_available_money(as_role, db: Session) -> None: 
 def _entry(bank_id: int, **fields: Any) -> dict[str, Any]:
     body = physical(bank_id, **fields)
     body.pop("physical_receipt_confirmed")
-    return {**body, "physical_receipt_confirmed": True, "business_date": DAY.isoformat()}
+    return {**body, "physical_receipt_confirmed": True, "business_date": yesterday().isoformat()}
 
 
 def test_opening_balance_is_admin_only(operator: TestClient, as_role, db: Session) -> None:  # type: ignore[no-untyped-def]  # [34]
@@ -758,7 +770,7 @@ def test_only_a_cheque_without_later_activity_leaves_its_settlement(  # [27]
     closed(operator, sid)
     # A later movement of the cheque (R4-2 will have deposits; here, a raw one out and back).
     for amount in ("-50000", "50000"):
-        db.execute(text(_MOVE), {"d": DAY, "k": uuid4(), "amount": amount, "c": cid})
+        db.execute(text(_MOVE), {"d": yesterday(), "k": uuid4(), "amount": amount, "c": cid})
     db.commit()
     admin = as_role("admin")
     reopen(admin, sid, 1)

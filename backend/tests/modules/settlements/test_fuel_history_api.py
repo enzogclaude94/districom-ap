@@ -12,7 +12,8 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from tests.conftest import PASSWORD
-from tests.modules.settlements.direct_support import T, account_id, fund, reverse, spent
+from tests.modules.settlements.days import today, yesterday
+from tests.modules.settlements.direct_support import account_id, fund, reverse, spent
 from tests.modules.settlements.fuel_support import (
     BASE,
     add_fuel,
@@ -22,7 +23,7 @@ from tests.modules.settlements.fuel_support import (
     make_legacy,
     vehicle,
 )
-from tests.modules.settlements.test_settlement_close_api import DAY, close, create, reopen
+from tests.modules.settlements.test_settlement_close_api import close, create, reopen
 
 URL = f"{BASE}/fuel-loads"
 
@@ -64,7 +65,7 @@ def van(admin: TestClient, db: Session) -> int:
 
 @pytest.fixture
 def cash(admin: TestClient) -> int:
-    fund(admin, "main_cash", "5000000", T - timedelta(days=10))
+    fund(admin, "main_cash", "5000000", today() - timedelta(days=10))
     return account_id(admin, "main_cash")
 
 
@@ -139,7 +140,7 @@ def test_a_direct_load_in_effect_is_published_and_summed(operator, cash, fuel_id
         None,
         "Caja principal",
     )
-    assert row["business_date"] == T.isoformat()
+    assert row["business_date"] == today().isoformat()
     assert summary(operator) == ("40.000", "50000.00", "1250.00")
 
 
@@ -231,10 +232,10 @@ def test_an_inactive_employee_stays_visible_and_findable(operator, history, juan
 
 def test_date_range_on_business_dates(operator, history) -> None:  # type: ignore[no-untyped-def]
     """[11] The settlement's business date for its loads, the expense's for a direct one."""
-    assert ids(operator, date_from=T.isoformat()) == {history["direct"]}
-    assert ids(operator, date_to=DAY.isoformat()) == {history["closed"], history["open"]}
-    assert ids(operator, date_from=DAY.isoformat(), date_to=T.isoformat()) == set(history.values())
-    assert ids(operator, date_to=(DAY - timedelta(days=1)).isoformat()) == set()
+    assert ids(operator, date_from=today().isoformat()) == {history["direct"]}
+    assert ids(operator, date_to=yesterday().isoformat()) == {history["closed"], history["open"]}
+    assert ids(operator, date_from=yesterday().isoformat(), date_to=today().isoformat()) == set(history.values())
+    assert ids(operator, date_to=(yesterday() - timedelta(days=1)).isoformat()) == set()
     assert operator.get(URL, params={"date_from": "no-date"}).status_code == 422
 
 
@@ -270,7 +271,7 @@ def test_order_is_business_date_then_id_descending(operator, history) -> None:  
     """[15] Today's direct load first, then yesterday's settlement loads, newest load first."""
     rows = page(operator)["items"]
     assert [r["expense_id"] for r in rows] == [history["direct"], history["open"], history["closed"]]
-    assert [r["business_date"] for r in rows] == [T.isoformat(), DAY.isoformat(), DAY.isoformat()]
+    assert [r["business_date"] for r in rows] == [today().isoformat(), yesterday().isoformat(), yesterday().isoformat()]
 
 
 def test_no_loads_at_all(operator) -> None:  # type: ignore[no-untyped-def]

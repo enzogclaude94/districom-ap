@@ -9,10 +9,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.core.clock import business_today
+from tests.modules.settlements.days import today
 
 BASE = "/api/v1/settlements"
-T = business_today()
 
 
 def account_id(client: TestClient, code: str) -> int:
@@ -25,8 +24,10 @@ def balance(client: TestClient, code: str, on: date | None = None) -> Decimal:
     return Decimal(client.get(f"{BASE}/accounts/{account_id(client, code)}", params=params).json()["balance"])
 
 
-def fund(admin: TestClient, code: str, amount: str, on: date = T) -> None:
+def fund(admin: TestClient, code: str, amount: str, on: date | None = None) -> None:
     """An opening balance of the box or the bank (as admin) on that day."""
+    if on is None:
+        on = today()
     response = admin.post(
         f"{BASE}/operations/opening-balance",
         json={
@@ -42,7 +43,7 @@ def fund(admin: TestClient, code: str, amount: str, on: date = T) -> None:
 def spend(client: TestClient, account: int, category: int, amount: str | None = None, **extra: Any) -> Any:
     body: dict[str, Any] = {
         "client_request_id": str(uuid4()),
-        "business_date": T.isoformat(),
+        "business_date": today().isoformat(),
         "category_id": category,
         "paid_from_account_id": account,
         **extra,

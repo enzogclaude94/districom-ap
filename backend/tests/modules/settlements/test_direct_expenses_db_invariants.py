@@ -12,7 +12,8 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
-from tests.modules.settlements.direct_support import BASE, T, account_id, fund, reverse, spent
+from tests.modules.settlements.days import today
+from tests.modules.settlements.direct_support import BASE, account_id, fund, reverse, spent
 from tests.modules.settlements.fuel_support import fuel_category, vehicle
 from tests.modules.settlements.test_settlement_close_api import close, create
 
@@ -37,7 +38,7 @@ def world(as_role, driver, db: Session) -> dict[str, Any]:  # type: ignore[no-un
     """Cash box with $100.000, bank with $0, a direct toll of $500 from the cash box and a direct fuel
     expense (10 l x $1.000) from the cash box."""
     admin = as_role("admin")
-    fund(admin, "main_cash", "100000", T - timedelta(days=5))
+    fund(admin, "main_cash", "100000", today() - timedelta(days=5))
     juan = driver("Juan Pérez", function="settlements.cash_viewer")
     tolls = admin.post(f"{BASE}/expense-categories", json={"name": "Peajes"}).json()["id"]
     truck = vehicle(db, "AB123CD")
@@ -74,7 +75,7 @@ def _expense(db: Session, w: dict[str, Any], **values: Any) -> int:
         "category_id": w["tolls"],
         "amount": 100,
         "paid_from_account_id": w["cash"],
-        "business_date": T,
+        "business_date": today(),
         "created_by": w["user"],
         **values,
     }
@@ -98,10 +99,12 @@ def _operation(
     legs: list[tuple[int, int]],
     *,
     type: str = "DIRECT_EXPENSE",
-    business_date: Any = T,
+    business_date: Any = None,
     reverses: int | None = None,
     source_type: str | None = "expense",
 ) -> int:
+    if business_date is None:
+        business_date = today()
     op_id = int(
         db.execute(
             text(
@@ -134,7 +137,11 @@ def _publish(db: Session, w: dict[str, Any], amount: int = 100, **expense: Any) 
     eid = _expense(db, w, amount=amount, **expense)
     account = expense.get("paid_from_account_id", w["cash"])
     op = _operation(
-        db, w, eid, [(account, -amount), (w["expense_account"], amount)], business_date=expense.get("business_date", T)
+        db,
+        w,
+        eid,
+        [(account, -amount), (w["expense_account"], amount)],
+        business_date=expense.get("business_date", today()),
     )
     _sql(db, "UPDATE settlements.expenses SET operation_id = :o WHERE id = :e", o=op, e=eid)
     return eid
@@ -176,7 +183,7 @@ def test_5_a_settlement_expense_keeps_its_rules(as_role, world, driver, db: Sess
     ).json()["expenses"][-1]["id"]
     for column, value in (
         ("paid_from_account_id", world["cash"]),
-        ("business_date", T),
+        ("business_date", today()),
         ("operation_id", world["toll"]["operation_id"]),
         ("settlement_id", None),
     ):
@@ -310,7 +317,7 @@ def test_12_the_money_of_a_direct_expense_never_changes(world, db: Session, colu
     resolved = {
         "FUEL": world["FUEL"],
         "bank": world["bank"],
-        "yesterday": T - timedelta(days=1),
+        "yesterday": today() - timedelta(days=1),
         "fuel_operation": world["fuel"]["operation_id"],
         "uuid": str(uuid4()),
     }.get(value, value)
@@ -334,7 +341,7 @@ def test_12_the_description_does_change(world, db: Session) -> None:  # type: ig
 def test_13_a_reversal_belongs_to_its_expense(world, db: Session) -> None:  # type: ignore[no-untyped-def]
     toll, fuel = world["toll"], world["fuel"]
 
-    def reversal_of(op: int, amount: int, on: Any = T) -> int:
+    def reversal_of(op: int, amount: int, on: Any = None) -> int:
         return _operation(
             db,
             world,
@@ -364,7 +371,7 @@ def test_13_a_reversal_belongs_to_its_expense(world, db: Session) -> None:  # ty
 
     # On another business date than the expense's.
     def other_day() -> None:
-        rid = reversal_of(toll["operation_id"], 500, T - timedelta(days=1))
+        rid = reversal_of(toll["operation_id"], 500, today() - timedelta(days=1))
         _sql(
             db,
             "UPDATE settlements.expenses SET reversal_operation_id = :r, voided_by = :u, voided_at = now(), "
@@ -486,7 +493,7 @@ def test_20_the_cash_box_is_never_negative(world, db: Session) -> None:  # type:
     assert "cannot have a negative balance" in _refused(db, lambda: _publish(db, world, amount=89501))
     # Nor retroactively, before the box was funded.
     assert "cannot have a negative balance" in _refused(
-        db, lambda: _publish(db, world, amount=1, business_date=T - timedelta(days=6))
+        db, lambda: _publish(db, world, amount=1, business_date=today() - timedelta(days=6))
     )
 
 

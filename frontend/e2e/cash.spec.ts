@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 import { formatMoney } from "../src/lib/format";
-import { adminEmail, adminPassword, login } from "./helpers";
+import { adminEmail, adminPassword, businessDay, login } from "./helpers";
 
 const operatorEmail = process.env.E2E_OPERATOR_EMAIL ?? "e2e-operator@districom.local";
 const operatorPassword = process.env.E2E_OPERATOR_PASSWORD ?? "operator-password-123";
@@ -172,7 +172,7 @@ test("cash boxes end to end: opening, transfer, deposit, contribution, adjustmen
     headers: HEADERS,
     data: {
       client_request_id: crypto.randomUUID(),
-      business_date: new Date().toISOString().slice(0, 10),
+      business_date: businessDay(),
       from_account_id: main.id,
       to_account_id: change.id,
       amount: "1.00",

@@ -153,12 +153,78 @@ class PaymentDetail(PaymentOut):
 
 
 class PaymentListQuery(BaseModel):
+    """Filters of the list (R6-3), all applied in the database. Those on items (`account_id`, `method`,
+    `cheque_id`, `cheque_number`) keep a payment when ANY of its items matches: a mixed payment appears under
+    each of its means, always with its whole amount and all its items."""
+
     third_party_id: int | None = None
     concept: Concept | None = None
+    expense_category_id: int | None = None
     date_from: date | None = None
     date_to: date | None = None
     # Payments with an item from this cash box or bank account.
     account_id: int | None = None
+    method: Method | None = None
+    cheque_id: int | None = None
+    # The number printed on a delivered cheque, exactly (surrounding spaces ignored).
+    cheque_number: Annotated[str, Field(max_length=30)] | None = None
+    # Part of the reference of the payment or of one of its items, ignoring case.
+    reference: Reference | None = None
     state: PaymentState | None = None
     limit: int = Field(default=50, ge=1, le=200)
+    offset: int = Field(default=0, ge=0)
+
+
+class ConceptTotal(BaseModel):
+    concept: Concept
+    count: int
+    amount: Money
+
+
+class MethodTotal(BaseModel):
+    method: Method
+    # Items of that means in the payments in effect (a mixed payment adds each item to its own means).
+    count: int
+    amount: Money
+
+
+class ThirdPartyPaymentSummary(BaseModel):
+    """What was paid to a third party (R6-3): payments in effect only; reversed ones stay in its history
+    and never add. A sum of payments made, never a balance, a debt or an account payable."""
+
+    third_party_id: int
+    payments_in_effect: int
+    amount_in_effect: Money
+    payments_reversed: int
+    by_concept: list[ConceptTotal]
+    by_method: list[MethodTotal]
+    # Cheques delivered to it in payments in effect (not those recovered after a reversal).
+    cheques_delivered: int
+    cheques_delivered_amount: Money
+
+
+class DeliveredChequeOut(BaseModel):
+    """A cheque given to the third party in a payment (R6-3). `recovered` when that payment was reversed and
+    the cheque came back: it stays in the history but is no longer delivered."""
+
+    cheque_id: int
+    cheque_number: str
+    bank_name: str
+    amount: Money
+    delivered_on: date
+    payment_id: int
+    payment_state: PaymentState
+    recovered: bool
+    recovered_at: datetime | None
+    state: str
+    state_label: str
+
+
+class DeliveredChequePage(BaseModel):
+    items: list[DeliveredChequeOut]
+    total: int
+
+
+class PageQuery(BaseModel):
+    limit: int = Field(default=10, ge=1, le=200)
     offset: int = Field(default=0, ge=0)

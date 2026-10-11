@@ -13,14 +13,15 @@ from sqlalchemy import Connection, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
-from app.core.clock import business_today
 from app.modules.settlements.cheques import cycle
 from app.modules.settlements.cheques import schemas as cs
 from app.modules.settlements.cheques import service as cheques
 from app.platform.auth.models import User
+from tests.modules.settlements.days import days_ago, today
 
-T = business_today()
-ISSUED = T - timedelta(days=12)
+
+def issued_on() -> date:
+    return days_ago(12)
 
 
 def _bank(db: Session) -> int:
@@ -34,7 +35,9 @@ def _account(db: Session, code: str) -> int:
 _numbers = iter(range(20000, 40000))
 
 
-def _entry(db: Session, admin: User, issued: object = ISSUED, entered: object = None) -> int:
+def _entry(db: Session, admin: User, issued: object = None, entered: object = None) -> int:
+    if issued is None:
+        issued = issued_on()
     number = str(next(_numbers))
     body = cs.AdministrativeEntryIn(
         client_request_id=uuid4(),
@@ -49,12 +52,14 @@ def _entry(db: Session, admin: User, issued: object = ISSUED, entered: object = 
         drawer_name="Distribuidora Sur SA",
         delivered_by_name="Almacén Don José",
         physical_receipt_confirmed=True,
-        business_date=entered or T - timedelta(days=10),  # type: ignore[arg-type]
+        business_date=entered or today() - timedelta(days=10),  # type: ignore[arg-type]
     )
     return cheques.opening_balance(db, admin, body).id
 
 
-def _deposit(db: Session, operator: User, cid: int, on: date = T - timedelta(days=8)) -> int:
+def _deposit(db: Session, operator: User, cid: int, on: date | None = None) -> int:
+    if on is None:
+        on = today() - timedelta(days=8)
     body = cs.DepositIn(
         client_request_id=uuid4(), bank_account_id=_account(db, "bank"), cheque_ids=[cid], business_date=on
     )
@@ -134,9 +139,9 @@ def test_a_document_has_one_operation(conn: Connection, deposited: dict[str, int
 
 
 def test_a_deposit_never_takes_an_expired_cheque(db: Session, conn: Connection, actor) -> None:  # type: ignore[no-untyped-def]
-    issued = T - timedelta(days=35)
-    cid = _entry(db, actor("admin"), issued=issued, entered=T - timedelta(days=34))
-    deposit_id = _deposit(db, actor("operator"), _entry(db, actor("admin")), on=T)
+    issued = today() - timedelta(days=35)
+    cid = _entry(db, actor("admin"), issued=issued, entered=today() - timedelta(days=34))
+    deposit_id = _deposit(db, actor("operator"), _entry(db, actor("admin")), on=today())
     message = _refused(
         conn,
         "INSERT INTO settlements.cheque_deposit_items (deposit_id, cheque_id, amount) VALUES (:d, :c, 100000)",
@@ -152,7 +157,7 @@ def test_only_a_rejection_overdraws_a_bank(db: Session, conn: Connection, actor,
     cid = _entry(db, actor("admin"))
     _deposit(db, operator, cid)
     credit = cs.CreditIn(
-        client_request_id=uuid4(), bank_account_id=_account(db, "bank"), cheque_ids=[cid], business_date=T
+        client_request_id=uuid4(), bank_account_id=_account(db, "bank"), cheque_ids=[cid], business_date=today()
     )
     cycle.credit(db, operator, credit)
     # Spend the money, then the bank rejects the cheque: overdrawn.
@@ -162,7 +167,7 @@ def test_only_a_rejection_overdraws_a_bank(db: Session, conn: Connection, actor,
             "INSERT INTO settlements.financial_operations (type, business_date, client_request_id, "
             "request_fingerprint, created_by) VALUES ('BANK_WITHDRAWAL', :d, gen_random_uuid(), :f, :u) RETURNING id"
         ),
-        {"d": T, "f": "0" * 64, "u": user_id},
+        {"d": today(), "f": "0" * 64, "u": user_id},
     ).scalar_one()
     for code, amount in (("bank", "-100000"), ("main_cash", "100000")):
         conn.execute(
@@ -174,7 +179,7 @@ def test_only_a_rejection_overdraws_a_bank(db: Session, conn: Connection, actor,
         )
     conn.commit()
     body = cs.RejectionIn(
-        client_request_id=uuid4(), reason="Sin fondos", business_date=T, responsible_employee_id=driver("Ana")
+        client_request_id=uuid4(), reason="Sin fondos", business_date=today(), responsible_employee_id=driver("Ana")
     )
     cycle.reject(db, operator, cid, body)
     balance = conn.execute(
@@ -196,7 +201,7 @@ def test_a_pending_born_from_a_cheque_has_one_origin_and_is_voided_only_with_it(
     cid = _entry(db, actor("admin"))
     _deposit(db, operator, cid)
     body = cs.RejectionIn(
-        client_request_id=uuid4(), reason="Sin fondos", business_date=T, responsible_employee_id=driver("Ana")
+        client_request_id=uuid4(), reason="Sin fondos", business_date=today(), responsible_employee_id=driver("Ana")
     )
     rejection_id = cycle.reject(db, operator, cid, body).id
     pending_id = conn.execute(
