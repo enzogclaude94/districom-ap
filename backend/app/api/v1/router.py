@@ -7,6 +7,7 @@ from app.modules import MODULES
 from app.platform.auth import router as auth
 from app.platform.banks import router as banks
 from app.platform.modules import install
+from app.platform.outlets import router as outlets
 from app.platform.parties import router as employees
 from app.platform.settings import router as settings
 from app.platform.third_parties import router as third_parties
@@ -20,6 +21,7 @@ api_router.include_router(employees.router)
 api_router.include_router(banks.router)
 api_router.include_router(vehicles.router)
 api_router.include_router(third_parties.router)
+api_router.include_router(outlets.router)
 
 for module in MODULES:
     install(module)

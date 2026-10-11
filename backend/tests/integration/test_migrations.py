@@ -16,6 +16,7 @@ EXPECTED_TABLES = {
     "financial_institutions",
     "vehicles",
     "third_parties",
+    "outlets",
 }
 
 
@@ -61,6 +62,7 @@ SETTLEMENTS_TABLES = {
     "settlement_closing_fuel_loads",
     "payments",
     "payment_items",
+    "outlet_responsibilities",
 }
 
 
@@ -225,7 +227,7 @@ def test_platform_vehicles_migration_goes_down_and_up() -> None:
     assert "vehicles" in _tables(url)
     command.downgrade(cfg, "0013")
     assert "vehicles" not in _tables(url)
-    assert _tables(url) >= EXPECTED_TABLES - {"vehicles", "third_parties"}
+    assert _tables(url) >= EXPECTED_TABLES - {"vehicles", "third_parties", "outlets"}
     command.upgrade(cfg, "head")
     assert "vehicles" in _tables(url)
 
@@ -239,7 +241,7 @@ def test_third_parties_and_payments_migrations_go_down_and_up() -> None:
 
     command.upgrade(cfg, "head")
     command.downgrade(cfg, "0018")
-    assert _settlements_tables(url) == SETTLEMENTS_TABLES - {"payments", "payment_items"}
+    assert _settlements_tables(url) == SETTLEMENTS_TABLES - {"payments", "payment_items", "outlet_responsibilities"}
     assert "third_parties" in _tables(url)
     engine = create_engine(url)
     try:
@@ -256,3 +258,35 @@ def test_third_parties_and_payments_migrations_go_down_and_up() -> None:
         command.upgrade(cfg, "head")
     assert _settlements_tables(url) == SETTLEMENTS_TABLES
     assert "third_parties" in _tables(url)
+
+
+def test_outlets_and_responsibilities_migrations_go_down_and_up() -> None:
+    """R7-1: 0022 only adds `settlements.outlet_responsibilities` (and its guard); 0021 only `public.outlets`
+    (and its guards). Going back removes exactly that; coming up again restores it."""
+    cfg = alembic_config()
+    url = cfg.get_main_option("sqlalchemy.url")
+    assert url
+
+    command.upgrade(cfg, "head")
+    command.downgrade(cfg, "0021")
+    assert _settlements_tables(url) == SETTLEMENTS_TABLES - {"outlet_responsibilities"}
+    assert "outlets" in _tables(url)
+    engine = create_engine(url)
+    try:
+        command.downgrade(cfg, "0020")
+        assert "outlets" not in _tables(url)
+        assert _tables(url) >= EXPECTED_TABLES - {"outlets"}
+        assert _settlements_tables(url) == SETTLEMENTS_TABLES - {"outlet_responsibilities"}
+        with engine.connect() as conn:
+            leftovers = conn.execute(
+                text(
+                    "SELECT proname FROM pg_proc WHERE proname IN "
+                    "('check_outlet_update', 'forbid_outlet_delete', 'check_outlet_responsibility')"
+                )
+            ).all()
+        assert leftovers == []
+    finally:
+        engine.dispose()
+        command.upgrade(cfg, "head")
+    assert _settlements_tables(url) == SETTLEMENTS_TABLES
+    assert "outlets" in _tables(url)

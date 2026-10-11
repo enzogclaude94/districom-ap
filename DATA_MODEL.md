@@ -219,6 +219,21 @@ Maestro **único** de terceros a quienes la empresa les paga (proveedores, flete
 - **Concurrencia.** Un pago toma el tercero `FOR SHARE` (servicio y trigger) hasta su commit: una desactivación en curso espera al pago, y un pago que empieza después de la desactivación la ve y se rechaza.
 - API: `GET /api/v1/third-parties` (`include_inactive`, `q` por nombre o por ≥3 dígitos del CUIT), `GET /{id}` (con la historia), `POST` y `PATCH /{id}` (admin de plataforma). Sin DELETE.
 
+#### outlets (R7‑1 · migración `0021`)
+Maestro **único** de bocas de expendio (puntos de venta que rinden), para cualquier módulo (ADR 009). Lo administra el **admin de plataforma**; todo usuario autenticado lo consulta. Quién responde por cada boca es del módulo Rendiciones (§13.7).
+| Columna | Tipo | Notas |
+|---|---|---|
+| id | bigint identity | PK |
+| code | varchar(20) | Obligatorio, **único** (`uq_outlets_code`) e **inmutable** (trigger `check_outlet_update`). CHECK `^[A-Z0-9-]{2,20}$`. Se ingresa con o sin mayúsculas y espacios alrededor; cualquier otro carácter se rechaza (422 `invalid_outlet_code`), nunca se corrige. Es la identidad de la boca junto con el id; el nombre nunca lo es |
+| name | varchar(100) | Obligatorio (CHECK no vacío); espacios repetidos se colapsan; se corrige |
+| name_key | varchar(100) | Clave de comparación del nombre (la de terceros: minúsculas, sin acentos ni puntuación, espacios colapsados). **Única** (`uq_outlets_name_key`): no hay dos bocas con nombres operativamente iguales (409 `outlet_name_taken`). Relajarla exige consultar a Enzo |
+| description | text nulo | Opcional; vacía se guarda nula |
+| active | boolean | Una inactiva no abre rendiciones nuevas ni suma responsables; lo abierto se termina y su historia sigue visible |
+| created_by / updated_by | bigint FK `users` (RESTRICT) | |
+| created_at / updated_at | timestamptz | |
+
+Sin dirección ni localidad. Sin DELETE (trigger `forbid_outlet_delete`); `code`, `created_by` y `created_at` inmutables. Auditoría `platform.outlet.created`, `.name_changed`, `.description_changed`, `.deactivated`, `.reactivated` con usuario, antes, después e instante; un PATCH sin cambios no registra nada. Código duplicado: 409 `outlet_code_taken` (la carrera de dos altas la decide el índice único). API: `GET /api/v1/outlets` (`include_inactive`), `GET /{id}` (con la historia), `POST` y `PATCH /{id}` (admin de plataforma; el PATCH no acepta `code`). Sin DELETE.
+
 ### 4.2 Inteligencia Comercial (`commercial`)
 
 #### customer_types
@@ -728,7 +743,21 @@ Un pago combina efectivo, transferencias y **uno o más cheques de la cartera**;
 - **Cheques vencidos.** No se entregan si la fecha del pago es posterior al último día de presentación (§13.6.1).
 - **Deuda futura conocida: cheque entregado que vuelve rechazado** (D5, fuera de R6). Si el tercero no puede cobrar un cheque entregado y lo devuelve rechazado, hoy no hay flujo: el pago sigue vigente y el cheque «Entregado». Hará falta un documento propio (reconocer que el pago quedó sin cubrir, recuperar el cheque y la deuda con el librador/cliente) sin editar el pago. Se propondrá aparte.
 
-### 13.7 Empleados (R8)
+### 13.7 Bocas de expendio (R7)
+Decisiones en ADR 009 (separa lo decidido de lo implementado). Implementado en R7‑1: `public.outlets` (§4.1) y `outlet_responsibilities`. La rendición `OUTLET`, sus cuentas técnicas y las entregas parciales son R7‑2/R7‑3.
+
+**Decidido para R7‑2/R7‑3 (sin implementar):** EL CONTEO FINAL ES EL EFECTIVO FÍSICO QUE QUEDA EN LA BOCA DESPUÉS DE LAS REMESAS YA REALIZADAS. Ejemplo: $900.000 cobrados y $700.000 entregados durante el día: el conteo es $200.000.
+
+- **`settlements.outlet_responsibilities`** (R7‑1 · migración `0022`) — `outlet_id` → `outlets`, `employee_id` → `employees` (RESTRICT, indexadas); `valid_from date`, `valid_to date` nulo; `created_by`; `ended_by`, `ended_at`, `end_reason` (CHECK `end_complete`: los cuatro de fin juntos o ninguno, motivo no vacío); CHECK `valid_to IS NULL OR valid_to >= valid_from`.
+- **Vigencia inclusiva.** Una responsabilidad está vigente el día `d` cuando `valid_from <= d <= valid_to`; sin tope mientras `valid_to` es nulo. Por día, sin turnos.
+- **Varios a la vez.** Puede haber varios responsables simultáneos en una boca, y un empleado puede ser responsable de varias bocas, también el mismo día. La única exclusión es el mismo empleado en la misma boca con rangos superpuestos: `EXCLUDE USING gist (outlet_id =, employee_id =, daterange(valid_from, valid_to, '[]') &&)` (409 `outlet_responsibility_overlap`). Sin restricción global por empleado.
+- **Sin función de empleado.** Cualquier empleado activo; no existe `outlet_attendant`.
+- **Historia que no se reescribe.** Trigger `check_outlet_responsibility`: al insertar, boca y empleado activos (`FOR SHARE`) y fila abierta; el único UPDATE es terminarla (una sola vez: 409 `outlet_responsibility_already_ended`), sin tocar boca, empleado, inicio ni autor. Sin DELETE (`forbid_delete`).
+- **Inactivos.** Boca o empleado desactivados después: sus responsabilidades siguen visibles y se pueden terminar; no se crean nuevas (422 `inactive_outlet`, `inactive_employee`).
+- **Auditoría.** `settlements.outlet_responsibility.created` y `.ended` (con el motivo).
+- **API** (bajo `/api/v1/settlements`): `GET /outlet-responsibilities` (`outlet_id`, `employee_id`, `on`, paginado; viewer), `GET /outlets/{id}/responsibilities` (`on`; sin `on`, la historia completa, el inicio más reciente primero; viewer), `GET /outlet-responsibilities/employees` (empleados activos elegibles; admin), `POST /outlets/{id}/responsibilities` (`employee_id`, `valid_from`; admin), `POST /outlet-responsibilities/{id}/end` (`valid_to`, `reason`; admin).
+
+### 13.8 Empleados (R8)
 `employee_pay_terms` (con vigencia) · `loans` + `loan_installments` · `payroll_runs` + `payroll_lines`. Consumos, adelantos y bonos son operaciones contra la cuenta interna del empleado.
 
 **Clientes (ADR 007, C3):** hasta que exista `public.customers`, las tablas de Rendiciones guardan el nombre del cliente en texto y un `customer_id` opcional; no hay catálogo de clientes propio.
