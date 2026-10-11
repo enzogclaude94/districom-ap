@@ -3,6 +3,7 @@
 from app.modules.settlements.cheques import models as settlements_cheques_models
 from app.modules.settlements.delivery import models as settlements_delivery_models
 from app.modules.settlements.ledger import models as settlements_ledger_models
+from app.modules.settlements.outlets import models as settlements_outlets_models
 from app.modules.settlements.payments import models as settlements_payments_models
 from app.modules.settlements.pending import models as settlements_pending_models
 from app.platform.audit import models as audit_models
@@ -25,6 +26,7 @@ __all__ = [
     "settlements_cheques_models",
     "settlements_delivery_models",
     "settlements_ledger_models",
+    "settlements_outlets_models",
     "settlements_payments_models",
     "settlements_pending_models",
     "sources_models",
