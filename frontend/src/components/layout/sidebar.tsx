@@ -1,7 +1,7 @@
 "use client";
 
 import type { LucideIcon } from "lucide-react";
-import { Handshake, IdCard, Settings, Truck } from "lucide-react";
+import { Handshake, IdCard, Settings, Store, Truck } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -13,6 +13,7 @@ import { cn } from "@/lib/cn";
 const PLATFORM_NAV: NavSection[] = [
   { label: "Terceros", icon: Handshake, href: "/terceros" },
   { label: "Vehículos", icon: Truck, href: "/vehiculos" },
+  { label: "Bocas de expendio", icon: Store, href: "/bocas" },
   { label: "Configuración", icon: Settings, href: "/configuracion" },
 ];
 /** Platform pages only platform admins can use. */
