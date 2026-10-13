@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import { deliveryPath, type Settlement } from "./api";
+import { settlementPath, type Settlement } from "./api";
 import { ActionDialog, TextField } from "./form";
 import { settlementTitle } from "./labels";
 import { useDeliveryAction } from "./use-delivery-action";
@@ -17,14 +17,18 @@ export function ReopenDialog({ settlement, onClose }: { settlement: Settlement; 
   return (
     <ActionDialog
       title="Reabrir para corregir"
-      description="El cierre actual sigue vigente en Cajas hasta que confirmes el nuevo cierre. Reabrir no mueve dinero."
+      description={
+        settlement.close_in_effect?.kind === "ADMINISTRATIVE_ZERO"
+          ? "El cierre en cero sigue vigente hasta que confirmes el nuevo cierre. Reabrir no mueve dinero."
+          : "El cierre actual sigue vigente en Cajas hasta que confirmes el nuevo cierre. Reabrir no mueve dinero."
+      }
       submitLabel="Reabrir"
       action={action}
       onClose={onClose}
       validate={() => (!reason.trim() ? "Indicá el motivo de la reapertura." : null)}
       build={() => ({
         method: "POST",
-        path: deliveryPath(settlement.id, "/reopen"),
+        path: settlementPath(settlement, "/reopen"),
         body: { version: settlement.version, reason: reason.trim() },
         summary: `Reapertura de la ${settlementTitle(settlement.sequence_number).toLowerCase()}`,
       })}

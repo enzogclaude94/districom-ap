@@ -18,7 +18,8 @@ export type AccountKind =
   | "CHEQUES_IN_TRANSIT"
   | "MERCHANDISE_PAYMENTS"
   | "THIRD_PARTY_REFUNDS"
-  | "OTHER_PAYMENTS";
+  | "OTHER_PAYMENTS"
+  | "OUTLET_COLLECTIONS";
 
 export type OperationType =
   | "OPENING_BALANCE"

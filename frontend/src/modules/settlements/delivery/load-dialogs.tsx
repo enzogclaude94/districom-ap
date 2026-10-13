@@ -5,9 +5,10 @@ import { useState } from "react";
 import { formatMoney } from "@/lib/format";
 import type { Account } from "@/modules/settlements/cash/api";
 import { parseAmount } from "@/modules/settlements/cash/amount";
+import { parseExpected } from "@/modules/settlements/outlet-settlements/amount";
 
 import {
-  deliveryPath,
+  settlementPath,
   FUEL_CODE,
   type Expense,
   type ExpenseCategory,
@@ -45,7 +46,7 @@ export function AdditionDialog({ settlement, boxes, onClose }: Base & { boxes: A
       }
       build={(requestId) => ({
         method: "POST",
-        path: deliveryPath(settlement.id, "/additions"),
+        path: settlementPath(settlement, "/additions"),
         body: {
           client_request_id: requestId,
           amount: parseAmount(amount),
@@ -89,7 +90,7 @@ export function VoidDialog({
       validate={() => (!reason.trim() ? "Indicá el motivo." : null)}
       build={() => ({
         method: "POST",
-        path: deliveryPath(settlement.id, path),
+        path: settlementPath(settlement, path),
         body: { reason: reason.trim() },
         summary: `${title}: ${what.toLowerCase()}`,
       })}
@@ -115,7 +116,7 @@ export function TransferDialog({ settlement, banks, onClose }: Base & { banks: A
       validate={() => (!parseAmount(amount) ? "Ingresá el importe." : bank === null ? "Elegí la cuenta." : null)}
       build={(requestId) => ({
         method: "POST",
-        path: deliveryPath(settlement.id, "/transfers"),
+        path: settlementPath(settlement, "/transfers"),
         body: {
           client_request_id: requestId,
           amount: parseAmount(amount),
@@ -171,7 +172,7 @@ export function TransferDecisionDialog({
       validate={() => (needsReason && !reason.trim() ? "Indicá el motivo." : null)}
       build={() => ({
         method: "POST",
-        path: deliveryPath(settlement.id, `/transfers/${transfer.id}/status`),
+        path: settlementPath(settlement, `/transfers/${transfer.id}/status`),
         body: { status, reason: reason.trim() || null },
         summary: `${TRANSFER_STATUS_LABELS[status]}: transferencia de ${what}`,
       })}
@@ -200,7 +201,10 @@ export function TransferDecisionDialog({
 }
 
 export function ExpenseDialog({ settlement, categories, onClose }: Base & { categories: ExpenseCategory[] }) {
-  const active = categories.filter((category) => category.active);
+  // A boca has no fuel (R7-2): its expenses never offer the FUEL category.
+  const active = categories.filter(
+    (category) => category.active && !(settlement.type === "OUTLET" && category.code === FUEL_CODE),
+  );
   const [category, setCategory] = useState<number | null>(null);
   const [amount, setAmount] = useState("");
   const [description, setDescription] = useState("");
@@ -226,7 +230,7 @@ export function ExpenseDialog({ settlement, categories, onClose }: Base & { cate
       }
       build={(requestId) => ({
         method: "POST",
-        path: deliveryPath(settlement.id, "/expenses"),
+        path: settlementPath(settlement, "/expenses"),
         body: {
           client_request_id: requestId,
           category_id: category,
@@ -275,7 +279,7 @@ export function FuelCorrectionDialog({ settlement, expense, onClose }: Base & { 
       }
       build={() => ({
         method: "PATCH",
-        path: deliveryPath(settlement.id, `/expenses/${expense.id}`),
+        path: settlementPath(settlement, `/expenses/${expense.id}`),
         body: { fuel: fuelBody(load, expense.fuel) },
         summary: `Carga de combustible: ${formatQuantity(parseDecimal(load.liters, 3)!)} l`,
       })}
@@ -285,32 +289,53 @@ export function FuelCorrectionDialog({ settlement, expense, onClose }: Base & { 
   );
 }
 
-/** Correct the expected amount, reference or notes of an open settlement. Driver, date and number never change. */
+/**
+ * Correct the expected amount, reference or notes of an open settlement. Driver (or boca), date and number
+ * never change. A boca's expected amount may be 0 or left empty until Store Sys gives it (R7-2).
+ */
 export function EditSettlementDialog({ settlement, onClose }: Base) {
-  const [expected, setExpected] = useState(settlement.expected_amount.replace(".", ","));
+  const outlet = settlement.type === "OUTLET";
+  const [expected, setExpected] = useState((settlement.expected_amount ?? "").replace(".", ","));
   const [reference, setReference] = useState(settlement.external_reference ?? "");
   const [notes, setNotes] = useState(settlement.notes ?? "");
   const action = useDeliveryAction(`edit:${settlement.id}`, onClose);
   return (
     <ActionDialog
       title="Corregir datos"
-      description="El repartidor, la fecha y el número no cambian."
+      description={
+        outlet ? "La boca, la fecha y el número no cambian." : "El repartidor, la fecha y el número no cambian."
+      }
       submitLabel="Guardar"
       action={action}
       onClose={onClose}
-      validate={() => (!parseAmount(expected) ? "Ingresá el importe esperado." : null)}
+      validate={() =>
+        outlet
+          ? expected.trim() && parseExpected(expected) === null
+            ? "Ingresá un importe válido o dejalo vacío."
+            : null
+          : !parseAmount(expected)
+            ? "Ingresá el importe esperado."
+            : null
+      }
       build={() => ({
         method: "PATCH",
-        path: deliveryPath(settlement.id),
+        path: settlementPath(settlement),
         body: {
-          expected_amount: parseAmount(expected),
+          expected_amount: outlet ? parseExpected(expected) : parseAmount(expected),
           external_reference: reference.trim() || null,
           notes: notes.trim() || null,
         },
-        summary: `Esperado ${formatMoney(parseAmount(expected)!)}`,
+        summary:
+          outlet && parseExpected(expected) === null
+            ? "Esperado sin cargar"
+            : `Esperado ${formatMoney((outlet ? parseExpected(expected) : parseAmount(expected))!)}`,
       })}
     >
-      <AmountField label="Importe esperado" value={expected} onChange={setExpected} />
+      <AmountField
+        label={outlet ? "Importe esperado de Store Sys (vacío si todavía no está)" : "Importe esperado"}
+        value={expected}
+        onChange={setExpected}
+      />
       <TextField label="Referencia (opcional)" value={reference} onChange={setReference} maxLength={100} />
       <TextField label="Notas (opcional)" value={notes} onChange={setNotes} multiline />
     </ActionDialog>

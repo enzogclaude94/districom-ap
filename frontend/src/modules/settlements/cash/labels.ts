@@ -54,6 +54,7 @@ export const ACCOUNT_KIND_LABELS: Record<AccountKind, string> = {
   MERCHANDISE_PAYMENTS: "Pagos realizados",
   THIRD_PARTY_REFUNDS: "Pagos realizados",
   OTHER_PAYMENTS: "Pagos realizados",
+  OUTLET_COLLECTIONS: "Cuenta técnica",
 };
 
 /** Accounts that hold money or partner contributions. Technical counterparts never show as available money. */

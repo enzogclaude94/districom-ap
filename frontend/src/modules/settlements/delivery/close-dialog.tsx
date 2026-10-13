@@ -16,7 +16,7 @@ import { parseAmount } from "@/modules/settlements/cash/amount";
 
 import {
   deliveryApi,
-  deliveryPath,
+  settlementPath,
   deliveryQueryKey,
   type AllocationInput,
   type ClosingPreview,
@@ -48,7 +48,7 @@ function Line({ label, value, strong = false }: { label: string; value: string; 
   );
 }
 
-function Amounts({ preview }: { preview: ClosingPreview }) {
+function Amounts({ preview, outlet }: { preview: ClosingPreview; outlet: boolean }) {
   const s = preview.summary;
   return (
     <dl className="rounded-md border border-border px-3 py-2 text-sm" aria-label="Importes del cierre">
@@ -58,7 +58,7 @@ function Amounts({ preview }: { preview: ClosingPreview }) {
       ))}
       <Line label="Transferencias verificadas" value={s.transfers_verified} />
       <Line label="Cheques" value={s.cheques} />
-      <Line label="Pendiente" value={s.pending} />
+      {!outlet && <Line label="Pendiente" value={s.pending} />}
       <Line label="Gastos" value={s.expenses} />
       <Line label="Justificado" value={s.justified} strong />
     </dl>
@@ -85,14 +85,15 @@ export function CloseDialog({
   const nextKey = useRef(1);
   const preview = useQuery({
     queryKey: previewQueryKey(settlement.id),
-    queryFn: () => deliveryApi.preview(settlement.id),
+    queryFn: () => deliveryApi.preview(settlement),
     // The token on screen must be the one of the amounts on screen: never refreshed behind the user's back.
     refetchOnWindowFocus: false,
     staleTime: 0,
   });
   const employees = useQuery({ queryKey: [...deliveryQueryKey, "employees"], queryFn: deliveryApi.employees });
   const [rows, setRows] = useState<Row[]>(() => [
-    { key: 0, target: "EMPLOYEE", employeeId: settlement.employee_id, amount: "", reason: "" },
+    // A delivery's driver is proposed; a boca's responsables are only suggestions, never preloaded (R7-2).
+    { key: 0, target: "EMPLOYEE", employeeId: settlement.employee_id ?? null, amount: "", reason: "" },
   ]);
   const action = useDeliveryAction(`close:${settlement.id}`, (closed) => {
     onClosed(closed);
@@ -110,6 +111,8 @@ export function CloseDialog({
   }
 
   const data = preview.data;
+  const outlet = settlement.type === "OUTLET";
+  const zero = Boolean(data?.administrative_zero);
   const balanced = data?.difference_kind === "BALANCED";
   const toAllocate = data ? toCents(data.amount_to_allocate) : 0;
   const assigned = rows.reduce(
@@ -146,16 +149,20 @@ export function CloseDialog({
         }));
     action.submit(() => ({
       method: "POST",
-      path: deliveryPath(settlement.id, "/close"),
+      path: settlementPath(settlement, "/close"),
       body: { version: data.version, preview_token: data.preview_token, allocations, confirm: true },
-      summary: `Cierre de la rendición (${differenceText(data.difference)})`,
+      summary: zero ? "Cierre administrativo cero" : `Cierre de la rendición (${differenceText(data.difference)})`,
     }));
   };
 
   return (
     <Dialog
       title="Cerrar rendición"
-      description="Revisá los importes. Al confirmar, el efectivo y las transferencias verificadas pasan a Cajas."
+      description={
+        outlet
+          ? "Revisá los importes. Al confirmar, se descuenta el esperado de Cobranzas de boca y el efectivo, las transferencias verificadas, los cheques y los gastos pasan a Cajas."
+          : "Revisá los importes. Al confirmar, el efectivo y las transferencias verificadas pasan a Cajas."
+      }
       onClose={onClose}
       className="sm:max-w-2xl"
     >
@@ -178,7 +185,7 @@ export function CloseDialog({
             </div>
           )}
 
-          <Amounts preview={data!} />
+          <Amounts preview={data!} outlet={outlet} />
 
           {data!.blockers.length > 0 && (
             <div role="alert" className="space-y-1 rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-sm">
@@ -193,12 +200,23 @@ export function CloseDialog({
 
           {data!.close_in_effect && (
             <p className="rounded-md border border-border bg-muted px-3 py-2 text-sm">
-              Al confirmar, el cierre anterior se revierte y este se publica en su lugar, juntos y con la misma fecha de
-              negocio. Hasta entonces, el cierre anterior sigue vigente en Cajas.
+              {data!.close_in_effect.operation_id === null
+                ? "Al confirmar, este cierre reemplaza al cierre en cero vigente; no había nada que revertir en Cajas."
+                : zero
+                  ? "Al confirmar, el cierre anterior se revierte en Cajas y la rendición queda cerrada en cero, sin una operación nueva."
+                  : "Al confirmar, el cierre anterior se revierte y este se publica en su lugar, juntos y con la misma fecha de negocio. Hasta entonces, el cierre anterior sigue vigente en Cajas."}
             </p>
           )}
 
-          {balanced ? (
+          {zero ? (
+            <p
+              className="flex items-center gap-2 rounded-md border border-success/30 bg-success-soft px-3 py-2 text-sm font-medium text-success"
+              data-testid="administrative-zero"
+            >
+              <CheckCircle2 className="size-4" aria-hidden />
+              Rendición de $0 sin movimientos: se cierra sin operación en Cajas (cierre administrativo cero).
+            </p>
+          ) : balanced ? (
             <p
               className="flex items-center gap-2 rounded-md border border-success/30 bg-success-soft px-3 py-2 text-sm font-medium text-success"
               data-testid="balanced"
@@ -209,6 +227,7 @@ export function CloseDialog({
           ) : (
             <Allocations
               preview={data!}
+              outlet={outlet}
               rows={rows}
               employees={employees.data ?? []}
               isAdmin={isAdmin}
@@ -243,6 +262,7 @@ export function CloseDialog({
 
 function Allocations({
   preview,
+  outlet,
   rows,
   employees,
   isAdmin,
@@ -253,6 +273,7 @@ function Allocations({
   remove,
 }: {
   preview: ClosingPreview;
+  outlet: boolean;
   rows: Row[];
   employees: Person[];
   isAdmin: boolean;
@@ -276,6 +297,13 @@ function Allocations({
             : "Repartilo entre uno o varios empleados: queda a su favor en su cuenta interna."}
           {isAdmin && " Como administrador, también podés asignar una parte a la empresa, con motivo."}
         </p>
+        {outlet && (
+          <p className="text-sm text-muted-foreground" data-testid="close-responsible-suggestions">
+            {preview.responsible_suggestions?.length
+              ? `Responsables de la boca ese día (sugerencia): ${preview.responsible_suggestions.map((p) => p.full_name).join(", ")}. Podés elegir a cualquier empleado.`
+              : "La boca no tenía responsables asignados ese día. Podés elegir a cualquier empleado."}
+          </p>
+        )}
       </div>
       <ul className="space-y-3">
         {rows.map((row, index) => (
