@@ -59,6 +59,13 @@ class InEffect:
 # --- load -----------------------------------------------------------------------------------------
 
 
+def not_enabled_for_outlets() -> AppError:
+    """A boca de expendio has no pending collections (Enzo's D4); the database refuses them too (0023)."""
+    return AppError(
+        422, "pending_not_enabled_for_outlets", "La rendición de boca de expendio no admite pendientes de cobro."
+    )
+
+
 def create(db: Session, actor: User, settlement_id: int, body: s.PendingIn) -> service.Created:
     customer = _clean_customer(body.customer_name)
     reason = _clean_reason(body.reason)
@@ -80,9 +87,13 @@ def create(db: Session, actor: User, settlement_id: int, body: s.PendingIn) -> s
         return service.Created(existing.id, created=False)
 
     settlement = service.lock_open(db, settlement_id)
+    if not service.profile(settlement).pending_collections:
+        raise not_enabled_for_outlets()
     responsible = settlement.employee_id
     if body.responsible_employee_id is not None and body.responsible_employee_id != settlement.employee_id:
         responsible = active_employee(db, body.responsible_employee_id).id
+    if responsible is None:  # a delivery settlement always has its driver; kept for the type checker
+        raise not_enabled_for_outlets()
     _check_expected_date(settlement, body.expected_date)
     pending = PendingCollection(
         origin_type="SETTLEMENT",

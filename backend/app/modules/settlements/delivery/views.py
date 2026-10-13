@@ -1,6 +1,7 @@
 """Responses of the delivery settlements API, built from the rows and the backend totals."""
 
 from collections.abc import Iterable
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -37,6 +38,19 @@ from app.platform.vehicles.models import Vehicle
 
 def settlement(db: Session, settlement_id: int) -> s.SettlementOut:
     row = service.get(db, settlement_id)
+    if row.employee_id is None or row.expected_amount is None:  # never for DELIVERY (identity_by_type)
+        raise service.not_found()
+    employee = db.get(Employee, row.employee_id)
+    return s.SettlementOut(
+        **board(db, row),
+        employee_id=row.employee_id,
+        employee_name=employee.full_name if employee else "",
+        expected_amount=row.expected_amount,
+    )
+
+
+def board(db: Session, row: Settlement) -> dict[str, Any]:
+    """Everything a settlement shows whatever its type: its load, totals, financial state and close."""
     lines = service.count_lines(db, row.id)
     added = additions.of(db, row.id)
     sent = transfers.of(db, row.id)
@@ -46,7 +60,7 @@ def settlement(db: Session, settlement_id: int) -> s.SettlementOut:
     totals = summary.totals(db, [row.id])[row.id]
     difference = closing.current_difference(db, row)
     allocated = closing.allocations_of(db, [difference.id] if difference else [])
-    in_effect = closing.close_of(db, row.current_close_operation_id) if row.current_close_operation_id else None
+    in_effect = closing.closing_in_effect(db, row)
 
     users = _user_names(
         db,
@@ -63,7 +77,6 @@ def settlement(db: Session, settlement_id: int) -> s.SettlementOut:
     )
     accounts = {a.account_id: a.name for a in ledger.account_balances(db, include_inactive=True)}
     categories = {c.id: c for c in db.scalars(select(ExpenseCategory))}
-    employee = db.get(Employee, row.employee_id)
     fuel_vehicles = {
         v.id: v for v in db.scalars(select(Vehicle).where(Vehicle.id.in_({x.vehicle_id for x in loads.values()})))
     }
@@ -72,25 +85,22 @@ def settlement(db: Session, settlement_id: int) -> s.SettlementOut:
         for e in db.scalars(select(Employee).where(Employee.id.in_({x.employee_id for x in loads.values()})))
     }
 
-    return s.SettlementOut(
-        id=row.id,
-        type=row.type,
-        business_date=row.business_date,
-        employee_id=row.employee_id,
-        employee_name=employee.full_name if employee else "",
-        sequence_number=row.sequence_number,
-        expected_amount=row.expected_amount,
-        expected_source=row.expected_source,
-        external_reference=row.external_reference,
-        notes=row.notes,
-        status=row.status,
-        version=row.version,
-        created_by=row.created_by,
-        created_by_name=users[row.created_by],
-        created_at=row.created_at,
-        updated_at=row.updated_at,
-        same_day_settlement_ids=service.same_day(db, row),
-        count_lines=[
+    return {
+        "id": row.id,
+        "type": row.type,
+        "business_date": row.business_date,
+        "sequence_number": row.sequence_number,
+        "expected_source": row.expected_source,
+        "external_reference": row.external_reference,
+        "notes": row.notes,
+        "status": row.status,
+        "version": row.version,
+        "created_by": row.created_by,
+        "created_by_name": users[row.created_by],
+        "created_at": row.created_at,
+        "updated_at": row.updated_at,
+        "same_day_settlement_ids": service.same_day(db, row),
+        "count_lines": [
             s.CountLineOut(
                 denomination_code=line.denomination_code,
                 denomination_value=line.denomination_value,
@@ -101,7 +111,7 @@ def settlement(db: Session, settlement_id: int) -> s.SettlementOut:
             )
             for line in lines
         ],
-        additions=[
+        "additions": [
             s.AdditionOut(
                 id=a.id,
                 amount=a.amount,
@@ -119,7 +129,7 @@ def settlement(db: Session, settlement_id: int) -> s.SettlementOut:
             )
             for a in added
         ],
-        transfers=[
+        "transfers": [
             s.TransferOut(
                 id=t.id,
                 amount=t.amount,
@@ -149,7 +159,7 @@ def settlement(db: Session, settlement_id: int) -> s.SettlementOut:
             )
             for t in sent
         ],
-        expenses=[
+        "expenses": [
             s.ExpenseOut(
                 id=e.id,
                 category_id=e.category_id,
@@ -170,21 +180,21 @@ def settlement(db: Session, settlement_id: int) -> s.SettlementOut:
             )
             for e in spent
         ],
-        pending_collections=pending_views.items(db, pending_service.of(db, row.id)),
-        cheques=cheque_views.items(db, cheque_service.of(db, row.id)),
-        summary=_summary(totals, accounts),
-        financial_state=closing.financial_state(row),
-        financial_state_detail=closing.financial_state_detail(row),
-        close_in_effect=_close_ref(in_effect),
-        closed_by=row.closed_by,
-        closed_by_name=users[row.closed_by] if row.closed_by else None,
-        closed_at=row.closed_at,
-        reopened_by=row.reopened_by,
-        reopened_by_name=users[row.reopened_by] if row.reopened_by else None,
-        reopened_at=row.reopened_at,
-        reopen_reason=row.reopen_reason,
-        current_difference=_difference(db, difference, allocated, users) if difference else None,
-    )
+        "pending_collections": pending_views.items(db, pending_service.of(db, row.id)),
+        "cheques": cheque_views.items(db, cheque_service.of(db, row.id)),
+        "summary": summary_out(totals, accounts),
+        "financial_state": closing.financial_state(row),
+        "financial_state_detail": closing.financial_state_detail(row),
+        "close_in_effect": close_ref(in_effect),
+        "closed_by": row.closed_by,
+        "closed_by_name": users[row.closed_by] if row.closed_by else None,
+        "closed_at": row.closed_at,
+        "reopened_by": row.reopened_by,
+        "reopened_by_name": users[row.reopened_by] if row.reopened_by else None,
+        "reopened_at": row.reopened_at,
+        "reopen_reason": row.reopen_reason,
+        "current_difference": _difference(db, difference, allocated, users) if difference else None,
+    }
 
 
 def closing_preview(db: Session, settlement_id: int) -> s.ClosingPreviewOut:
@@ -192,18 +202,19 @@ def closing_preview(db: Session, settlement_id: int) -> s.ClosingPreviewOut:
     plan = preview.plan
     row = plan.settlement
     accounts = {a.account_id: a for a in ledger.account_balances(db, include_inactive=True)}
-    in_effect = closing.close_of(db, row.current_close_operation_id) if row.current_close_operation_id else None
+    in_effect = closing.closing_in_effect(db, row)
     portfolio = ledger.system_account_id(db, "cheque_portfolio")
     return s.ClosingPreviewOut(
         settlement_id=row.id,
         version=row.version,
         status=row.status,
         financial_state=closing.financial_state(row),
-        summary=_summary(plan.totals, {a.account_id: a.name for a in accounts.values()}),
+        summary=summary_out(plan.totals, {a.account_id: a.name for a in accounts.values()}),
         difference=plan.difference,
         difference_kind=plan.totals.difference_kind,
         amount_to_allocate=abs(plan.difference),
         blockers=preview.blockers,
+        administrative_zero=plan.administrative_zero,
         preview_token=preview.token,
         legs=[
             s.LegOut(
@@ -217,7 +228,7 @@ def closing_preview(db: Session, settlement_id: int) -> s.ClosingPreviewOut:
         ],
         pending_collections=pending_views.items(db, pending_service.of(db, row.id)),
         cheques=cheque_views.items(db, cheque_service.of(db, row.id)),
-        close_in_effect=_close_ref(in_effect),
+        close_in_effect=close_ref(in_effect),
     )
 
 
@@ -227,7 +238,7 @@ def history(db: Session, settlement_id: int) -> s.HistoryOut:
     diffs = closing.differences(db, row.id)
     allocated = closing.allocations_of(db, [d.id for d in diffs])
     reopened = closing.reopenings(db, row.id)
-    details = {c.operation_id: ledger.operation_detail(db, c.operation_id) for c in closings}
+    details = {c.operation_id: ledger.operation_detail(db, c.operation_id) for c in closings if c.operation_id}
     users = _user_names(
         db,
         [c.closed_by for c in closings] + [r.reopened_by for r in reopened] + _difference_users(diffs, allocated),
@@ -241,29 +252,7 @@ def history(db: Session, settlement_id: int) -> s.HistoryOut:
         status=row.status,
         financial_state=closing.financial_state(row),
         closings=[
-            s.ClosingOut(
-                settlement_version=c.settlement_version,
-                operation_id=c.operation_id,
-                reversal_operation_id=c.reversal_operation_id,
-                reversed_by_operation_id=details[c.operation_id].reversed_by_operation_id,
-                in_effect=c.operation_id == row.current_close_operation_id,
-                closed_by=c.closed_by,
-                closed_by_name=users[c.closed_by],
-                closed_at=c.closed_at,
-                business_date=details[c.operation_id].business_date,
-                legs=[
-                    s.LegOut(
-                        account_id=entry.account_id,
-                        account_name=entry.account_name,
-                        account_kind=entry.account_kind,
-                        employee_id=employees.get(entry.account_id),
-                        cheque_id=entry.cheque_id,
-                        amount=entry.amount,
-                    )
-                    for entry in details[c.operation_id].entries
-                ],
-            )
-            for c in closings
+            _closing(c, details[c.operation_id] if c.operation_id else None, row, users, employees) for c in closings
         ],
         reopenings=[
             s.ReopeningOut(
@@ -281,6 +270,41 @@ def history(db: Session, settlement_id: int) -> s.HistoryOut:
     )
 
 
+def _closing(
+    c: SettlementClosing,
+    detail: ledger.OperationDetail | None,
+    row: Settlement,
+    users: dict[int, str],
+    employees: dict[int, int],
+) -> s.ClosingOut:
+    """One close of the history. An administrative zero close (R7-2) has no operation: no legs, its own
+    snapshot, dated on the settlement's business day."""
+    return s.ClosingOut(
+        settlement_version=c.settlement_version,
+        kind="ADMINISTRATIVE_ZERO" if c.kind == "ADMINISTRATIVE_ZERO" else "FINANCIAL",
+        operation_id=c.operation_id,
+        reversal_operation_id=c.reversal_operation_id,
+        reversed_by_operation_id=detail.reversed_by_operation_id if detail else None,
+        in_effect=c.id == row.current_closing_id,
+        closed_by=c.closed_by,
+        closed_by_name=users[c.closed_by],
+        closed_at=c.closed_at,
+        business_date=detail.business_date if detail else row.business_date,
+        legs=[
+            s.LegOut(
+                account_id=entry.account_id,
+                account_name=entry.account_name,
+                account_kind=entry.account_kind,
+                employee_id=employees.get(entry.account_id),
+                cheque_id=entry.cheque_id,
+                amount=entry.amount,
+            )
+            for entry in (detail.entries if detail else [])
+        ],
+        snapshot={str(k): str(v) for k, v in c.snapshot.items()} if c.snapshot else None,
+    )
+
+
 def items(db: Session, rows: Iterable[tuple[Settlement, str]]) -> list[s.SettlementItem]:
     rows = list(rows)
     totals = summary.totals(db, [row.id for row, _ in rows])
@@ -289,10 +313,10 @@ def items(db: Session, rows: Iterable[tuple[Settlement, str]]) -> list[s.Settlem
             id=row.id,
             type=row.type,
             business_date=row.business_date,
-            employee_id=row.employee_id,
+            employee_id=row.employee_id or 0,  # the delivery list: always its driver
             employee_name=name,
             sequence_number=row.sequence_number,
-            expected_amount=row.expected_amount,
+            expected_amount=row.expected_amount or 0,  # DELIVERY: always > 0
             external_reference=row.external_reference,
             status=row.status,
             version=row.version,
@@ -350,7 +374,7 @@ def fuel_out(
     )
 
 
-def _summary(totals: summary.Totals, accounts: dict[int, str]) -> s.Summary:
+def summary_out(totals: summary.Totals, accounts: dict[int, str]) -> s.Summary:
     return s.Summary(
         expected=totals.expected,
         cash_counted=totals.cash_counted,
@@ -380,10 +404,15 @@ def _summary(totals: summary.Totals, accounts: dict[int, str]) -> s.Summary:
     )
 
 
-def _close_ref(row: SettlementClosing | None) -> s.CloseRef | None:
+def close_ref(row: SettlementClosing | None) -> s.CloseRef | None:
     if row is None:
         return None
-    return s.CloseRef(operation_id=row.operation_id, settlement_version=row.settlement_version, closed_at=row.closed_at)
+    return s.CloseRef(
+        operation_id=row.operation_id,
+        kind="ADMINISTRATIVE_ZERO" if row.kind == "ADMINISTRATIVE_ZERO" else "FINANCIAL",
+        settlement_version=row.settlement_version,
+        closed_at=row.closed_at,
+    )
 
 
 def _difference_users(diffs: list[SettlementDifference], allocated: dict[int, list[DifferenceAllocation]]) -> list[int]:

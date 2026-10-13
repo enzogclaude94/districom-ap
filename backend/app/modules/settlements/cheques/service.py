@@ -361,6 +361,30 @@ def publish(
             )
 
 
+def withdraw_published(
+    db: Session,
+    actor: User,
+    settlement: Settlement,
+    cheques: Sequence[Cheque],
+    previous_close_id: int,
+    reversal_operation_id: int,
+) -> None:
+    """Record that the cheques of the previous close left the portfolio with its reversal, when the settlement
+    is closed again without a ledger operation (an OUTLET settlement corrected to $0, R7-2)."""
+    by_id = {c.id: c for c in cheques}
+    for cheque_id, amount in sorted(in_effect(db, previous_close_id).items()):
+        record_event(
+            db,
+            actor,
+            by_id[cheque_id],
+            "WITHDRAWN",
+            {"amount": service.money(amount)},
+            None,
+            settlement=settlement,
+            operation_id=reversal_operation_id,
+        )
+
+
 def preview_rows(db: Session, settlement_id: int) -> list[list[Any]]:
     """What of the cheques a closing preview depends on, sorted by id: any material change makes it stale."""
     rows = of(db, settlement_id)

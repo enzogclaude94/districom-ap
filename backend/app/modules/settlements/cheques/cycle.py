@@ -891,6 +891,13 @@ def _responsible(db: Session, cheque: Cheque, chosen: int | None) -> int:
     if cheque.settlement_id is not None:
         settlement = db.get(Settlement, cheque.settlement_id)
         assert settlement is not None  # foreign key
+        if settlement.employee_id is None:  # a boca settlement has no driver to default to (R7-2)
+            raise AppError(
+                422,
+                "responsible_required",
+                "El cheque vino de una rendición de boca de expendio: indicá qué empleado se ocupa de cobrar el "
+                "pendiente.",
+            )
         return settlement.employee_id
     if cheque.origin_pending_id is not None:
         paid = db.get(PendingCollection, cheque.origin_pending_id)

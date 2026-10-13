@@ -15,6 +15,9 @@ Text500 = Annotated[str, Field(max_length=500)]
 # NOT_CLOSED: never closed. CLOSED: closed, its close in effect in the ledger. BEING_CORRECTED: reopened;
 # its last close is still in effect in Cajas until the new close is confirmed.
 FinancialState = Literal["NOT_CLOSED", "CLOSED", "BEING_CORRECTED"]
+# FINANCIAL: the close published a SETTLEMENT_CLOSE. ADMINISTRATIVE_ZERO: an OUTLET settlement of $0 without
+# movements, closed without any ledger operation (R7-2).
+ClosingKind = Literal["FINANCIAL", "ADMINISTRATIVE_ZERO"]
 
 
 class StrictIn(BaseModel):
@@ -307,7 +310,9 @@ class ReopenIn(StrictIn):
 
 
 class CloseRef(BaseModel):
-    operation_id: int
+    # Null for an administrative zero close (R7-2), which has no ledger operation.
+    operation_id: int | None
+    kind: ClosingKind = "FINANCIAL"
     settlement_version: int
     closed_at: datetime
 
@@ -340,6 +345,8 @@ class ClosingPreviewOut(BaseModel):
     difference_kind: Literal["SHORTAGE", "SURPLUS", "BALANCED"]
     amount_to_allocate: Money
     blockers: list[Blocker]
+    # An OUTLET settlement of $0 without movements: the close is administrative, without a ledger operation.
+    administrative_zero: bool = False
     legs: list[LegOut]
     # What the close would publish per pending (the load) next to what is in effect now.
     pending_collections: list[PendingOut]
@@ -377,7 +384,9 @@ class DifferenceOut(BaseModel):
 
 class ClosingOut(BaseModel):
     settlement_version: int
-    operation_id: int
+    kind: ClosingKind = "FINANCIAL"
+    # Null for an administrative zero close (R7-2): it published nothing.
+    operation_id: int | None
     # Reversal of the previous close, published together with this one (null for the first close).
     reversal_operation_id: int | None
     # Reversal that undid this close when a later version was closed.
@@ -388,6 +397,8 @@ class ClosingOut(BaseModel):
     closed_at: datetime
     business_date: date
     legs: list[LegOut]
+    # What an administrative zero close certified (every total at $0); null for a financial close.
+    snapshot: dict[str, str] | None = None
 
 
 class ReopeningOut(BaseModel):
@@ -397,8 +408,9 @@ class ReopeningOut(BaseModel):
     reopened_by: int
     reopened_by_name: str
     reopened_at: datetime
-    # The close that stayed in effect in Cajas while the settlement was corrected.
-    close_operation_id: int
+    # The close that stayed in effect in Cajas while the settlement was corrected; null when it was an
+    # administrative zero close (R7-2).
+    close_operation_id: int | None
 
 
 class HistoryOut(BaseModel):

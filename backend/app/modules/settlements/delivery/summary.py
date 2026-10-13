@@ -45,6 +45,9 @@ class BoxTotals:
 @dataclass
 class Totals:
     expected: Decimal
+    # An OUTLET settlement whose Store Sys amount is not loaded yet (R7-2): `expected` is 0 here and the
+    # difference means nothing until it is loaded; the close requires it.
+    expected_missing: bool = False
     by_box: dict[int, BoxTotals] = field(default_factory=lambda: defaultdict(BoxTotals))
     transfers: dict[str, Decimal] = field(default_factory=lambda: defaultdict(lambda: ZERO))
     declared_transfers_count: int = 0
@@ -86,7 +89,7 @@ def totals(db: Session, settlement_ids: Sequence[int]) -> dict[int, Totals]:
         return {}
     ids = list(settlement_ids)
     result = {
-        sid: Totals(expected=expected)
+        sid: Totals(expected=ZERO if expected is None else expected, expected_missing=expected is None)
         for sid, expected in db.execute(select(Settlement.id, Settlement.expected_amount).where(Settlement.id.in_(ids)))
     }
     counted = db.execute(
