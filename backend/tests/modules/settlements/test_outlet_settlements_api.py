@@ -399,3 +399,17 @@ def test_outlet_collections_is_not_on_the_cajas_board(r: Roles, centro: int, ids
     )
     assert response.status_code == 422, response.text
     assert balances(r.admin)["outlet_collections"] == "0.00"
+
+
+def test_a_rejected_boca_cheque_asks_who_collects_it(r: Roles, centro: int, employee: Callable[[str], int]) -> None:
+    """A boca has no driver to default to: the rejection's new pending needs a responsible chosen by hand."""
+    from tests.modules.settlements.test_cheque_cycle_api import deposited, pending, reject, rejected
+
+    ana = employee("Ana Cajera")
+    sid = create(r.operator, centro, "50000")
+    cheque = r.operator.post(f"{OUT}/{sid}/cheques", json=physical(bank(r.operator))).json()["cheques"][-1]["id"]
+    assert close(r.operator, sid).status_code == 201
+    deposited(r.operator, [cheque], on=today())
+    assert error(reject(r.operator, cheque, today())) == (422, "responsible_required")
+    owed = pending(r.operator, rejected(r.operator, cheque, today(), responsible=ana)["pending_id"])
+    assert (owed["responsible_employee_id"], owed["settlement_id"]) == (ana, None)
