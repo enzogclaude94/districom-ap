@@ -66,7 +66,8 @@ TRUNCATED_TABLES = (
     "settlements.expense_categories",
     "settlements.settlements",
 )
-# Rendiciones accounts seeded by migrations 0005 and 0008-0010; tests may add others, removed afterwards.
+# Rendiciones accounts seeded by migrations 0005, 0008-0010, 0012, 0019 and 0023; tests may add others,
+# removed afterwards.
 # The official bank catalog as migration 0011 seeds it (JSON), restored after each test.
 SEEDED_BANKS = "[]"
 SEEDED_ACCOUNTS = (
@@ -85,6 +86,7 @@ SEEDED_ACCOUNTS = (
     "merchandise_payments",
     "third_party_refunds",
     "other_payments",
+    "outlet_collections",
 )
 
 

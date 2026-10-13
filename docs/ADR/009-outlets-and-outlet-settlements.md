@@ -3,7 +3,7 @@
 - Estado: Aceptado · 2026-10-11 (aprobación de la arquitectura de R7 por Enzo, alternativa B, decisiones D1–D9 y ajustes 1–5)
 - Amplía: ADR 006 (plataforma modular), ADR 007 (módulo Rendiciones) y ADR 008 (ledger). No los reemplaza.
 
-Este ADR separa lo **DECIDIDO** (vale para todo R7) de lo **IMPLEMENTADO** (lo que ya existe en el código). Al cierre de R7‑1 solo están implementados el maestro de bocas y los responsables; todo lo demás está decidido y llega en R7‑2, R7‑3 y R7‑4.
+Este ADR separa lo **DECIDIDO** (vale para todo R7) de lo **IMPLEMENTADO** (lo que ya existe en el código). Al cierre de R7‑2 están implementados el maestro de bocas, los responsables y la rendición de boca sin entregas parciales (con el cierre administrativo cero); las entregas parciales y `OUTLET_ADVANCES` están decididas y llegan en R7‑3.
 
 ## Contexto
 Una boca de expendio es un punto de venta que rinde lo cobrado en el día, con entregas parciales de efectivo durante la jornada. Enzo pidió la propuesta completa antes de cualquier código (`PROPUESTA_R7_BOCA_DE_EXPENDIO.md`) y aprobó la alternativa B: la boca rinde con la misma rendición que el reparto, y lo entregado durante el día se lleva en una cuenta técnica por boca, sin una caja ficticia.
@@ -16,7 +16,7 @@ Una boca de expendio es un punto de venta que rinde lo cobrado en el día, con e
 - **Nombre:** se corrige. `name_key` (minúsculas, sin acentos ni puntuación, espacios simples) es **único**: dos bocas no pueden tener nombres operativamente iguales. Si aparece un caso real de homónimos, se consulta a Enzo antes de relajar la invariante.
 - Sin DELETE (API y base). Auditoría `platform.outlet.{created, name_changed, description_changed, deactivated, reactivated}`; el código nunca aparece en un cambio.
 - Lectura para todo usuario autenticado; alta, corrección y (des)activación para el admin de plataforma. Pantalla `/bocas`.
-- **Boca inactiva (ajuste 1):** no abre rendiciones nuevas ni suma responsables. Lo abierto (OPEN o BEING_CORRECTED) se termina normalmente: entregas, efectivo, transferencias, cheques, gastos, cierre y corrección. Desactivar no se bloquea; la pantalla advierte. *Implementado en R7‑1:* lo que toca a responsables y la advertencia general. *Pendiente (R7‑2):* el bloqueo de apertura y la advertencia con la cantidad de rendiciones abiertas.
+- **Boca inactiva (ajuste 1):** no abre rendiciones nuevas ni suma responsables. Lo abierto (OPEN o BEING_CORRECTED) se termina normalmente: entregas, efectivo, transferencias, cheques, gastos, cierre y corrección. Desactivar no se bloquea; la pantalla advierte. *Implementado en R7‑1:* lo que toca a responsables y la advertencia general. *Implementado en R7‑2:* el bloqueo de apertura (servicio y trigger `trg_settlements_outlet_active`, con la boca tomada `FOR SHARE`) y «N rendiciones abiertas» en la ficha de la boca.
 
 ### 2. Los responsables son del módulo — DECIDIDO · IMPLEMENTADO (R7‑1, `0022`)
 - `settlements.outlet_responsibilities`: `outlet_id`, `employee_id`, `valid_from`, `valid_to` (ambos **inclusive**), `created_by`, `ended_by`, `ended_at`, `end_reason`.
@@ -26,16 +26,20 @@ Una boca de expendio es un punto de venta que rinde lo cobrado en el día, con e
 - Nueva responsabilidad: boca activa y empleado activo. Una ya abierta sigue visible y se puede terminar aunque después se desactive la boca o el empleado.
 - Vigente el día `d`: `valid_from <= d <= valid_to` (sin tope mientras `valid_to` es nulo). API `GET /settlements/outlets/{id}/responsibilities?on=YYYY-MM-DD`.
 
-### 3. La rendición de boca reutiliza `settlements.settlements` — DECIDIDO (R7‑2), no implementado
+### 3. La rendición de boca reutiliza `settlements.settlements` — DECIDIDO · IMPLEMENTADO (R7‑2, `0023`)
 - `type = OUTLET` en la misma tabla y el mismo ciclo (OPEN → CLOSED → BEING_CORRECTED → CLOSED), con la misma lógica de conteo, transferencias, cheques, gastos, diferencia y cierre atómico al ledger.
 - **Importe esperado (D2):** para OUTLET puede ser nulo mientras está abierta y es obligatorio para cerrar; puede ser 0. Abierta: `expected_amount IS NULL OR >= 0`; para cerrar: `IS NOT NULL AND >= 0`. La regla de DELIVERY (`> 0`) no cambia.
 - **Sin pendientes (D4):** la base lo prohíbe (`pending_not_enabled_for_outlets`); sin sección en pantalla; R3 no se modifica.
 - **Diferencias (D5):** la misma cuenta «Diferencias de rendición»; sin `OUTLET_DIFFERENCES`. La asignación es siempre explícita, nunca se reparte sola entre responsables (D3).
 - **Cheques (D8):** entran a Cartera al cierre; no hay entrega parcial de cheques.
+- **Sin combustible (R7‑2):** un gasto de boca nunca es `FUEL` (`fuel_not_allowed_for_outlet`, servicio y base).
+- **Identidad:** OUTLET lleva `outlet_id` y `employee_id` nulo; DELIVERY al revés (`ck_settlements_identity_by_type`). Numeración por boca y día (`uq_settlements_outlet_sequence`, parcial) separada de la de reparto (`uq_settlements_sequence`, ahora parcial a DELIVERY con el mismo nombre). La Rendición 2 del mismo día exige confirmación explícita (409 `additional_settlement_confirmation_required`).
+- **Responsables:** los del `business_date` se muestran como sugerencia en el detalle y en la vista previa del cierre; nunca precargan un importe, nunca bloquean el cierre y se puede asignar a un empleado que no lo era ese día.
+- **Cierre administrativo cero (R7‑2‑Q1, respuesta de Enzo):** una rendición OUTLET con esperado 0, sin efectivo contado, sin agregados, sin transferencias verificadas (ni declaradas), sin cheques que justifiquen o esperen verificación, sin gastos, sin pendientes, sin entregas (R7‑3), sin diferencia y sin un cierre propio vigente en el ledger **se cierra sin operación de ledger**: no hay patas de $0, ninguna cuenta se mueve. Quedan `settlement_closings` (`kind = ADMINISTRATIVE_ZERO`, `operation_id` nulo, `snapshot` con los importes en "0.00"), la versión, el token de vista previa, quién y cuándo, la auditoría, el estado CLOSED y la historia. `closed_has_close` no se relaja en general: DELIVERY CLOSED ⇒ operación financiera (`ck_settlements_delivery_close_financial`); OUTLET CLOSED ⇒ operación o un cierre documental vigente que la base verifica completo al commit (`settlements.assert_zero_close`). Reabrir un cierre cero no revierte nada; volver a cerrar en cero es otro cierre administrativo; si aparece actividad, el nuevo cierre es un `SETTLEMENT_CLOSE` normal. Financiero → reapertura → corregido a cero: se revierte la operación anterior (`ledger.withdraw_document_operation`, en la fecha original) y el nuevo cierre es administrativo.
 
-### 4. Fondos: cuentas técnicas, sin caja ficticia — DECIDIDO (R7‑2/R7‑3), no implementado
+### 4. Fondos: cuentas técnicas, sin caja ficticia — DECIDIDO · IMPLEMENTADO `OUTLET_COLLECTIONS` (R7‑2); `OUTLET_ADVANCES` y entregas en R7‑3
 - **Sin `CASH_BOX` por boca (D1, modelo 2).** El efectivo final del cierre va a Caja principal o a Caja de cambio.
-- **«Cobranzas de boca» (`OUTLET_COLLECTIONS`, D9):** una cuenta técnica; la pata del importe esperado del cierre OUTLET.
+- **«Cobranzas de boca» (`OUTLET_COLLECTIONS`, D9):** una cuenta técnica; la pata del importe esperado del cierre OUTLET (−esperado; sin pata cuando el esperado es 0). *Implementado en R7‑2:* sembrada por `0023`, puede ser negativa, fuera del tablero de Cajas; la mueven solo el `SETTLEMENT_CLOSE` de una OUTLET (negativo) y su reverso (positivo): regla del ledger (`at_most_one_of`), trigger por pata `trg_ledger_entries_outlet_collections` y trigger diferido `trg_financial_operations_outlet_close_collections` (exactamente −esperado, nunca «Cobranzas de reparto»). El cierre cero no la toca.
 - **«Entregas a cuenta — {Boca}» (`OUTLET_ADVANCES`, D9):** una por boca.
 - **Entrega parcial (`OUTLET_REMITTANCE`):** `OUTLET_ADVANCES` −X, caja destino +X. Destino: cualquier `CASH_BOX` activa (por defecto Caja principal); nunca Banco ni una cuenta técnica (D7). Una entrega que supera el esperado no se bloquea: se confirma con «Con esta entrega lo entregado supera el importe esperado en $X.» (también si el esperado es nulo, D6).
 - **Cuenta técnica cerrada (ajuste 2):** solo tocan `OUTLET_ADVANCES` las `OUTLET_REMITTANCE` (−X), el `SETTLEMENT_CLOSE` de OUTLET (+ el total exacto de las entregas vigentes) y sus REVERSAL documentales. Prohibido: traspasos genéricos, ajustes manuales, saldo inicial, extracción, depósito, PAYMENT, DIRECT_EXPENSE, operaciones de socios y cualquier otra. Cajas no muestra acciones sobre ella. El saldo negativo es válido mientras haya entregas sin cerrar; la excepción sale de reglas exactas por operación y documento, no solo de `allow_negative = true`. Positivo solo transitoriamente durante BEING_CORRECTED; al confirmar el nuevo cierre vuelve a ser coherente. `OUTLET_COLLECTIONS` tiene la misma disciplina: solo los cierres OUTLET autorizados y sus reversos.
@@ -48,8 +52,8 @@ Todo movimiento de valores de la boca pasa por `ledger/service.py` (ADR 008). Ni
 ## División en PRs
 | PR | Contenido | Estado |
 |---|---|---|
-| R7‑1 | Maestro de bocas y responsables (`0021`, `0022`) | Implementado, en revisión |
-| R7‑2 | Rendición OUTLET (esperado nulo/≥ 0, sin pendientes, cuentas técnicas, cierre) | Decidido, sin código |
+| R7‑1 | Maestro de bocas y responsables (`0021`, `0022`) | Implementado y aprobado (PR #34) |
+| R7‑2 | Rendición OUTLET sin entregas parciales (esperado nulo/≥ 0, sin pendientes ni combustible, «Cobranzas de boca», cierre, cierre administrativo cero; `0023`) | Implementado, en revisión |
 | R7‑3 | Entregas parciales `OUTLET_REMITTANCE` y su reverso | Decidido, sin código |
 | R7‑4 | Pantallas de boca, móvil, ayuda del conteo final y E2E de punta a punta | Decidido, sin código |
 

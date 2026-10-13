@@ -3,7 +3,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, ArrowLeft, CheckCircle2, Info, Lock, RotateCcw } from "lucide-react";
 import Link from "next/link";
-import { useState, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useState, type ReactNode } from "react";
 
 import { ErrorState } from "@/components/common/error-state";
 import { PageHeader } from "@/components/common/page-header";
@@ -13,21 +14,25 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { authApi, currentUserQueryKey, moduleRole, roleAtLeast } from "@/lib/api/auth";
+import { ApiError } from "@/lib/api/client";
 import { cn } from "@/lib/cn";
 import { formatDate, formatDateTime, formatMoney } from "@/lib/format";
 import { cashApi, cashQueryKey } from "@/modules/settlements/cash/api";
 import { SettlementCheques } from "@/modules/settlements/cheques/settlement-cheques";
+import { outletSettlementApi } from "@/modules/settlements/outlet-settlements/api";
 import { SettlementPendings } from "@/modules/settlements/pending/settlement-pendings";
 
 import {
   deliveryApi,
   deliveryQueryKey,
   FUEL_CODE,
+  settlementHref,
   settlementQueryKey,
   type Addition,
   type Expense,
   type Person,
   type Settlement,
+  type SettlementType,
   type Transfer,
   type TransferStatus,
 } from "./api";
@@ -56,6 +61,12 @@ import { ReopenDialog } from "./reopen-dialog";
 
 export const BEING_CORRECTED_BANNER =
   "Esta rendición está siendo corregida. El cierre anterior continúa vigente en Cajas hasta que confirmes el nuevo cierre.";
+/** The same, when the close in effect is an administrative zero close (R7-2): nothing of it is in Cajas. */
+export const BEING_CORRECTED_ZERO_BANNER =
+  "Esta rendición está siendo corregida. Su cierre en cero sigue vigente, sin movimientos en Cajas, hasta que confirmes el nuevo cierre.";
+export const ZERO_CLOSE_TEXT = "Cierre administrativo cero: rendición de $0 sin movimientos, sin operación en Cajas.";
+
+const isOutlet = (settlement: Settlement) => settlement.type === "OUTLET";
 
 type Open =
   | { kind: "count" | "addition" | "transfer" | "expense" | "edit" | "close" | "reopen" }
@@ -78,9 +89,15 @@ function Stat({ label, value, tone, note }: { label: string; value: ReactNode; t
 function Board({ settlement }: { settlement: Settlement }) {
   const s = settlement.summary;
   const declared = s.declared_transfers_count;
+  const missing = Boolean(s.expected_missing);
   return (
     <section aria-label="Tablero de la rendición" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-      <Stat label="Esperado" value={formatMoney(s.expected)} />
+      <Stat
+        label={isOutlet(settlement) ? "Esperado (Store Sys)" : "Esperado"}
+        value={missing ? <span data-testid="expected-missing">Sin cargar</span> : formatMoney(s.expected)}
+        tone={missing ? "text-warning" : undefined}
+        note={missing && <span className="text-warning">Cargalo antes de cerrar</span>}
+      />
       <Stat label="Efectivo" value={formatMoney(s.cash_total)} />
       <Stat
         label="Transferencias verificadas"
@@ -96,11 +113,11 @@ function Board({ settlement }: { settlement: Settlement }) {
       />
       <Stat label="Cheques" value={formatMoney(s.cheques)} />
       <Stat label="Gastos" value={formatMoney(s.expenses)} />
-      <Stat label="Pendiente" value={formatMoney(s.pending)} />
+      {!isOutlet(settlement) && <Stat label="Pendiente" value={formatMoney(s.pending)} />}
       <Stat label="Justificado" value={formatMoney(s.justified)} />
       <Stat
         label="Diferencia"
-        value={<span data-testid="board-difference">{differenceText(s.difference)}</span>}
+        value={<span data-testid="board-difference">{missing ? "—" : differenceText(s.difference)}</span>}
         tone={
           s.difference_kind === "SHORTAGE"
             ? "text-danger"
@@ -442,7 +459,10 @@ function Load({
 
       <SettlementCheques settlement={settlement} editable={editable} isAdmin={isAdmin} />
 
-      <SettlementPendings settlement={settlement} editable={editable} employees={employees} />
+      {/* A boca has no pending collections (R7-2). */}
+      {!isOutlet(settlement) && (
+        <SettlementPendings settlement={settlement} editable={editable} employees={employees} />
+      )}
     </div>
   );
 }
@@ -464,10 +484,46 @@ function CurrentDifference({ settlement }: { settlement: Settlement }) {
   );
 }
 
-/** `/rendiciones/repartos/[id]`: the fixed board, the load, the close and the history of one settlement. */
-export function SettlementDetail({ settlementId }: { settlementId: number }) {
+function Responsables({ settlement }: { settlement: Settlement }) {
+  const people = settlement.responsible_suggestions ?? [];
+  return (
+    <p className="text-sm text-muted-foreground" data-testid="responsible-suggestions">
+      {people.length === 0
+        ? `La boca no tiene responsables asignados el ${formatDate(settlement.business_date)}.`
+        : `Responsables de la boca el ${formatDate(settlement.business_date)}: ${people.map((p) => p.full_name).join(", ")}. Son una sugerencia para asignar diferencias; nada se reparte solo.`}
+    </p>
+  );
+}
+
+/** A settlement link from elsewhere (a cheque, an expense, Cajas) only knows the id: a boca's opens here. */
+function useOutletRedirect(settlementId: number, error: unknown, type: SettlementType) {
+  const router = useRouter();
+  const notFoundAsDelivery =
+    type === "DELIVERY" && error instanceof ApiError && error.status === 404 && error.code === "settlement_not_found";
+  const outlet = useQuery({
+    queryKey: ["settlements", "outlet-settlements", "detail", settlementId],
+    queryFn: () => outletSettlementApi.get(settlementId),
+    enabled: notFoundAsDelivery,
+    retry: false,
+  });
+  useEffect(() => {
+    if (outlet.data) router.replace(settlementHref(outlet.data));
+  }, [outlet.data, router]);
+  return notFoundAsDelivery && (outlet.isPending || Boolean(outlet.data));
+}
+
+/**
+ * `/rendiciones/repartos/[id]` and `/rendiciones/boca/[id]` (R7-2): the fixed board, the load, the close and
+ * the history of one settlement. A boca has no driver, no pendings and no fuel; its responsables of the day
+ * are shown as suggestions, and a $0 boca without movements closes administratively.
+ */
+export function SettlementDetail({ settlementId, type = "DELIVERY" }: { settlementId: number; type?: SettlementType }) {
   const me = useQuery({ queryKey: currentUserQueryKey, queryFn: authApi.me });
-  const query = useQuery({ queryKey: settlementQueryKey(settlementId), queryFn: () => deliveryApi.get(settlementId) });
+  const query = useQuery({
+    queryKey: settlementQueryKey(settlementId, type),
+    queryFn: () => (type === "OUTLET" ? outletSettlementApi.get(settlementId) : deliveryApi.get(settlementId)),
+  });
+  const redirecting = useOutletRedirect(settlementId, query.error, type);
   const accounts = useQuery({ queryKey: [...cashQueryKey, "accounts"], queryFn: cashApi.accounts });
   const role = moduleRole(me.data, "settlements");
   const canOperate = roleAtLeast(role, "operator");
@@ -491,7 +547,7 @@ export function SettlementDetail({ settlementId }: { settlementId: number }) {
   const [tab, setTab] = useState<"load" | "history">("load");
   const [closedNotice, setClosedNotice] = useState<Settlement | null>(null);
 
-  if (query.isPending) {
+  if (query.isPending || redirecting) {
     return (
       <div className="space-y-3" aria-label="Cargando rendición">
         <Skeleton className="h-10 w-72" />
@@ -507,19 +563,22 @@ export function SettlementDetail({ settlementId }: { settlementId: number }) {
   const boxes = (accounts.data ?? []).filter((account) => account.kind === "CASH_BOX" && account.active);
   const banks = (accounts.data ?? []).filter((account) => account.kind === "BANK" && account.active);
   const close = () => setDialog(null);
+  const outlet = isOutlet(settlement);
+  const who = outlet ? (settlement.outlet_name ?? "") : (settlement.employee_name ?? "");
+  const zeroInEffect = settlement.close_in_effect?.kind === "ADMINISTRATIVE_ZERO";
 
   return (
     <>
       <Link
-        href="/rendiciones/repartos"
+        href={outlet ? "/rendiciones/boca" : "/rendiciones/repartos"}
         className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
       >
         <ArrowLeft className="size-4" aria-hidden />
-        Rendiciones de reparto
+        {outlet ? "Rendiciones de boca" : "Rendiciones de reparto"}
       </Link>
       <PageHeader
-        title={`${settlementTitle(settlement.sequence_number)} · ${settlement.employee_name}`}
-        description={`Fecha ${formatDate(settlement.business_date)}${settlement.external_reference ? ` · Referencia ${settlement.external_reference}` : ""} · Versión ${settlement.version}`}
+        title={`${settlementTitle(settlement.sequence_number)} · ${who}`}
+        description={`${outlet ? "Boca de expendio · " : ""}Fecha ${formatDate(settlement.business_date)}${settlement.external_reference ? ` · Referencia ${settlement.external_reference}` : ""} · Versión ${settlement.version}${outlet && settlement.outlet_active === false ? " · Boca desactivada: esta rendición se puede terminar" : ""}`}
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <Badge tone={FINANCIAL_STATE_TONES[settlement.financial_state]} data-testid="financial-state">
@@ -550,7 +609,7 @@ export function SettlementDetail({ settlementId }: { settlementId: number }) {
         <div role="status" className="flex gap-2 rounded-md border border-warning/40 bg-warning-soft px-4 py-3 text-sm">
           <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden />
           <div className="space-y-1">
-            <p className="font-medium">{BEING_CORRECTED_BANNER}</p>
+            <p className="font-medium">{zeroInEffect ? BEING_CORRECTED_ZERO_BANNER : BEING_CORRECTED_BANNER}</p>
             {settlement.reopened_by_name && settlement.reopened_at && (
               <p>
                 Reabierta por {settlement.reopened_by_name} el {formatDateTime(settlement.reopened_at)}. Motivo:{" "}
@@ -568,8 +627,12 @@ export function SettlementDetail({ settlementId }: { settlementId: number }) {
           className="flex flex-wrap items-center gap-2 rounded-md border border-primary/30 bg-primary-soft px-4 py-3 text-sm"
         >
           <CheckCircle2 className="size-4 text-primary" aria-hidden />
-          <span className="font-medium">Rendición cerrada. El efectivo y las transferencias ya están en Cajas.</span>
-          {closedNotice.close_in_effect && (
+          <span className="font-medium">
+            {closedNotice.close_in_effect?.kind === "ADMINISTRATIVE_ZERO"
+              ? `Rendición cerrada. ${ZERO_CLOSE_TEXT}`
+              : "Rendición cerrada. El efectivo y las transferencias ya están en Cajas."}
+          </span>
+          {closedNotice.close_in_effect?.operation_id != null && (
             <Link
               href={`/rendiciones/cajas/operaciones/${closedNotice.close_in_effect.operation_id}`}
               className="text-primary hover:underline"
@@ -594,7 +657,8 @@ export function SettlementDetail({ settlementId }: { settlementId: number }) {
             <p>
               Cerrada por {settlement.closed_by_name} el{" "}
               {settlement.closed_at ? formatDateTime(settlement.closed_at) : "—"}.{" "}
-              {settlement.close_in_effect && (
+              {zeroInEffect && <span data-testid="zero-close">{ZERO_CLOSE_TEXT}</span>}
+              {settlement.close_in_effect?.operation_id != null && (
                 <Link
                   href={`/rendiciones/cajas/operaciones/${settlement.close_in_effect.operation_id}`}
                   className="text-primary hover:underline"
@@ -610,11 +674,11 @@ export function SettlementDetail({ settlementId }: { settlementId: number }) {
 
       {settlement.same_day_settlement_ids.length > 0 && (
         <p className="text-sm text-muted-foreground">
-          {settlement.employee_name} tiene otras rendiciones el {formatDate(settlement.business_date)}:{" "}
+          {who} tiene otras rendiciones el {formatDate(settlement.business_date)}:{" "}
           {settlement.same_day_settlement_ids.map((id, i) => (
             <span key={id}>
               {i > 0 && ", "}
-              <Link href={`/rendiciones/repartos/${id}`} className="text-primary hover:underline">
+              <Link href={settlementHref({ id, type: settlement.type })} className="text-primary hover:underline">
                 ver rendición
               </Link>
             </span>
@@ -622,6 +686,8 @@ export function SettlementDetail({ settlementId }: { settlementId: number }) {
           .
         </p>
       )}
+
+      {outlet && <Responsables settlement={settlement} />}
 
       <Board settlement={settlement} />
 

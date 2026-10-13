@@ -11,7 +11,7 @@ export const SETTLEMENTS_NAV: NavSection[] = [
     icon: ClipboardList,
     items: [
       { label: "Rendiciones de reparto", href: "/rendiciones/repartos" },
-      { label: "Boca de expendio", href: "/rendiciones/boca", phase: 7 },
+      { label: "Rendiciones de boca", href: "/rendiciones/boca" },
       { label: "Pendientes", href: "/rendiciones/pendientes", indicator: PendingAlertBadge },
     ],
   },

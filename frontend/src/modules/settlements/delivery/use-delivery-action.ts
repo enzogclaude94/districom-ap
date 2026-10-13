@@ -9,7 +9,7 @@ import { chequeQueryKey } from "@/modules/settlements/cheques/api";
 import { newRequestId } from "@/modules/settlements/cash/request-id";
 import { pendingQueryKey } from "@/modules/settlements/pending/api";
 
-import { deliveryApi, deliveryQueryKey, type Settlement } from "./api";
+import { deliveryApi, deliveryQueryKey, outletSettlementQueryKey, type Settlement } from "./api";
 import { deliveryErrorView } from "./errors";
 
 export type Method = "POST" | "PUT" | "PATCH";
@@ -175,7 +175,7 @@ export function useDeliveryAction(slot: string, onDone: (settlement: Settlement)
   return useWriteAction<Settlement>({
     slot,
     write: (request) => deliveryApi.write(request.method, request.path, request.body),
-    invalidate: [deliveryQueryKey, cashQueryKey, pendingQueryKey, chequeQueryKey],
+    invalidate: [deliveryQueryKey, outletSettlementQueryKey, cashQueryKey, pendingQueryKey, chequeQueryKey],
     isUncertain: (error) => Boolean(deliveryErrorView(error).uncertain),
     onDone,
   });

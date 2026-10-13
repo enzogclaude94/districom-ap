@@ -17,7 +17,8 @@ test("platform admin picks Rendiciones and switches back to Comercial", async ({
   await expect(page.getByText("El módulo está habilitado")).toBeVisible();
 
   if (isMobile) await page.getByRole("button", { name: "Abrir menú" }).click();
-  await expect(page.getByTitle("Disponible en la fase R7")).toBeVisible();
+  await expect(page.getByTitle("Disponible en la fase R8")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Rendiciones de boca" })).toHaveAttribute("href", "/rendiciones/boca");
   await expect(page.getByRole("link", { name: "Combustible" })).toHaveAttribute("href", "/rendiciones/combustible");
   await page.getByRole("button", { name: /Cambiar de módulo/ }).click();
   await page.getByRole("navigation", { name: "Módulos" }).getByRole("link", { name: "Inteligencia Comercial" }).click();

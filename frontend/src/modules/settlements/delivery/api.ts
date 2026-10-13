@@ -26,6 +26,8 @@ export interface CashByBox {
 
 export interface Summary {
   expected: string;
+  /** Boca settlements only (R7-2): the Store Sys amount is not loaded yet; `expected` reads 0 meanwhile. */
+  expected_missing?: boolean;
   cash_counted: string;
   cash_additions: string;
   cash_total: string;
@@ -154,8 +156,13 @@ export interface Expense {
   void_reason: string | null;
 }
 
+/** FINANCIAL publishes a ledger operation; ADMINISTRATIVE_ZERO (boca of $0 without movements, R7-2) does not. */
+export type ClosingKind = "FINANCIAL" | "ADMINISTRATIVE_ZERO";
+
 export interface CloseRef {
-  operation_id: number;
+  /** Null for an administrative zero close, which has no operation in Cajas. */
+  operation_id: number | null;
+  kind: ClosingKind;
   settlement_version: number;
   closed_at: string;
 }
@@ -186,14 +193,31 @@ export interface Difference {
   allocations: Allocation[];
 }
 
+export type SettlementType = "DELIVERY" | "OUTLET";
+
+export interface ResponsibleSuggestion {
+  employee_id: number;
+  full_name: string;
+}
+
+/**
+ * A delivery settlement (R2) or a boca settlement (R7-2): the same board. A delivery has its driver and an
+ * expected amount always loaded; a boca has its outlet, the responsables of the day as suggestions and an
+ * expected amount that may still be unknown (null).
+ */
 export interface Settlement {
   id: number;
-  type: string;
+  type: SettlementType;
   business_date: string;
-  employee_id: number;
-  employee_name: string;
+  employee_id?: number;
+  employee_name?: string;
+  outlet_id?: number;
+  outlet_code?: string;
+  outlet_name?: string;
+  outlet_active?: boolean;
+  responsible_suggestions?: ResponsibleSuggestion[];
   sequence_number: number;
-  expected_amount: string;
+  expected_amount: string | null;
   expected_source: string;
   external_reference: string | null;
   notes: string | null;
@@ -254,11 +278,17 @@ export interface ClosingPreview {
   pending_collections: Pending[];
   preview_token: string;
   close_in_effect: CloseRef | null;
+  /** The close will be an administrative zero close: no operation, nothing moves in Cajas (R7-2). */
+  administrative_zero: boolean;
+  /** Boca settlements only: who answered for the boca that day, as suggestions (never preloaded). */
+  responsible_suggestions?: ResponsibleSuggestion[];
 }
 
 export interface Closing {
   settlement_version: number;
-  operation_id: number;
+  kind: ClosingKind;
+  /** Null for an administrative zero close. */
+  operation_id: number | null;
   reversal_operation_id: number | null;
   reversed_by_operation_id: number | null;
   in_effect: boolean;
@@ -267,6 +297,8 @@ export interface Closing {
   closed_at: string;
   business_date: string;
   legs: Leg[];
+  /** What an administrative zero close certified (all amounts "0.00"); null for a financial close. */
+  snapshot: Record<string, string> | null;
 }
 
 export interface Reopening {
@@ -276,7 +308,8 @@ export interface Reopening {
   reopened_by: number;
   reopened_by_name: string;
   reopened_at: string;
-  close_operation_id: number;
+  /** The close that stayed in effect while correcting; null when it was an administrative zero close. */
+  close_operation_id: number | null;
 }
 
 export interface History {
@@ -346,6 +379,14 @@ function query(filters: SettlementFilters) {
 
 export const deliveryPath = (id: number, rest = "") => `/deliveries/${id}${rest}`;
 
+/** API path of a settlement of either type: `/deliveries/{id}…` or `/outlet-settlements/{id}…`. */
+export const settlementPath = (settlement: Pick<Settlement, "id" | "type">, rest = "") =>
+  settlement.type === "OUTLET" ? `/outlet-settlements/${settlement.id}${rest}` : deliveryPath(settlement.id, rest);
+
+/** Screen of a settlement of either type. */
+export const settlementHref = (settlement: Pick<Settlement, "id" | "type">) =>
+  settlement.type === "OUTLET" ? `/rendiciones/boca/${settlement.id}` : `/rendiciones/repartos/${settlement.id}`;
+
 export const deliveryApi = {
   list: (filters: SettlementFilters) => apiFetch<SettlementPage>(`${BASE}/deliveries?${query(filters)}`),
   get: (id: number) => apiFetch<Settlement>(`${BASE}${deliveryPath(id)}`),
@@ -358,12 +399,17 @@ export const deliveryApi = {
   createCategory: (name: string) => send<ExpenseCategory>("POST", "/expense-categories", { name }),
   updateCategory: (id: number, change: { name?: string; active?: boolean }) =>
     send<ExpenseCategory>("PATCH", `/expense-categories/${id}`, change),
-  preview: (id: number) => apiFetch<ClosingPreview>(`${BASE}${deliveryPath(id, "/closing-preview")}`),
-  history: (id: number) => apiFetch<History>(`${BASE}${deliveryPath(id, "/history")}`),
+  preview: (settlement: Pick<Settlement, "id" | "type">) =>
+    apiFetch<ClosingPreview>(`${BASE}${settlementPath(settlement, "/closing-preview")}`),
+  history: (settlement: Pick<Settlement, "id" | "type">) =>
+    apiFetch<History>(`${BASE}${settlementPath(settlement, "/history")}`),
   /** Every write answers with the whole settlement, already recomputed by the backend. */
   write: (method: "POST" | "PUT" | "PATCH", path: string, body: unknown) => send<Settlement>(method, path, body),
 };
 
 /** Everything the delivery screens read; invalidated after every write. */
 export const deliveryQueryKey = ["settlements", "deliveries"] as const;
-export const settlementQueryKey = (id: number) => [...deliveryQueryKey, "detail", id] as const;
+/** Everything the boca screens read (R7-2); invalidated after every write too. */
+export const outletSettlementQueryKey = ["settlements", "outlet-settlements"] as const;
+export const settlementQueryKey = (id: number, type: SettlementType = "DELIVERY") =>
+  [...(type === "OUTLET" ? outletSettlementQueryKey : deliveryQueryKey), "detail", id] as const;

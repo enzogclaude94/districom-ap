@@ -74,18 +74,30 @@ export function timeline(settlement: Settlement, history: History): Event[] {
       at: closing.closed_at,
       rank: 2,
       key: `close-${closing.settlement_version}`,
-      title: closing.settlement_version === 1 ? "Cierre" : `Nuevo cierre (versión ${closing.settlement_version})`,
+      title:
+        (closing.settlement_version === 1 ? "Cierre" : `Nuevo cierre (versión ${closing.settlement_version})`) +
+        (closing.operation_id === null ? " administrativo cero" : ""),
       by: closing.closed_by_name,
-      badges: closing.in_effect ? <Badge tone="success">Vigente</Badge> : <Badge>Revertido</Badge>,
-      children: (
-        <>
+      badges: closing.in_effect ? (
+        <Badge tone="success">Vigente</Badge>
+      ) : (
+        <Badge>{closing.operation_id === null ? "Reemplazado" : "Revertido"}</Badge>
+      ),
+      children:
+        closing.operation_id === null ? (
           <p>
-            Publicado en Cajas con la {operationLink(closing.operation_id)}, fecha de negocio{" "}
+            Rendición de $0 sin movimientos: se cerró sin operación en Cajas, fecha de negocio{" "}
             {formatDate(closing.business_date)}.
           </p>
-          <Legs legs={closing.legs} />
-        </>
-      ),
+        ) : (
+          <>
+            <p>
+              Publicado en Cajas con la {operationLink(closing.operation_id)}, fecha de negocio{" "}
+              {formatDate(closing.business_date)}.
+            </p>
+            <Legs legs={closing.legs} />
+          </>
+        ),
     });
   }
   for (const difference of history.differences) {
@@ -122,7 +134,13 @@ export function timeline(settlement: Settlement, history: History): Event[] {
         <>
           <p>Motivo: {reopening.reason}</p>
           <p className="text-muted-foreground">
-            El cierre ({operationLink(reopening.close_operation_id)}) siguió vigente en Cajas mientras se corregía.
+            {reopening.close_operation_id === null ? (
+              "El cierre administrativo cero siguió vigente mientras se corregía; no había nada en Cajas."
+            ) : (
+              <>
+                El cierre ({operationLink(reopening.close_operation_id)}) siguió vigente en Cajas mientras se corregía.
+              </>
+            )}
           </p>
         </>
       ),
@@ -134,7 +152,7 @@ export function timeline(settlement: Settlement, history: History): Event[] {
 export function HistoryTab({ settlement }: { settlement: Settlement }) {
   const history = useQuery({
     queryKey: [...deliveryQueryKey, "history", settlement.id, settlement.version, settlement.status],
-    queryFn: () => deliveryApi.history(settlement.id),
+    queryFn: () => deliveryApi.history(settlement),
   });
   if (history.isPending) return <Skeleton className="h-40 w-full" aria-label="Cargando historial" />;
   if (history.isError) return <ErrorState error={history.error} onRetry={() => void history.refetch()} />;

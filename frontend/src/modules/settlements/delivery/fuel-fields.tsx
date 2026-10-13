@@ -20,9 +20,9 @@ export interface FuelForm {
   odometer: string;
 }
 
-export const fuelForm = (employee: number, load?: FuelLoad | null): FuelForm => ({
+export const fuelForm = (employee: number | null | undefined, load?: FuelLoad | null): FuelForm => ({
   vehicle: load?.vehicle_id ?? null,
-  employee: load?.employee_id ?? employee,
+  employee: load?.employee_id ?? employee ?? null,
   liters: load ? formatQuantity(load.liters) : "",
   price: load ? formatQuantity(load.price_per_liter) : "",
   odometer: load?.odometer_km != null ? String(load.odometer_km) : "",

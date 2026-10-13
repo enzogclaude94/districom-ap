@@ -1,4 +1,8 @@
-"""Delivery settlements while they are loaded (R2-1): creation, reading, corrections and the cash count.
+"""Settlements while they are loaded (R2-1): creation, reading, corrections and the cash count.
+
+Delivery settlements are created here; boca de expendio settlements (OUTLET, R7-2) in
+`outlet_settlements.service`. Everything else (count, additions, transfers, expenses, cheques, close) is
+the same domain for both, and what differs by type is its `TypeProfile`.
 
 Every write locks the settlement row and requires it to be OPEN; the database refuses the same changes
 on a CLOSED settlement whoever writes (migration 0007). Each public function commits its own
@@ -17,7 +21,7 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import ColumnElement, func, or_, select
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session
 
@@ -35,6 +39,28 @@ logger = logging.getLogger(__name__)
 
 DRIVER_FUNCTION = "settlements.delivery_driver"
 DELIVERY = "DELIVERY"
+OUTLET = "OUTLET"
+
+
+@dataclass(frozen=True)
+class TypeProfile:
+    """What a settlement type allows, and where its close takes the expected amount from (R7-2, ADR 009)."""
+
+    # System account the close takes the expected amount out of.
+    collections_account: str
+    # Pending collections (R3) and fuel expenses (R5) are loaded only where the type allows them (Enzo's D4).
+    pending_collections: bool
+    fuel: bool
+
+
+PROFILES = {
+    DELIVERY: TypeProfile("delivery_collections", pending_collections=True, fuel=True),
+    OUTLET: TypeProfile("outlet_collections", pending_collections=False, fuel=False),
+}
+
+
+def profile(settlement: Settlement) -> TypeProfile:
+    return PROFILES[settlement.type]
 
 
 @dataclass(frozen=True)
@@ -68,6 +94,15 @@ def get(db: Session, settlement_id: int) -> Settlement:
     if settlement is None:
         raise not_found()
     return settlement
+
+
+def require_type(db: Session, settlement_id: int, type: str) -> int:
+    """The id, when that settlement exists and is of that type: a boca settlement is never reached through
+    the delivery endpoints, nor the other way round (404, as if it did not exist there)."""
+    found = db.scalar(select(Settlement.type).where(Settlement.id == settlement_id))
+    if found != type:
+        raise not_found()
+    return settlement_id
 
 
 def not_found() -> AppError:
@@ -206,7 +241,7 @@ def create(db: Session, actor: User, body: s.SettlementIn) -> Created:
         entity_type="settlement",
         entity_id=settlement.id,
         before=None,
-        after=_snapshot(settlement),
+        after=snapshot(settlement),
     )
     commit(db)
     return Created(settlement.id, created=True)
@@ -214,17 +249,18 @@ def create(db: Session, actor: User, body: s.SettlementIn) -> Created:
 
 def update(db: Session, actor: User, settlement_id: int, body: s.SettlementPatch) -> None:
     settlement = lock_open(db, settlement_id)
-    before = _snapshot(settlement)
+    before = snapshot(settlement)
     fields = body.model_fields_set
     if "expected_amount" in fields:
-        if body.expected_amount is None:
+        # A boca may not know its Store Sys amount yet (Enzo's D2); a delivery always does.
+        if body.expected_amount is None and settlement.type == DELIVERY:
             raise AppError(422, "invalid_amount", "El importe esperado es obligatorio.")
         settlement.expected_amount = body.expected_amount
     if "external_reference" in fields:
         settlement.external_reference = (body.external_reference or "").strip() or None
     if "notes" in fields:
         settlement.notes = (body.notes or "").strip() or None
-    after = _snapshot(settlement)
+    after = snapshot(settlement)
     if before != after:
         record_change(
             db,
@@ -252,7 +288,11 @@ def list_settlements(
 ) -> tuple[Sequence[tuple[Settlement, str]], int]:
     if date_from and date_to and date_from > date_to:
         raise AppError(422, "invalid_date_range", "La fecha desde no puede ser posterior a la fecha hasta.")
-    query = select(Settlement, Employee.full_name).join(Employee, Employee.id == Settlement.employee_id)
+    query = (
+        select(Settlement, Employee.full_name)
+        .join(Employee, Employee.id == Settlement.employee_id)
+        .where(Settlement.type == DELIVERY)
+    )
     if date_from:
         query = query.where(Settlement.business_date >= date_from)
     if date_to:
@@ -261,12 +301,7 @@ def list_settlements(
         query = query.where(Settlement.employee_id == employee_id)
     if status is not None:
         query = query.where(Settlement.status == status)
-    if financial_state == "CLOSED":
-        query = query.where(Settlement.status == "CLOSED")
-    elif financial_state == "NOT_CLOSED":
-        query = query.where(Settlement.status == "OPEN", Settlement.current_close_operation_id.is_(None))
-    elif financial_state == "BEING_CORRECTED":
-        query = query.where(Settlement.status == "OPEN", Settlement.current_close_operation_id.is_not(None))
+    query = query.where(*financial_state_filter(financial_state))
     total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
     rows = db.execute(
         query.order_by(Settlement.business_date.desc(), Employee.full_name, Settlement.sequence_number, Settlement.id)
@@ -276,13 +311,27 @@ def list_settlements(
     return list(rows), total
 
 
+def financial_state_filter(financial_state: str | None) -> list[ColumnElement[bool]]:
+    """The financial state is read from the documentary close in effect (R7-2): an administrative zero
+    close has none in the ledger and is still a close."""
+    if financial_state == "CLOSED":
+        return [Settlement.status == "CLOSED"]
+    if financial_state == "NOT_CLOSED":
+        return [Settlement.status == "OPEN", Settlement.current_closing_id.is_(None)]
+    if financial_state == "BEING_CORRECTED":
+        return [Settlement.status == "OPEN", Settlement.current_closing_id.is_not(None)]
+    return []
+
+
 def same_day(db: Session, settlement: Settlement) -> list[int]:
+    """Other settlements of the same driver (or boca) and day."""
     return list(
         db.scalars(
             select(Settlement.id)
             .where(
                 Settlement.type == settlement.type,
-                Settlement.employee_id == settlement.employee_id,
+                Settlement.employee_id.is_not_distinct_from(settlement.employee_id),
+                Settlement.outlet_id.is_not_distinct_from(settlement.outlet_id),
                 Settlement.business_date == settlement.business_date,
                 Settlement.id != settlement.id,
             )
@@ -291,17 +340,20 @@ def same_day(db: Session, settlement: Settlement) -> list[int]:
     )
 
 
-def _snapshot(settlement: Settlement) -> dict[str, Any]:
-    return {
+def snapshot(settlement: Settlement) -> dict[str, Any]:
+    result = {
         "type": settlement.type,
         "business_date": settlement.business_date.isoformat(),
         "employee_id": settlement.employee_id,
         "sequence_number": settlement.sequence_number,
-        "expected_amount": money(settlement.expected_amount),
+        "expected_amount": money(settlement.expected_amount) if settlement.expected_amount is not None else None,
         "external_reference": settlement.external_reference,
         "has_notes": settlement.notes is not None,
         "status": settlement.status,
     }
+    if settlement.outlet_id is not None:
+        result["outlet_id"] = settlement.outlet_id
+    return result
 
 
 # --- cash count -----------------------------------------------------------------------------------

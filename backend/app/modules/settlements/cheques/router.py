@@ -21,6 +21,7 @@ from app.modules.settlements.cheques import schemas as cs
 from app.modules.settlements.cheques.state import State
 from app.modules.settlements.delivery import schemas as s
 from app.modules.settlements.delivery import views as delivery_views
+from app.modules.settlements.delivery.routing import DeliveryId
 from app.modules.settlements.delivery.service import Created
 from app.modules.settlements.pending import views as pending_views
 from app.modules.settlements.pending.schemas import PendingDetailOut
@@ -63,7 +64,7 @@ def _cheque(db: DbSession, cheque_id: int, created: Created | None, response: Re
     summary="Cheque recibido en la rendición (físico en mano, o ECHEQ declarado)",
 )
 def create_cheque(
-    settlement_id: int, body: cs.ChequeIn, db: DbSession, user: Operator, response: Response
+    settlement_id: DeliveryId, body: cs.ChequeIn, db: DbSession, user: Operator, response: Response
 ) -> s.SettlementOut:
     return _settlement(db, settlement_id, service.create(db, user, settlement_id, body), response)
 
@@ -74,7 +75,7 @@ def create_cheque(
     summary="Corregir un cheque que todavía no tuvo efecto financiero",
 )
 def update_cheque(
-    settlement_id: int, cheque_id: int, body: cs.ChequePatch, db: DbSession, user: Operator, response: Response
+    settlement_id: DeliveryId, cheque_id: int, body: cs.ChequePatch, db: DbSession, user: Operator, response: Response
 ) -> s.SettlementOut:
     service.update(db, user, settlement_id, cheque_id, body)
     return _settlement(db, settlement_id, None, response)
@@ -86,7 +87,7 @@ def update_cheque(
     summary="Anular un cheque, con motivo (si está en cartera, sigue ahí hasta el nuevo cierre)",
 )
 def void_cheque(
-    settlement_id: int, cheque_id: int, body: s.VoidIn, db: DbSession, user: Operator, response: Response
+    settlement_id: DeliveryId, cheque_id: int, body: s.VoidIn, db: DbSession, user: Operator, response: Response
 ) -> s.SettlementOut:
     service.void(db, user, settlement_id, cheque_id, body.reason)
     return _settlement(db, settlement_id, None, response)
@@ -98,7 +99,7 @@ def void_cheque(
     summary="Verificar un ECHEQ o rechazar su verificación (corregir una decisión: admin, con motivo)",
 )
 def decide_echeq_verification(
-    settlement_id: int,
+    settlement_id: DeliveryId,
     cheque_id: int,
     body: cs.VerificationIn,
     db: DbSession,

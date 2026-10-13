@@ -43,12 +43,13 @@ def require_vehicle(db: Session, vehicle_id: int) -> None:
     vehicles.active(db, vehicle_id)
 
 
-def require_employee(db: Session, employee_id: int) -> None:
-    employee = db.get(Employee, employee_id)
+def require_employee(db: Session, employee_id: int | None) -> int:
+    employee = db.get(Employee, employee_id) if employee_id is not None else None
     if employee is None or not employee.active:
         raise AppError(
             422, "invalid_employee", "El empleado que cargó tiene que ser uno activo.", {"employee_id": employee_id}
         )
+    return employee.id
 
 
 def snapshot(load: FuelLoad) -> dict[str, Any]:

@@ -18,6 +18,7 @@ from app.core.clock import business_today
 from app.modules.settlements.delivery import additions, closing, denominations, expenses, service, transfers, views
 from app.modules.settlements.delivery import schemas as s
 from app.modules.settlements.delivery.denominations import Denomination
+from app.modules.settlements.delivery.routing import DeliveryId
 from app.modules.settlements.pending import schemas as ps
 from app.modules.settlements.pending import service as pending_collections
 from app.platform.auth.access import require_module_access
@@ -97,13 +98,13 @@ def create_delivery(body: s.SettlementIn, db: DbSession, user: Operator, respons
 
 
 @router.get("/deliveries/{settlement_id}", response_model=s.SettlementOut, summary="Rendición con su tablero")
-def get_delivery(settlement_id: int, db: DbSession, _: Viewer) -> s.SettlementOut:
+def get_delivery(settlement_id: DeliveryId, db: DbSession, _: Viewer) -> s.SettlementOut:
     return views.settlement(db, settlement_id)
 
 
 @router.patch("/deliveries/{settlement_id}", response_model=s.SettlementOut, summary="Corregir esperado o notas")
 def update_delivery(
-    settlement_id: int, body: s.SettlementPatch, db: DbSession, user: Operator, response: Response
+    settlement_id: DeliveryId, body: s.SettlementPatch, db: DbSession, user: Operator, response: Response
 ) -> s.SettlementOut:
     service.update(db, user, settlement_id, body)
     return _detail(db, settlement_id, None, response)
@@ -111,7 +112,7 @@ def update_delivery(
 
 @router.put("/deliveries/{settlement_id}/count", response_model=s.SettlementOut, summary="Conteo de efectivo")
 def replace_count(
-    settlement_id: int, body: s.CountIn, db: DbSession, user: Operator, response: Response
+    settlement_id: DeliveryId, body: s.CountIn, db: DbSession, user: Operator, response: Response
 ) -> s.SettlementOut:
     service.replace_count(db, user, settlement_id, body)
     return _detail(db, settlement_id, None, response)
@@ -128,7 +129,7 @@ def replace_count(
     summary="Agregado de efectivo",
 )
 def create_addition(
-    settlement_id: int, body: s.AdditionIn, db: DbSession, user: Operator, response: Response
+    settlement_id: DeliveryId, body: s.AdditionIn, db: DbSession, user: Operator, response: Response
 ) -> s.SettlementOut:
     created = additions.create(db, user, settlement_id, body)
     return _detail(db, settlement_id, created, response)
@@ -140,7 +141,7 @@ def create_addition(
     summary="Anular un agregado, con motivo",
 )
 def void_addition(
-    settlement_id: int, addition_id: int, body: s.VoidIn, db: DbSession, user: Operator, response: Response
+    settlement_id: DeliveryId, addition_id: int, body: s.VoidIn, db: DbSession, user: Operator, response: Response
 ) -> s.SettlementOut:
     additions.void(db, user, settlement_id, addition_id, body.reason)
     return _detail(db, settlement_id, None, response)
@@ -157,7 +158,7 @@ def void_addition(
     summary="Transferencia declarada",
 )
 def create_transfer(
-    settlement_id: int, body: s.TransferIn, db: DbSession, user: Operator, response: Response
+    settlement_id: DeliveryId, body: s.TransferIn, db: DbSession, user: Operator, response: Response
 ) -> s.SettlementOut:
     created = transfers.create(db, user, settlement_id, body)
     return _detail(db, settlement_id, created, response)
@@ -169,7 +170,12 @@ def create_transfer(
     summary="Corregir los datos de una transferencia declarada",
 )
 def update_transfer(
-    settlement_id: int, transfer_id: int, body: s.TransferPatch, db: DbSession, user: Operator, response: Response
+    settlement_id: DeliveryId,
+    transfer_id: int,
+    body: s.TransferPatch,
+    db: DbSession,
+    user: Operator,
+    response: Response,
 ) -> s.SettlementOut:
     transfers.update(db, user, settlement_id, transfer_id, body)
     return _detail(db, settlement_id, None, response)
@@ -181,7 +187,7 @@ def update_transfer(
     summary="Verificar o rechazar (operator); corregir una decisión (admin, con motivo)",
 )
 def change_transfer_status(
-    settlement_id: int,
+    settlement_id: DeliveryId,
     transfer_id: int,
     body: s.TransferStatusIn,
     db: DbSession,
@@ -203,7 +209,7 @@ def change_transfer_status(
     summary="Gasto",
 )
 def create_expense(
-    settlement_id: int, body: s.ExpenseIn, db: DbSession, user: Operator, response: Response
+    settlement_id: DeliveryId, body: s.ExpenseIn, db: DbSession, user: Operator, response: Response
 ) -> s.SettlementOut:
     created = expenses.create(db, user, settlement_id, body)
     return _detail(db, settlement_id, created, response)
@@ -213,7 +219,7 @@ def create_expense(
     "/deliveries/{settlement_id}/expenses/{expense_id}", response_model=s.SettlementOut, summary="Corregir un gasto"
 )
 def update_expense(
-    settlement_id: int, expense_id: int, body: s.ExpensePatch, db: DbSession, user: Operator, response: Response
+    settlement_id: DeliveryId, expense_id: int, body: s.ExpensePatch, db: DbSession, user: Operator, response: Response
 ) -> s.SettlementOut:
     expenses.update(db, user, settlement_id, expense_id, body)
     return _detail(db, settlement_id, None, response)
@@ -225,7 +231,7 @@ def update_expense(
     summary="Anular un gasto, con motivo",
 )
 def void_expense(
-    settlement_id: int, expense_id: int, body: s.VoidIn, db: DbSession, user: Operator, response: Response
+    settlement_id: DeliveryId, expense_id: int, body: s.VoidIn, db: DbSession, user: Operator, response: Response
 ) -> s.SettlementOut:
     expenses.void(db, user, settlement_id, expense_id, body.reason)
     return _detail(db, settlement_id, None, response)
@@ -242,7 +248,7 @@ def void_expense(
     summary="Pendiente de cobro (responsable: el repartidor, salvo que se elija otro empleado)",
 )
 def create_pending_collection(
-    settlement_id: int, body: ps.PendingIn, db: DbSession, user: Operator, response: Response
+    settlement_id: DeliveryId, body: ps.PendingIn, db: DbSession, user: Operator, response: Response
 ) -> s.SettlementOut:
     created = pending_collections.create(db, user, settlement_id, body)
     return _detail(db, settlement_id, created, response)
@@ -254,7 +260,7 @@ def create_pending_collection(
     summary="Corregir un pendiente (en una corrección, cambia la próxima versión, no lo vigente)",
 )
 def update_pending_collection(
-    settlement_id: int, pending_id: int, body: ps.PendingPatch, db: DbSession, user: Operator, response: Response
+    settlement_id: DeliveryId, pending_id: int, body: ps.PendingPatch, db: DbSession, user: Operator, response: Response
 ) -> s.SettlementOut:
     pending_collections.update(db, user, settlement_id, pending_id, body)
     return _detail(db, settlement_id, None, response)
@@ -266,7 +272,7 @@ def update_pending_collection(
     summary="Anular un pendiente, con motivo (en una corrección, sigue vigente hasta el nuevo cierre)",
 )
 def void_pending_collection(
-    settlement_id: int, pending_id: int, body: s.VoidIn, db: DbSession, user: Operator, response: Response
+    settlement_id: DeliveryId, pending_id: int, body: s.VoidIn, db: DbSession, user: Operator, response: Response
 ) -> s.SettlementOut:
     pending_collections.void(db, user, settlement_id, pending_id, body.reason)
     return _detail(db, settlement_id, None, response)
@@ -280,7 +286,7 @@ def void_pending_collection(
     response_model=s.ClosingPreviewOut,
     summary="Qué publicaría el cierre ahora y qué lo impide",
 )
-def closing_preview(settlement_id: int, db: DbSession, _: Viewer) -> s.ClosingPreviewOut:
+def closing_preview(settlement_id: DeliveryId, db: DbSession, _: Viewer) -> s.ClosingPreviewOut:
     return views.closing_preview(db, settlement_id)
 
 
@@ -295,7 +301,7 @@ def closing_preview(settlement_id: int, db: DbSession, _: Viewer) -> s.ClosingPr
     summary="Cerrar la rendición (con la asignación de la diferencia)",
 )
 def close_delivery(
-    settlement_id: int, body: s.CloseIn, db: DbSession, user: Operator, response: Response
+    settlement_id: DeliveryId, body: s.CloseIn, db: DbSession, user: Operator, response: Response
 ) -> s.SettlementOut:
     return _detail(db, settlement_id, closing.close(db, user, settlement_id, body), response)
 
@@ -305,7 +311,7 @@ def close_delivery(
     response_model=s.SettlementOut,
     summary="Reabrir para corregir (no mueve Cajas hasta el nuevo cierre)",
 )
-def reopen_delivery(settlement_id: int, body: s.ReopenIn, db: DbSession, user: Admin) -> s.SettlementOut:
+def reopen_delivery(settlement_id: DeliveryId, body: s.ReopenIn, db: DbSession, user: Admin) -> s.SettlementOut:
     closing.reopen(db, user, settlement_id, body)
     return views.settlement(db, settlement_id)
 
@@ -315,7 +321,7 @@ def reopen_delivery(settlement_id: int, body: s.ReopenIn, db: DbSession, user: A
     response_model=s.HistoryOut,
     summary="Cierres, reaperturas y diferencias de la rendición",
 )
-def delivery_history(settlement_id: int, db: DbSession, _: Viewer) -> s.HistoryOut:
+def delivery_history(settlement_id: DeliveryId, db: DbSession, _: Viewer) -> s.HistoryOut:
     return views.history(db, settlement_id)
 
 

@@ -146,6 +146,12 @@ def create(db: Session, actor: User, settlement_id: int, body: s.ExpenseIn) -> s
     category = _active_category(db, body.category_id)
     load: FuelLoad | None = None
     if category.code == FUEL:
+        if not service.profile(settlement).fuel:
+            raise AppError(
+                422,
+                "fuel_not_allowed_for_outlet",
+                "La rendición de boca de expendio no admite gastos de combustible.",
+            )
         if body.amount is not None:
             raise _amount_is_computed()
         if body.fuel is None:
@@ -154,9 +160,8 @@ def create(db: Session, actor: User, settlement_id: int, body: s.ExpenseIn) -> s
                 "fuel_detail_required",
                 "Un gasto de combustible lleva vehículo, empleado, litros y precio por litro.",
             )
-        employee_id = body.fuel.employee_id or settlement.employee_id
         fuel.require_vehicle(db, body.fuel.vehicle_id)
-        fuel.require_employee(db, employee_id)
+        employee_id = fuel.require_employee(db, body.fuel.employee_id or settlement.employee_id)
         amount = fuel.amount(body.fuel.liters, body.fuel.price_per_liter)
         load = FuelLoad(
             vehicle_id=body.fuel.vehicle_id,
@@ -270,7 +275,7 @@ def update(db: Session, actor: User, settlement_id: int, expense_id: int, body: 
 
 
 def _apply_fuel(
-    db: Session, actor: User, driver_id: int, expense: Expense, load: FuelLoad | None, patch: s.FuelPatch
+    db: Session, actor: User, driver_id: int | None, expense: Expense, load: FuelLoad | None, patch: s.FuelPatch
 ) -> FuelLoad:
     fields = patch.model_fields_set
     if load is None:  # a legacy expense getting its detail: everything but employee and odometer is needed
@@ -289,8 +294,7 @@ def _apply_fuel(
     if "employee_id" in fields:
         employee_id = patch.employee_id or driver_id
         if employee_id != load.employee_id:
-            fuel.require_employee(db, employee_id)
-            load.employee_id = employee_id
+            load.employee_id = fuel.require_employee(db, employee_id)
     for name in ("liters", "price_per_liter"):
         if name in fields:
             value = getattr(patch, name)

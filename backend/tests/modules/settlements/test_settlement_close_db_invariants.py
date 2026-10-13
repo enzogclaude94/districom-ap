@@ -244,7 +244,8 @@ def test_reopenings_are_append_only(db: Session, closed) -> None:  # type: ignor
     assert "next_version" in _refused(
         db,
         "INSERT INTO settlements.settlement_reopenings (settlement_id, from_version, to_version, close_operation_id, "
-        "reason, reopened_by) VALUES (:s, 5, 7, :o, 'x', :u)",
+        "closing_id, reason, reopened_by) SELECT :s, 5, 7, :o, id, 'x', :u FROM settlements.settlement_closings "
+        "WHERE operation_id = :o",
         s=closed["settlement"],
         o=closed["close"],
         u=closed["user"],

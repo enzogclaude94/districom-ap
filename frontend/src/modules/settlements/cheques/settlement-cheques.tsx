@@ -10,7 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { ApiError } from "@/lib/api/client";
 import { cn } from "@/lib/cn";
 import { formatDate, formatDateTime, formatMoney } from "@/lib/format";
-import { deliveryPath, type Settlement } from "@/modules/settlements/delivery/api";
+import { settlementPath, type Settlement } from "@/modules/settlements/delivery/api";
 import { ActionDialog, TextField } from "@/modules/settlements/delivery/form";
 import { VoidDialog } from "@/modules/settlements/delivery/load-dialogs";
 import { useDeliveryAction } from "@/modules/settlements/delivery/use-delivery-action";
@@ -292,13 +292,13 @@ function ChequeLoadDialog({
         cheque
           ? {
               method: "PATCH",
-              path: deliveryPath(settlement.id, `/cheques/${cheque.id}`),
+              path: settlementPath(settlement, `/cheques/${cheque.id}`),
               body: patchBody(draft),
               summary: `Corrección del cheque n.º ${draft.number.trim()}`,
             }
           : {
               method: "POST",
-              path: deliveryPath(settlement.id, "/cheques"),
+              path: settlementPath(settlement, "/cheques"),
               body: { client_request_id: requestId, ...draftBody(draft) },
               summary: `${KIND_LABELS[draft.kind]} n.º ${draft.number.trim()} de ${draft.deliveredBy.trim()}`,
             }
@@ -348,7 +348,7 @@ function DecisionDialog({
       validate={() => (needsReason && !reason.trim() ? "Indicá el motivo." : null)}
       build={() => ({
         method: "POST",
-        path: deliveryPath(settlement.id, `/cheques/${cheque.id}/verification`),
+        path: settlementPath(settlement, `/cheques/${cheque.id}/verification`),
         body: { status: to, reason: reason.trim() || null },
         summary: `${verify ? "Verificación" : "Rechazo de verificación"} del ECHEQ n.º ${cheque.cheque_number}`,
       })}

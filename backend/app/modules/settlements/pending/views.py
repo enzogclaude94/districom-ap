@@ -115,7 +115,7 @@ def items(db: Session, rows: Sequence[PendingCollection]) -> list[s.PendingOut]:
 def list_items(db: Session, rows: Sequence[PendingCollection]) -> list[s.PendingListItem]:
     """Rows of the global list: each pending with its settlement and driver."""
     settlements = _settlements(db, rows)
-    drivers = _names(db, Employee, [st.employee_id for st in settlements.values()])
+    drivers = _names(db, Employee, [st.employee_id for st in settlements.values() if st.employee_id is not None])
     result = []
     for item in items(db, rows):
         settlement = settlements.get(item.settlement_id) if item.settlement_id else None
@@ -125,7 +125,7 @@ def list_items(db: Session, rows: Sequence[PendingCollection]) -> list[s.Pending
                 settlement_business_date=settlement.business_date if settlement else None,
                 settlement_sequence_number=settlement.sequence_number if settlement else None,
                 driver_id=settlement.employee_id if settlement else None,
-                driver_name=drivers.get(settlement.employee_id, "") if settlement else None,
+                driver_name=drivers.get(settlement.employee_id, "") if settlement and settlement.employee_id else None,
             )
         )
     return result

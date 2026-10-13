@@ -12,7 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { cn } from "@/lib/cn";
 import { formatDate, formatDateTime, formatMoney } from "@/lib/format";
 import { parseAmount } from "@/modules/settlements/cash/amount";
-import { deliveryPath, type Person, type Settlement } from "@/modules/settlements/delivery/api";
+import { settlementPath, type Person, type Settlement } from "@/modules/settlements/delivery/api";
 import { ActionDialog, AmountField, SelectField, TextField } from "@/modules/settlements/delivery/form";
 import { VoidDialog } from "@/modules/settlements/delivery/load-dialogs";
 import { useDeliveryAction } from "@/modules/settlements/delivery/use-delivery-action";
@@ -227,16 +227,18 @@ function PendingDialog({
   const [reason, setReason] = useState(pending?.reason ?? "");
   // The driver answers for collecting it unless someone else is chosen (R3-D3).
   const [responsible, setResponsible] = useState<number | null>(
-    pending?.responsible_employee_id ?? settlement.employee_id,
+    pending?.responsible_employee_id ?? settlement.employee_id ?? null,
   );
   const [expected, setExpected] = useState(pending?.expected_date ?? "");
   const action = useDeliveryAction(
     pending ? `pending-edit:${settlement.id}:${pending.id}` : `pending:${settlement.id}`,
     onClose,
   );
-  const options = employees.some((e) => e.id === settlement.employee_id)
-    ? employees
-    : [{ id: settlement.employee_id, full_name: settlement.employee_name }, ...employees];
+  const driver =
+    settlement.employee_id !== undefined
+      ? { id: settlement.employee_id, full_name: settlement.employee_name ?? "" }
+      : null;
+  const options = !driver || employees.some((e) => e.id === driver.id) ? employees : [driver, ...employees];
   const parsed = parseAmount(amount);
   const fields = {
     customer_name: customer.trim(),
@@ -274,13 +276,13 @@ function PendingDialog({
         pending
           ? {
               method: "PATCH",
-              path: deliveryPath(settlement.id, `/pending-collections/${pending.id}`),
+              path: settlementPath(settlement, `/pending-collections/${pending.id}`),
               body: fields,
               summary: `Corrección del pendiente de ${customer.trim()} por ${formatMoney(parsed!)}`,
             }
           : {
               method: "POST",
-              path: deliveryPath(settlement.id, "/pending-collections"),
+              path: settlementPath(settlement, "/pending-collections"),
               body: { client_request_id: requestId, ...fields },
               summary: `Pendiente de ${customer.trim()} por ${formatMoney(parsed!)}`,
             }

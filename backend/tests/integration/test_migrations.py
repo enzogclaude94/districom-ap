@@ -145,6 +145,7 @@ def test_settlements_system_accounts_seeded(migrated_db: None) -> None:
         ("merchandise_payments", "MERCHANDISE_PAYMENTS", False),
         ("third_party_refunds", "THIRD_PARTY_REFUNDS", False),
         ("other_payments", "OTHER_PAYMENTS", False),
+        ("outlet_collections", "OUTLET_COLLECTIONS", True),
     ]
 
 
@@ -210,6 +211,7 @@ def test_account_name_key_backfill() -> None:
             "pagos por mercaderia",
             "devoluciones a terceros",
             "otros pagos",
+            "cobranzas de boca",
         ]
     finally:
         with engine.begin() as conn:

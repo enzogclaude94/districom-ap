@@ -177,6 +177,7 @@ function preview(changes: Partial<ClosingPreview> = {}): ClosingPreview {
     legs: [],
     preview_token: "a".repeat(64),
     close_in_effect: null,
+    administrative_zero: false,
     pending_collections: [],
     ...changes,
   };
@@ -522,7 +523,12 @@ describe("close flow", () => {
             settlement({
               status: "CLOSED",
               financial_state: "CLOSED",
-              close_in_effect: { operation_id: 40, settlement_version: 1, closed_at: "2026-10-04T15:00:00Z" },
+              close_in_effect: {
+                operation_id: 40,
+                kind: "FINANCIAL",
+                settlement_version: 1,
+                closed_at: "2026-10-04T15:00:00Z",
+              },
             }),
           ),
       }),
@@ -668,7 +674,7 @@ describe("reopen and history", () => {
   const CLOSED = settlement({
     status: "CLOSED",
     financial_state: "CLOSED",
-    close_in_effect: { operation_id: 40, settlement_version: 1, closed_at: closedAt },
+    close_in_effect: { operation_id: 40, kind: "FINANCIAL", settlement_version: 1, closed_at: closedAt },
     closed_by: 9,
     closed_by_name: "Oscar Operador",
     closed_at: closedAt,
@@ -739,6 +745,8 @@ describe("reopen and history", () => {
       closings: [
         {
           settlement_version: 1,
+          kind: "FINANCIAL",
+          snapshot: null,
           operation_id: 40,
           reversal_operation_id: null,
           reversed_by_operation_id: 41,
@@ -751,6 +759,8 @@ describe("reopen and history", () => {
         },
         {
           settlement_version: 2,
+          kind: "FINANCIAL",
+          snapshot: null,
           operation_id: 42,
           reversal_operation_id: 41,
           reversed_by_operation_id: null,

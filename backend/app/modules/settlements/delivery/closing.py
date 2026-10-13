@@ -37,6 +37,20 @@ and one voided in it stays there until then; a DECLARED ECHEQ blocks the close.
 The close carries the `preview_token` of the preview the user confirmed: if anything that could alter
 the close changed since, it is refused (`settlement_preview_stale`) before any financial write.
 
+Boca de expendio (OUTLET, R7-2): the same close, taking the expected amount out of «Cobranzas de boca» (no
+leg when it is 0); its expected amount must be loaded to close. An OUTLET settlement of $0 without any movement
+closes with an administrative zero close (Enzo's R7-2-Q1): a `settlement_closings` row of kind
+ADMINISTRATIVE_ZERO with its snapshot, no ledger operation, no zero legs. `current_closing_id` is the
+documentary close in effect (financial or administrative); `current_close_operation_id` its operation, NULL
+only after an administrative zero close. Crossings:
+
+- administrative -> reopen -> activity -> close: a normal SETTLEMENT_CLOSE (nothing to reverse);
+- financial -> reopen -> corrected to $0 -> close: the REVERSAL of the previous close
+  (`ledger.withdraw_document_operation`) and an administrative close, without a new operation;
+- administrative -> reopen -> $0 again -> close: a new administrative close.
+
+Reopening a zero close never invents a reversal of an operation that never existed.
+
 Lock order, always: the settlement row, its pending collections by id, its cheques by id, then (inside the ledger) the
 accounts that lose value, in id order. Load changes lock the settlement row too, so they never interleave with a close.
 """
@@ -85,6 +99,9 @@ REOPENED_EVENT = "settlements.settlement.reopened"
 # Namespace of the deterministic ledger request ids of closes; never change it.
 CLOSE_NAMESPACE = UUID("5d0f6c1e-8a43-4a52-9a43-1d2b8d7f0c21")
 ZERO = Decimal("0.00")
+ADMINISTRATIVE_ZERO = "ADMINISTRATIVE_ZERO"
+EXPECTED_REQUIRED = "expected_amount_required"
+EXPECTED_REQUIRED_MESSAGE = "Cargá el importe esperado de Store Sys para cerrar la rendición."
 
 # A leg before its account exists: ("account", account_id), ("employee", employee_id) or
 # ("cheque", cheque_id), the latter on "Cartera de cheques" with the cheque named on the leg.
@@ -116,21 +133,53 @@ class Plan:
     def kind(self) -> str:
         return self.totals.difference_kind
 
+    @property
+    def administrative_zero(self) -> bool:
+        """An OUTLET settlement of $0 without any movement: it closes without a ledger operation (R7-2-Q1)."""
+        totals = self.totals
+        return (
+            self.settlement.type == service.OUTLET
+            and not totals.expected_missing
+            and totals.expected == 0
+            and totals.cash_total == 0
+            and totals.transfers["VERIFIED"] == 0
+            and totals.declared_transfers_count == 0
+            and totals.cheques == 0
+            and totals.unverified_echeqs_count == 0
+            and totals.expenses == 0
+            and totals.pending == 0
+            and not self.legs
+        )
+
 
 # --- financial state ------------------------------------------------------------------------------
 
 
 def financial_state(settlement: Settlement) -> str:
+    """From the documentary close in effect, never from the ledger operation alone: an administrative zero
+    close (R7-2) is a close without one."""
     if settlement.status == "CLOSED":
         return "CLOSED"
-    return "BEING_CORRECTED" if settlement.current_close_operation_id is not None else "NOT_CLOSED"
+    return "BEING_CORRECTED" if settlement.current_closing_id is not None else "NOT_CLOSED"
+
+
+def administrative_close_in_effect(settlement: Settlement) -> bool:
+    return settlement.current_closing_id is not None and settlement.current_close_operation_id is None
 
 
 def financial_state_detail(settlement: Settlement) -> str:
     state = financial_state(settlement)
+    zero = administrative_close_in_effect(settlement)
     if state == "CLOSED":
+        if zero:
+            return "Rendición cerrada en cero: cierre administrativo, sin movimientos en Cajas."
         return "Rendición cerrada: su cierre está vigente en Cajas."
     if state == "BEING_CORRECTED":
+        if zero:
+            return (
+                "Rendición reabierta para corrección: su cierre anterior fue administrativo en cero y no movió "
+                "dinero en Cajas."
+            )
         return (
             "Rendición reabierta para corrección: el último cierre sigue vigente en Cajas "
             "hasta que se confirme el nuevo cierre."
@@ -162,6 +211,8 @@ def preview(db: Session, settlement_id: int) -> Preview:
     blockers = []
     if plan.settlement.status != "OPEN":
         blockers.append(s.Blocker(code="settlement_already_closed", message="La rendición ya está cerrada."))
+    if plan.totals.expected_missing:
+        blockers.append(s.Blocker(code=EXPECTED_REQUIRED, message=EXPECTED_REQUIRED_MESSAGE))
     if plan.totals.declared_transfers_count:
         blockers.append(
             s.Blocker(
@@ -234,12 +285,15 @@ def preview_token(db: Session, plan: Plan) -> str:
     totals = plan.totals
     payload: dict[str, Any] = {
         "settlement": sid,
+        "type": settlement.type,
         "version": settlement.version,
         "status": settlement.status,
         "close_in_effect": settlement.current_close_operation_id,
+        "closing_in_effect": settlement.current_closing_id,
         "business_date": settlement.business_date.isoformat(),
         "employee": settlement.employee_id,
-        "expected": service.money(totals.expected),
+        "outlet": settlement.outlet_id,
+        "expected": None if totals.expected_missing else service.money(totals.expected),
         "count": sorted([code, service.money(value), qty, box] for code, value, qty, box in lines),
         "additions": sorted([aid, service.money(amount), box] for aid, amount, box in added),
         "transfers": sorted([tid, service.money(amount), bank, status] for tid, amount, bank, status in sent),
@@ -300,6 +354,8 @@ def close(db: Session, actor: User, settlement_id: int, body: s.CloseIn) -> serv
             "antes de cerrar.",
             {"settlement_id": settlement.id, "version": settlement.version},
         )
+    if plan.totals.expected_missing:
+        raise AppError(422, EXPECTED_REQUIRED, EXPECTED_REQUIRED_MESSAGE, {"settlement_id": settlement.id})
     if plan.totals.declared_transfers_count:
         raise AppError(
             409,
@@ -313,6 +369,9 @@ def close(db: Session, actor: User, settlement_id: int, body: s.CloseIn) -> serv
     _check_allocations(db, actor, plan, allocations)
     if not body.confirm:
         raise AppError(422, "confirmation_required", "Confirmá el cierre de la rendición.")
+
+    if plan.administrative_zero:
+        return _close_administratively(db, actor, plan, locked_cheques, fingerprint)
 
     legs = _ledger_legs(db, actor, plan, allocations)
     description = f"Cierre de rendición #{settlement.id} (versión {settlement.version})"
@@ -380,20 +439,22 @@ def close(db: Session, actor: User, settlement_id: int, body: s.CloseIn) -> serv
             )
             for a in allocations
         )
-    db.add(
-        SettlementClosing(
-            settlement_id=settlement.id,
-            settlement_version=settlement.version,
-            operation_id=operation.id,
-            reversal_operation_id=reversal_id,
-            request_fingerprint=fingerprint,
-            closed_by=actor.id,
-            closed_at=now,
-        )
+    closing_row = SettlementClosing(
+        settlement_id=settlement.id,
+        settlement_version=settlement.version,
+        kind="FINANCIAL",
+        operation_id=operation.id,
+        reversal_operation_id=reversal_id,
+        request_fingerprint=fingerprint,
+        closed_by=actor.id,
+        closed_at=now,
     )
+    db.add(closing_row)
+    db.flush()
     previous_close = settlement.current_close_operation_id
     settlement.status = "CLOSED"
     settlement.current_close_operation_id = operation.id
+    settlement.current_closing_id = closing_row.id
     settlement.closed_at = now
     settlement.closed_by = actor.id
     record_change(
@@ -428,6 +489,96 @@ def close(db: Session, actor: User, settlement_id: int, body: s.CloseIn) -> serv
     return service.Created(settlement.id, created=True)
 
 
+def _close_administratively(
+    db: Session, actor: User, plan: Plan, locked_cheques: list[Cheque], fingerprint: str
+) -> service.Created:
+    """CIERRE ADMINISTRATIVO CERO (Enzo's R7-2-Q1): an OUTLET settlement of $0 without any movement closes
+    without a ledger operation and without zero legs; the close, its snapshot, who and when, the version, the
+    audit and the history are kept. After a financial close (a correction to $0), that close is reversed and
+    nothing replaces it. The database checks the whole load against it at commit (0023)."""
+    settlement = plan.settlement
+    previous_close = settlement.current_close_operation_id
+    reversal_id: int | None = None
+    if previous_close is not None:
+        reversal = ledger.withdraw_document_operation(
+            db,
+            actor=actor,
+            original_id=previous_close,
+            type=CLOSE_TYPE,
+            source=ledger.SourceRef(SOURCE_TYPE, settlement.id),
+            reason=f"Corrección de la rendición #{settlement.id} a cero: {settlement.reopen_reason or ''}",
+            reversal_request_id=reversal_request_id(settlement.id, settlement.version),
+        )
+        reversal_id = reversal.operation.id
+        cheques.withdraw_published(db, actor, settlement, locked_cheques, previous_close, reversal_id)
+    now = datetime.now(UTC)
+    superseded = db.execute(
+        update(SettlementDifference)
+        .where(SettlementDifference.settlement_id == settlement.id, SettlementDifference.superseded_at.is_(None))
+        .values(superseded_at=now, superseded_by=actor.id)
+        .returning(SettlementDifference.id)
+    ).scalar_one_or_none()
+    snapshot = zero_snapshot(settlement)
+    closing_row = SettlementClosing(
+        settlement_id=settlement.id,
+        settlement_version=settlement.version,
+        kind=ADMINISTRATIVE_ZERO,
+        operation_id=None,
+        reversal_operation_id=reversal_id,
+        request_fingerprint=fingerprint,
+        snapshot=snapshot,
+        closed_by=actor.id,
+        closed_at=now,
+    )
+    db.add(closing_row)
+    db.flush()
+    settlement.status = "CLOSED"
+    settlement.current_close_operation_id = None
+    settlement.current_closing_id = closing_row.id
+    settlement.closed_at = now
+    settlement.closed_by = actor.id
+    record_change(
+        db,
+        "settlements.settlement.closed",
+        action="close",
+        user_id=actor.id,
+        entity_type="settlement",
+        entity_id=settlement.id,
+        before={"status": "OPEN", "version": settlement.version, "close_in_effect": previous_close},
+        after={
+            "status": "CLOSED",
+            "version": settlement.version,
+            "closing_kind": ADMINISTRATIVE_ZERO,
+            "closing_id": closing_row.id,
+            "close_operation_id": None,
+            "reversal_operation_id": reversal_id,
+            "superseded_difference_id": superseded,
+            "snapshot": snapshot,
+        },
+    )
+    service.commit(db)
+    return service.Created(settlement.id, created=True)
+
+
+def zero_snapshot(settlement: Settlement) -> dict[str, Any]:
+    """What an administrative zero close certifies; the database checks it against the settlement."""
+    zero = service.money(ZERO)
+    return {
+        "type": settlement.type,
+        "outlet_id": str(settlement.outlet_id),
+        "version": str(settlement.version),
+        "business_date": settlement.business_date.isoformat(),
+        "expected_amount": zero,
+        "cash": zero,
+        "additions": zero,
+        "transfers_verified": zero,
+        "cheques": zero,
+        "expenses": zero,
+        "pending": zero,
+        "difference": zero,
+    }
+
+
 # --- reopen ---------------------------------------------------------------------------------------
 
 
@@ -457,13 +608,16 @@ def reopen(db: Session, actor: User, settlement_id: int, body: s.ReopenIn) -> se
         raise _concurrent_change(settlement)
     previous = settlement.version
     now = datetime.now(UTC)
-    if settlement.current_close_operation_id is None:  # guaranteed by closed_has_close; keeps mypy honest
+    if settlement.current_closing_id is None:  # guaranteed by closed_has_close; keeps mypy honest
         raise AppError(409, "settlement_not_closed", "La rendición no está cerrada.")
+    # An administrative zero close is reopened the same way: it stays in effect (with no operation) until the
+    # new close, and nothing is reversed because nothing was published (R7-2-Q1).
     db.add(
         SettlementReopening(
             settlement_id=settlement.id,
             from_version=previous,
             to_version=previous + 1,
+            closing_id=settlement.current_closing_id,
             close_operation_id=settlement.current_close_operation_id,
             reason=reason,
             reopened_by=actor.id,
@@ -488,6 +642,7 @@ def reopen(db: Session, actor: User, settlement_id: int, body: s.ReopenIn) -> se
             "version": settlement.version,
             "reason": reason,
             "close_in_effect": settlement.current_close_operation_id,
+            "closing_in_effect": settlement.current_closing_id,
         },
     )
     service.commit(db)
@@ -545,6 +700,11 @@ def close_of(db: Session, operation_id: int) -> SettlementClosing | None:
     return db.scalars(select(SettlementClosing).where(SettlementClosing.operation_id == operation_id)).one_or_none()
 
 
+def closing_in_effect(db: Session, settlement: Settlement) -> SettlementClosing | None:
+    """The documentary close in effect: financial or administrative zero (R7-2)."""
+    return db.get(SettlementClosing, settlement.current_closing_id) if settlement.current_closing_id else None
+
+
 def reopenings(db: Session, settlement_id: int) -> list[SettlementReopening]:
     return list(
         db.scalars(
@@ -592,7 +752,7 @@ def _plan(db: Session, settlement: Settlement) -> Plan:
     def add(key: LegKey, amount: Decimal) -> None:
         legs[key] = legs.get(key, ZERO) + amount
 
-    add(("account", ledger.system_account_id(db, "delivery_collections")), -totals.expected)
+    add(("account", ledger.system_account_id(db, service.profile(settlement).collections_account)), -totals.expected)
     for box_id, box in totals.by_box.items():
         add(("account", box_id), box.total)
     for bank_id, amount in plan.verified_by_bank.items():
@@ -745,5 +905,9 @@ def _fingerprint(
     portfolio = sorted([c.id, service.money(c.amount)] for c in cheques.justifying(locked_cheques))
     if portfolio:  # same: absent when there are none, so a close made before R4 keeps its fingerprint
         payload["cheques"] = portfolio
+    if plan.settlement.type != service.DELIVERY:  # absent for delivery, so its earlier closes keep their fingerprint
+        payload["type"] = plan.settlement.type
+        payload["outlet"] = plan.settlement.outlet_id
+        payload["kind"] = ADMINISTRATIVE_ZERO if plan.administrative_zero else "FINANCIAL"
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode()).hexdigest()

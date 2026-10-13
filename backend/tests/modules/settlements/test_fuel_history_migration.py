@@ -13,7 +13,6 @@ from fastapi.testclient import TestClient
 from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
-from app.modules.settlements.delivery import expenses
 from tests.conftest import TRUNCATED_TABLES, alembic_config
 from tests.modules.settlements.fuel_support import BASE, add_fuel, fuel, fuel_category, last_expense, vehicle
 from tests.modules.settlements.test_settlement_close_api import close, create, reopen
@@ -193,19 +192,16 @@ def test_a_voided_fuel_load_in_correction_also_blocks(as_role, setup, db: Sessio
 
 
 def test_once_the_correction_is_closed_the_upgrade_passes(  # type: ignore[no-untyped-def]
-    as_role, setup, correcting, db: Session, monkeypatch: pytest.MonkeyPatch
+    as_role, setup, correcting, db: Session
 ) -> None:
-    """[6] [7] [8] The correction is finished with the code deployed before R5-4 (whose close writes no fuel
-    snapshot), then 0017 runs: the snapshot is the new close's, 50 l x $1.600, never a mix. Down and up again
-    stays green."""
-    _down(db)
-    with pytest.raises(RuntimeError):
-        _up(db)
-    monkeypatch.setattr(expenses, "publish_fuel", lambda *_: None)
+    """[6] [7] [8] Once the correction is closed, 0017 runs: the snapshot is the new close's, 50 l x $1.600,
+    never a mix. Down and up again stays green. Since 0023 the models need the head schema, so the correction
+    can no longer be closed at 0016 with today's code: it is closed at head and the schema then goes down to
+    0016, where 0017 rebuilds the snapshot from the loads; the refusal while it is open is [4] [5]."""
     surplus = {"target": "EMPLOYEE", "employee_id": setup["pedro"], "amount": "20000"}  # $80.000 against $60.000
     response = close(as_role("operator"), correcting, surplus, version=2)
     assert response.status_code == 201, response.text
-    monkeypatch.undo()
+    _down(db)
     _up(db)
     rows = _rows(db, SNAPSHOT)
     assert rows == _rows(db, IN_EFFECT)

@@ -7,7 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { formatMoney } from "@/lib/format";
 import type { Account } from "@/modules/settlements/cash/api";
 
-import { deliveryPath, type Denomination, type Settlement } from "./api";
+import { settlementPath, type Denomination, type Settlement } from "./api";
 import { ActionDialog, selectClass } from "./form";
 import { fromCents, toCents } from "./money";
 import { useDeliveryAction } from "./use-delivery-action";
@@ -78,7 +78,7 @@ export function CountDialog({
       validate={validate}
       build={() => ({
         method: "PUT",
-        path: deliveryPath(settlement.id, "/count"),
+        path: settlementPath(settlement, "/count"),
         body: {
           lines: rows
             .filter((row) => quantityOf(row) > 0)

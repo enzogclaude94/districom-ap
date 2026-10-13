@@ -44,7 +44,7 @@ DistriCom es una plataforma modular (ADR 006). Este roadmap tiene tres carriles:
 | R4 | Cartera de cheques | **DONE** (aprobada por Enzo el 2026-10-09; PRs #17, #18 y #19) | R2 · R3 |
 | R5 | Combustible y vehículos | **DONE** (R5‑1 a R5‑4; `0014`–`0017` congeladas) | R2 |
 | R6 | Pagos a proveedores y terceros | **DONE** (2026-10-11) | R1 · R4 |
-| R7 | Boca de expendio | IN_PROGRESS (arquitectura aprobada 2026-10-11, ADR 009; R7‑1 en revisión) | R2–R5 |
+| R7 | Boca de expendio | IN_PROGRESS (arquitectura aprobada 2026-10-11, ADR 009; R7‑1 DONE; R7‑2 en revisión) | R2–R5 |
 | R8 | Cuenta interna de empleados y liquidación semanal | PLANNED | R1 · R2 |
 | R9 | Endurecimiento | PLANNED | todas |
 
@@ -238,9 +238,9 @@ Arquitectura aprobada por Enzo el 2026-10-11 (alternativa B, D1–D9, ajustes 1�
 
 | PR | Contenido | Estado |
 |---|---|---|
-| R7‑1 | Maestro de bocas en plataforma (`0021`) y responsables por vigencia en Rendiciones (`0022`), pantalla `/bocas` | IN_REVIEW |
-| R7‑2 | Rendición `OUTLET` (esperado nulo/≥ 0, sin pendientes, «Cobranzas de boca», cierre) | PLANNED — requiere aprobación de Enzo |
-| R7‑3 | Entregas parciales `OUTLET_REMITTANCE` a una caja, «Entregas a cuenta — {Boca}» | PLANNED |
+| R7‑1 | Maestro de bocas en plataforma (`0021`) y responsables por vigencia en Rendiciones (`0022`), pantalla `/bocas` | **DONE** (PR #34, aprobada por Enzo el 2026-10-11 con sus desvíos documentados; mergeado `2ce4ebd`, CI de main 4/4; `0021` y `0022` congeladas) |
+| R7‑2 | Rendición `OUTLET` sin entregas parciales (esperado nulo/≥ 0, sin pendientes ni combustible, «Cobranzas de boca», cierre, cierre administrativo cero); `0023` | IN_REVIEW (autorizada por Enzo el 2026-10-11, con la respuesta a R7‑2‑Q1) |
+| R7‑3 | Entregas parciales `OUTLET_REMITTANCE` a una caja, «Entregas a cuenta — {Boca}» | PLANNED — requiere aprobación de Enzo |
 | R7‑4 | Pantallas de boca, ayuda del conteo final, móvil y E2E de punta a punta | PLANNED |
 
 ### R8 — Empleados: cuenta interna y liquidación semanal
