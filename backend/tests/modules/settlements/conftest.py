@@ -117,3 +117,57 @@ def driver(db: Session) -> Callable[..., int]:
         return employee.id
 
     return _driver
+
+
+# --- R7-2: bocas de expendio -----------------------------------------------------------------------
+
+
+class Roles:
+    """The test client is one browser: each property logs it in as that user and returns it."""
+
+    def __init__(self, as_role) -> None:  # type: ignore[no-untyped-def]
+        self._as = as_role
+
+    @property
+    def admin(self) -> TestClient:
+        return self._as("admin")  # type: ignore[no-any-return]
+
+    @property
+    def operator(self) -> TestClient:
+        return self._as("operator")  # type: ignore[no-any-return]
+
+    @property
+    def viewer(self) -> TestClient:
+        return self._as("viewer")  # type: ignore[no-any-return]
+
+
+@pytest.fixture
+def r(as_role) -> Roles:  # type: ignore[no-untyped-def]
+    return Roles(as_role)
+
+
+@pytest.fixture
+def boca(r: Roles) -> Callable[[str], int]:
+    def _boca(code: str) -> int:
+        created = r.admin.post("/api/v1/outlets", json={"code": code, "name": f"Boca {code}"})
+        assert created.status_code == 201, created.text
+        return created.json()["id"]  # type: ignore[no-any-return]
+
+    return _boca
+
+
+@pytest.fixture
+def employee(db: Session) -> Callable[[str], int]:
+    def _employee(name: str) -> int:
+        row = Employee(full_name=name)
+        db.add(row)
+        db.commit()
+        return row.id
+
+    return _employee
+
+
+@pytest.fixture
+def ids(r: Roles) -> dict[str, int]:
+    """Ids of the system accounts by code (and of the bank accounts by name)."""
+    return {a["code"] or a["name"]: a["id"] for a in r.admin.get("/api/v1/settlements/accounts").json()}
