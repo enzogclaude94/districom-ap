@@ -55,6 +55,9 @@ ACCOUNT_KINDS = (
     "MERCHANDISE_PAYMENTS",
     "THIRD_PARTY_REFUNDS",
     "OTHER_PAYMENTS",
+    # R7-2: counterpart of the close of a boca de expendio settlement («Cobranzas de boca»): what the boca had
+    # to render leaves it. Technical, never available money; only that close and its reversal touch it.
+    "OUTLET_COLLECTIONS",
 )
 # Accounts whose every leg is one cheque (`ledger_entries.cheque_id`), and only those.
 CHEQUE_KINDS = ("CHEQUE_PORTFOLIO", "CHEQUES_IN_TRANSIT")
@@ -72,6 +75,7 @@ TECHNICAL_KINDS = (
     "MERCHANDISE_PAYMENTS",
     "THIRD_PARTY_REFUNDS",
     "OTHER_PAYMENTS",
+    "OUTLET_COLLECTIONS",
 )
 
 OPERATION_TYPES = (

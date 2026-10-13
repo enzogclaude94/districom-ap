@@ -13,6 +13,7 @@ with a reason; transfers keep every status decision in `transfer_status_events`.
 
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import (
@@ -32,17 +33,21 @@ from sqlalchemy import (
     func,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, IdMixin, TimestampMixin
 
 SCHEMA = "settlements"
 
-SETTLEMENT_TYPES = ("DELIVERY",)  # OUTLET arrives with R7
+SETTLEMENT_TYPES = ("DELIVERY", "OUTLET")  # OUTLET: rendición de boca de expendio (R7-2, ADR 009)
 EXPECTED_SOURCES = ("MANUAL",)  # STORE_SYS arrives when the integration exists
 SETTLEMENT_STATUSES = ("OPEN", "CLOSED")
 TRANSFER_STATUSES = ("DECLARED", "VERIFIED", "REJECTED")
 DIFFERENCE_KINDS = ("SHORTAGE", "SURPLUS")
+# FINANCIAL: the close published a SETTLEMENT_CLOSE. ADMINISTRATIVE_ZERO: an OUTLET settlement of $0 without
+# any movement, closed without a ledger operation (Enzo's R7-2-Q1); the database checks that nothing moved.
+CLOSING_KINDS = ("FINANCIAL", "ADMINISTRATIVE_ZERO")
 ALLOCATION_TARGETS = ("EMPLOYEE", "COMPANY")
 
 _ACCOUNT_FK = f"{SCHEMA}.accounts.id"
@@ -61,22 +66,65 @@ _VOID_CHECK = (
 
 
 class Settlement(IdMixin, TimestampMixin, Base):
-    """One settlement of a driver on a business day. A driver may have several the same day (R2-D7)."""
+    """One settlement of a business day: of a driver (DELIVERY, R2) or of a boca de expendio (OUTLET, R7-2).
+
+    A driver or a boca may have several the same day (R2-D7). The identity depends on the type: a
+    DELIVERY settlement has its driver and no boca, an OUTLET one its boca and no employee.
+    """
 
     __tablename__ = "settlements"
     __table_args__ = (
         CheckConstraint(f"type IN ({_in(SETTLEMENT_TYPES)})", name="type"),
         CheckConstraint(f"expected_source IN ({_in(EXPECTED_SOURCES)})", name="expected_source"),
         CheckConstraint(f"status IN ({_in(SETTLEMENT_STATUSES)})", name="status"),
-        CheckConstraint("expected_amount > 0", name="expected_amount_positive"),
+        CheckConstraint(
+            "(type = 'DELIVERY' AND employee_id IS NOT NULL AND outlet_id IS NULL) OR "
+            "(type = 'OUTLET' AND outlet_id IS NOT NULL AND employee_id IS NULL)",
+            name="identity_by_type",
+        ),
+        # DELIVERY: always known and positive. OUTLET: may be unknown (NULL) or 0 while it is loaded (D2).
+        CheckConstraint(
+            "(type = 'DELIVERY' AND expected_amount IS NOT NULL AND expected_amount > 0) OR "
+            "(type = 'OUTLET' AND (expected_amount IS NULL OR expected_amount >= 0))",
+            name="expected_amount_by_type",
+        ),
+        CheckConstraint("status <> 'CLOSED' OR expected_amount IS NOT NULL", name="closed_has_expected"),
         CheckConstraint("sequence_number >= 1", name="sequence_number_positive"),
         CheckConstraint("version >= 1", name="version_positive"),
         CheckConstraint("request_fingerprint ~ '^[0-9a-f]{64}$'", name="fingerprint_format"),
-        # Rendición 1, 2... of the same driver and day; the number is generated, never typed.
-        UniqueConstraint("type", "employee_id", "business_date", "sequence_number", name="uq_settlements_sequence"),
+        # Rendición 1, 2... of the same driver (or boca) and day; the number is generated, never typed.
+        Index(
+            "uq_settlements_sequence",
+            "employee_id",
+            "business_date",
+            "sequence_number",
+            unique=True,
+            postgresql_where=text("type = 'DELIVERY'"),
+        ),
+        Index(
+            "uq_settlements_outlet_sequence",
+            "outlet_id",
+            "business_date",
+            "sequence_number",
+            unique=True,
+            postgresql_where=text("type = 'OUTLET'"),
+        ),
         Index("ix_settlements_business_date", "business_date"),
-        # A closed settlement always has the close that is in effect in the ledger.
-        CheckConstraint("status <> 'CLOSED' OR current_close_operation_id IS NOT NULL", name="closed_has_close"),
+        # A closed settlement always has the close that is in effect in the ledger; only an OUTLET one may
+        # instead have an administrative zero close in effect (checked against its load at commit, 0023).
+        CheckConstraint(
+            "status <> 'CLOSED' OR current_close_operation_id IS NOT NULL "
+            "OR (type = 'OUTLET' AND current_closing_id IS NOT NULL)",
+            name="closed_has_close",
+        ),
+        # A close in effect in the ledger is always a documented close; a DELIVERY one is always financial.
+        CheckConstraint(
+            "current_close_operation_id IS NULL OR current_closing_id IS NOT NULL", name="close_documented"
+        ),
+        CheckConstraint(
+            "type <> 'DELIVERY' OR current_closing_id IS NULL OR current_close_operation_id IS NOT NULL",
+            name="delivery_close_financial",
+        ),
         CheckConstraint(
             "(reopened_at IS NULL AND reopened_by IS NULL AND reopen_reason IS NULL) OR "
             "(reopened_at IS NOT NULL AND reopened_by IS NOT NULL AND length(btrim(coalesce(reopen_reason, ''))) > 0)",
@@ -87,9 +135,15 @@ class Settlement(IdMixin, TimestampMixin, Base):
 
     type: Mapped[str] = mapped_column(String(20))
     business_date: Mapped[date] = mapped_column(Date)
-    employee_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("employees.id", ondelete="RESTRICT"), index=True)
+    # DELIVERY: the driver. NULL for OUTLET.
+    employee_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("employees.id", ondelete="RESTRICT"), index=True
+    )
+    # OUTLET: the boca de expendio (platform). NULL for DELIVERY.
+    outlet_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("outlets.id", ondelete="RESTRICT"), index=True)
     sequence_number: Mapped[int] = mapped_column(Integer)
-    expected_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2))
+    # NULL only for an OUTLET settlement whose Store Sys amount is not loaded yet; required to close it.
+    expected_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     expected_source: Mapped[str] = mapped_column(String(20), server_default="MANUAL")
     external_reference: Mapped[str | None] = mapped_column(String(100))
     notes: Mapped[str | None] = mapped_column(Text)
@@ -101,8 +155,19 @@ class Settlement(IdMixin, TimestampMixin, Base):
     request_fingerprint: Mapped[str] = mapped_column(String(64))
     created_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"))
     # Financial state (R2-2): the SETTLEMENT_CLOSE in effect, kept while a reopened settlement is corrected.
+    # NULL with a close in effect only after an administrative zero close (OUTLET, R7-2).
     current_close_operation_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("settlements.financial_operations.id", ondelete="RESTRICT")
+    )
+    # The documentary close in effect (R7-2): financial or administrative zero; kept while it is corrected.
+    current_closing_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey(
+            "settlements.settlement_closings.id",
+            ondelete="RESTRICT",
+            use_alter=True,
+            name="fk_settlements_current_closing_id_settlement_closings",
+        ),
     )
     closed_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"))
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -336,13 +401,18 @@ class SettlementClosing(IdMixin, Base):
     __tablename__ = "settlement_closings"
     __table_args__ = (
         CheckConstraint("request_fingerprint ~ '^[0-9a-f]{64}$'", name="fingerprint_format"),
+        CheckConstraint(f"kind IN ({_in(CLOSING_KINDS)})", name="kind"),
+        CheckConstraint("(kind = 'FINANCIAL') = (operation_id IS NOT NULL)", name="operation_by_kind"),
+        CheckConstraint("kind = 'FINANCIAL' OR snapshot IS NOT NULL", name="administrative_snapshot"),
         UniqueConstraint("settlement_id", "settlement_version", name="uq_settlement_closings_version"),
         {"schema": SCHEMA},
     )
 
     settlement_id: Mapped[int] = mapped_column(BigInteger, ForeignKey(_SETTLEMENT_FK, ondelete="RESTRICT"), index=True)
     settlement_version: Mapped[int] = mapped_column(Integer)
-    operation_id: Mapped[int] = mapped_column(
+    kind: Mapped[str] = mapped_column(String(30), server_default="FINANCIAL")
+    # The SETTLEMENT_CLOSE it published; NULL for an administrative zero close, which publishes nothing.
+    operation_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("settlements.financial_operations.id", ondelete="RESTRICT"), unique=True
     )
     reversal_operation_id: Mapped[int | None] = mapped_column(
@@ -351,6 +421,9 @@ class SettlementClosing(IdMixin, Base):
     # Everything the close meant (totals, difference, allocations, legs): same version + other content
     # is an idempotency conflict, never the old close returned silently.
     request_fingerprint: Mapped[str] = mapped_column(String(64))
+    # What an administrative zero close certified (all its totals at $0); NULL for a financial close, whose
+    # document is its ledger operation.
+    snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     closed_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"))
     closed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -370,8 +443,12 @@ class SettlementReopening(IdMixin, Base):
     settlement_id: Mapped[int] = mapped_column(BigInteger, ForeignKey(_SETTLEMENT_FK, ondelete="RESTRICT"), index=True)
     from_version: Mapped[int] = mapped_column(Integer)
     to_version: Mapped[int] = mapped_column(Integer)
-    # The SETTLEMENT_CLOSE that stayed in effect in the ledger while the settlement was corrected.
-    close_operation_id: Mapped[int] = mapped_column(
+    # The close that stayed in effect while the settlement was corrected, and its SETTLEMENT_CLOSE (NULL when
+    # that close was an administrative zero close, R7-2).
+    closing_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("settlements.settlement_closings.id", ondelete="RESTRICT")
+    )
+    close_operation_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("settlements.financial_operations.id", ondelete="RESTRICT")
     )
     reason: Mapped[str] = mapped_column(Text)

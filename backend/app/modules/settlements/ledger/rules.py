@@ -22,6 +22,8 @@ class OperationRule:
     signs: tuple[tuple[str, int], ...] = ()
     # Kinds of which, together, there must be exactly one leg (a counterpart that depends on the document).
     counterpart_one_of: frozenset[str] = frozenset()
+    # Kinds of which, together, there may be at most one leg.
+    at_most_one_of: frozenset[str] = frozenset()
 
 
 RULES: dict[str, OperationRule] = {
@@ -45,26 +47,33 @@ RULES: dict[str, OperationRule] = {
     # employees or the company. Who may absorb a difference for the company is checked by the settlement,
     # which owns that rule.
     # R4-1: each cheque received (physical) or verified (ECHEQ) enters "Cartera de cheques" with its own leg.
+    # R7-2: the close of a boca de expendio settlement takes its expected amount out of «Cobranzas de boca»
+    # instead, and has no collections leg when its expected amount is 0. The settlement chooses the account by
+    # its type; the database checks it against the settlement (0023: only an OUTLET close and its reversal
+    # touch «Cobranzas de boca», and with exactly -expected).
     "SETTLEMENT_CLOSE": OperationRule(
         "operator",
         CASH_AND_BANK
         | {
             "DELIVERY_COLLECTIONS",
+            "OUTLET_COLLECTIONS",
             "EXPENSE",
             "EMPLOYEE",
             "SETTLEMENT_DIFFERENCE",
             "PENDING_COLLECTIONS",
             "CHEQUE_PORTFOLIO",
         },
-        "DELIVERY_COLLECTIONS",
+        None,
         (
             ("DELIVERY_COLLECTIONS", -1),
+            ("OUTLET_COLLECTIONS", -1),
             ("CASH_BOX", 1),
             ("BANK", 1),
             ("EXPENSE", 1),
             ("PENDING_COLLECTIONS", 1),
             ("CHEQUE_PORTFOLIO", 1),
         ),
+        at_most_one_of=frozenset({"DELIVERY_COLLECTIONS", "OUTLET_COLLECTIONS"}),
     ),
     # A customer pays a pending collection (R3-2): it leaves "Pendientes de cobro" and enters the cash box
     # (CASH) or the bank (TRANSFER). The pending decides which one; exactly two legs.
@@ -178,6 +187,9 @@ REVERSIBLE_DOCUMENT_TYPES = frozenset(
 # company. Every other debit of a bank (withdrawal, transfer out, a reversal...) keeps every end-of-day
 # balance from its date on >= 0; incomes are never limited. The database applies the same rule (0013).
 EXTERNAL_BANK_DEBITS = frozenset({"CHEQUE_REJECTION"})
+# Document operations that a corrected document may withdraw without replacing them (`withdraw_document_operation`):
+# an OUTLET settlement corrected to $0 is closed again without a ledger operation (Enzo's R7-2-Q1).
+WITHDRAWABLE_DOCUMENT_TYPES = frozenset({"SETTLEMENT_CLOSE"})
 # REVERSAL has no rule here: it is only built by `reverse_operation` from the original's legs.
 REVERSAL_MIN_ROLE = "admin"
 
@@ -190,6 +202,8 @@ def leg_shape_error(rule: OperationRule, kinds: list[str], signs: list[int]) -> 
         return "La operación debe tener exactamente un movimiento en la cuenta de contrapartida."
     if rule.counterpart_one_of and sum(kind in rule.counterpart_one_of for kind in kinds) != 1:
         return "La operación debe tener exactamente un movimiento en la cuenta de contrapartida."
+    if rule.at_most_one_of and sum(kind in rule.at_most_one_of for kind in kinds) > 1:
+        return "La operación tiene más de un movimiento en las cuentas de contrapartida."
     required = dict(rule.signs)
     for kind, sign in zip(kinds, signs, strict=True):
         if kind in required and required[kind] != sign:

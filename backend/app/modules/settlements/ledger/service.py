@@ -47,6 +47,7 @@ from app.modules.settlements.ledger.rules import (
     REVERSAL_MIN_ROLE,
     REVERSIBLE_DOCUMENT_TYPES,
     RULES,
+    WITHDRAWABLE_DOCUMENT_TYPES,
     leg_shape_error,
 )
 from app.platform.audit.service import record_change
@@ -340,6 +341,46 @@ def replace_operation(
         reverses=None,
     )
     return Replaced(reversal.operation, replacement.operation, created=True)
+
+
+def withdraw_document_operation(
+    db: Session,
+    *,
+    actor: User,
+    original_id: int,
+    type: str,
+    source: SourceRef,
+    reason: str,
+    reversal_request_id: UUID,
+) -> Posted:
+    """Undo a document's operation when its corrected version has no financial effect at all: its REVERSAL
+    and nothing in its place (an OUTLET settlement corrected to $0, closed again administratively; R7-2).
+
+    The counterpart of `replace_operation` without a replacement: same role as the document's own
+    operation, the ORIGINAL business date, funds checked on that date and every later end of day (taking
+    back the cash of a close whose cash already left the box is `insufficient_funds`). Only for the types
+    in `WITHDRAWABLE_DOCUMENT_TYPES` and the operation of that same document. A retry returns it.
+    """
+    rule = RULES.get(type)
+    if rule is None or type not in WITHDRAWABLE_DOCUMENT_TYPES:
+        raise AppError(422, "unknown_operation_type", "El tipo de operación no se puede retirar.")
+    _require_role(actor, rule.min_role)
+    original = db.get(FinancialOperation, original_id)
+    if original is None:
+        raise AppError(404, "operation_not_found", "La operación no existe.")
+    if (original.type, original.source_type, original.source_id) != (type, source.type, source.id):
+        raise AppError(422, "invalid_document_reversal", "La operación no pertenece a ese documento.")
+    return _post(
+        db,
+        actor=actor,
+        type="REVERSAL",
+        legs=[Leg(entry.account_id, -entry.amount, entry.cheque_id) for entry in original.entries],
+        client_request_id=reversal_request_id,
+        business_date=original.business_date,
+        description=reason,
+        source=None,
+        reverses=original,
+    )
 
 
 def _post(
