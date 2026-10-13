@@ -4,6 +4,19 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Added — Rendición de boca sin entregas parciales (R7‑2)
+- **R7‑1 DONE** (aprobada por Enzo el 2026-10-11; PR #34 mergeado, `0021` y `0022` congeladas). **R7‑2 autorizada** con la respuesta a R7‑2‑Q1 (cierre administrativo cero).
+- **Rendición de boca** (`type = OUTLET` en `settlements.settlements`, migración `0023`): la boca reemplaza al repartidor (`outlet_id` obligatorio, `employee_id` nulo); reparto no cambia. Alta por operator, idempotente, con la boca activa y lock por boca y día; la Rendición 2 del mismo día pide confirmación explícita. Una boca desactivada después termina sus rendiciones abiertas.
+- **Importe esperado de Store Sys:** abierta puede ser nulo o ≥ 0; para cerrar es obligatorio («Cargá el importe esperado de Store Sys para cerrar la rendición.»). Un día sin ventas es $0.
+- **Componentes:** los mismos de reparto (conteo, agregados, transferencias verificadas al Banco, cheques que entran a Cartera al cierre, gastos), sin pendientes (`pending_not_enabled_for_outlets`) ni combustible (`fuel_not_allowed_for_outlet`), en servicio y base.
+- **«Cobranzas de boca»** (`OUTLET_COLLECTIONS`): cuenta técnica única, puede ser negativa, fuera del tablero de Cajas. El cierre de boca la mueve por −esperado; solo ese cierre y su reverso la tocan (regla del ledger y triggers).
+- **Diferencias:** el mismo motor; los responsables del día se muestran como sugerencia, sin importe precargado y sin reparto automático; se puede asignar a cualquier empleado.
+- **Cierre administrativo cero** (R7‑2‑Q1): una boca de $0 sin ningún movimiento se cierra **sin operación de ledger** ni patas de $0, con su cierre (`settlement_closings.kind = ADMINISTRATIVE_ZERO`, snapshot), versión, token de vista previa, usuario e instante, auditoría, estado CLOSED e historia. La base lo verifica al commit; $0,01 de cualquier componente lo impide. Reparto nunca cierra sin operación. Reabrir un cierre cero no revierte nada; financiero → cero revierte el cierre anterior.
+- **Cierre en vigor documental:** `settlements.current_closing_id` y `settlement_reopenings.closing_id`; el estado financiero se deriva del cierre documental, no solo de la operación.
+- **Pantallas:** «Rendiciones de boca» en el menú (`/rendiciones/boca`: lista con filtros, alta) y `/rendiciones/boca/{id}` (tablero, carga, vista previa, cierre, reapertura, historia) reutilizando las de reparto; «N rendiciones abiertas» en `/bocas/{id}`. Un enlace a una rendición de boca desde un cheque, gasto o Cajas abre la pantalla de boca.
+- **Downgrade de `0023`** rechazado si ya existe una rendición de boca.
+- **Tests:** API, cierre cero (los 12 casos), SQL directo, migración, frontend y E2E (`docs/TESTING.md`).
+
 ### Added — Bocas de expendio y responsables (R7‑1)
 - **Arquitectura de R7 aprobada** por Enzo el 2026-10-11 (alternativa B, decisiones D1–D9, ajustes 1–5) y fijada en **ADR 009**, que separa lo decidido de lo implementado. Solo R7‑1 autorizada.
 - **Maestro de bocas de expendio en plataforma** (`public.outlets`, migración `0021`): código obligatorio, único e inmutable (`^[A-Z0-9-]{2,20}$`, en mayúsculas), nombre corregible con clave normalizada única (no hay dos bocas con nombres operativamente iguales), descripción opcional, activación, auditoría `platform.outlet.*` y sin DELETE. Pantalla `/bocas` (escritorio y teléfono) con Nueva boca, Corregir, Desactivar (con advertencia) y Reactivar para el admin de plataforma; consulta para todos. Ficha `/bocas/{id}` con los cambios del maestro.
