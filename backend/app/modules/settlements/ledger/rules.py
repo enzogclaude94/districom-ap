@@ -51,12 +51,15 @@ RULES: dict[str, OperationRule] = {
     # instead, and has no collections leg when its expected amount is 0. The settlement chooses the account by
     # its type; the database checks it against the settlement (0023: only an OUTLET close and its reversal
     # touch «Cobranzas de boca», and with exactly -expected).
+    # R7-3: it also consolidates the boca's remittances in effect: «Entregas a cuenta — {Boca}» +their total
+    # (the cash boxes already received them, so they are not moved again; 0024 checks it).
     "SETTLEMENT_CLOSE": OperationRule(
         "operator",
         CASH_AND_BANK
         | {
             "DELIVERY_COLLECTIONS",
             "OUTLET_COLLECTIONS",
+            "OUTLET_ADVANCES",
             "EXPENSE",
             "EMPLOYEE",
             "SETTLEMENT_DIFFERENCE",
@@ -67,6 +70,7 @@ RULES: dict[str, OperationRule] = {
         (
             ("DELIVERY_COLLECTIONS", -1),
             ("OUTLET_COLLECTIONS", -1),
+            ("OUTLET_ADVANCES", 1),
             ("CASH_BOX", 1),
             ("BANK", 1),
             ("EXPENSE", 1),
@@ -163,6 +167,15 @@ RULES: dict[str, OperationRule] = {
         ),
         PAYMENT_COUNTERPARTS,
     ),
+    # Cash a boca hands over during the day (R7-3): its «Entregas a cuenta» -X, the destination cash box +X. Its
+    # document is the remittance, which builds the two legs; the database checks them against it (0024). Never
+    # to a bank nor a technical account.
+    "OUTLET_REMITTANCE": OperationRule(
+        "operator",
+        frozenset({"OUTLET_ADVANCES", "CASH_BOX"}),
+        "OUTLET_ADVANCES",
+        (("OUTLET_ADVANCES", -1), ("CASH_BOX", 1)),
+    ),
 }
 CHEQUE_CYCLE_TYPES = frozenset({"CHEQUE_DEPOSIT", "CHEQUE_CREDIT", "CHEQUE_REJECTION", "CHEQUE_RETURN"})
 # Operations that belong to a source document: only that document's flow corrects them, never Cajas.
@@ -175,12 +188,13 @@ DOCUMENT_TYPES = frozenset(
         "CHEQUE_OWNER_CONTRIBUTION",
         "DIRECT_EXPENSE",
         "PAYMENT",
+        "OUTLET_REMITTANCE",
     }
     | CHEQUE_CYCLE_TYPES
 )
 # Document operations undone with `reverse_document_operation` (a settlement close is replaced instead).
 REVERSIBLE_DOCUMENT_TYPES = frozenset(
-    {"PENDING_COLLECTION", "PENDING_WRITE_OFF", "DIRECT_EXPENSE", "PAYMENT"} | CHEQUE_CYCLE_TYPES
+    {"PENDING_COLLECTION", "PENDING_WRITE_OFF", "DIRECT_EXPENSE", "PAYMENT", "OUTLET_REMITTANCE"} | CHEQUE_CYCLE_TYPES
 )
 # «Banco en descubierto» (Enzo's R4-2 policy): the only debits a bank account books even if they create or
 # deepen an overdraft. A rejection of a cheque already credited is an external event, not a decision of the

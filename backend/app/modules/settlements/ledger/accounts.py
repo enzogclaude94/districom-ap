@@ -1,5 +1,7 @@
 """Accounts of the ledger that an admin creates: one contributions account per partner (P3)."""
 
+from dataclasses import dataclass
+
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -97,6 +99,67 @@ def employee_account_id(db: Session, *, employee_id: int, employee_name: str, us
         after={"name": account.name, "kind": account.kind, "employee_id": employee_id},
     )
     return account.id
+
+
+def outlet_advances_account_id(db: Session, *, outlet_id: int, outlet_name: str, user_id: int) -> int:
+    """«Entregas a cuenta — {Boca}» (`OUTLET_ADVANCES`), created on first use (R7-3), never seeded.
+
+    At most one per boca (unique index); a concurrent first use returns the account the other transaction
+    created. May be negative: cash the boca already handed over to a cash box, not yet consolidated by the close
+    of its settlement. If another account already has that name (a boca named like a partner), the boca's id
+    tells them apart.
+    """
+    existing = advances_account_of(db, outlet_id)
+    if existing is not None:
+        return existing
+    name = f"Entregas a cuenta — {' '.join(outlet_name.split())}"
+    if db.scalar(select(Account.id).where(Account.name_key == account_name_key(name))) is not None:
+        name = f"{name} (#{outlet_id})"
+    account = Account(name=name, kind="OUTLET_ADVANCES", allow_negative=True, outlet_id=outlet_id)
+    try:
+        with db.begin_nested():
+            db.add(account)
+            db.flush()
+    except IntegrityError:
+        winner = advances_account_of(db, outlet_id)
+        if winner is None:
+            raise
+        return winner
+    record_change(
+        db,
+        "settlements.account.created",
+        action="create",
+        user_id=user_id,
+        entity_type="account",
+        entity_id=account.id,
+        before=None,
+        after={"name": account.name, "kind": account.kind, "outlet_id": outlet_id},
+    )
+    return account.id
+
+
+def advances_account_of(db: Session, outlet_id: int) -> int | None:
+    """The «Entregas a cuenta» of a boca, if it was ever used."""
+    return db.scalar(select(Account.id).where(Account.outlet_id == outlet_id, Account.kind == "OUTLET_ADVANCES"))
+
+
+@dataclass(frozen=True)
+class CashBox:
+    id: int
+    name: str
+
+
+def active_cash_box(db: Session, account_id: int) -> CashBox | None:
+    """The account if it is an active cash box (where a boca's remittance may go, R7-3); None otherwise."""
+    account = db.get(Account, account_id)
+    if account is None or account.kind != "CASH_BOX" or not account.active:
+        return None
+    return CashBox(account.id, account.name)
+
+
+def lock_account(db: Session, account_id: int) -> None:
+    """Take an account row FOR NO KEY UPDATE: serializes the writers of one account's documents."""
+    db.execute(select(Account.id).where(Account.id == account_id).with_for_update(key_share=True))
 
 
 def employees_of_accounts(db: Session, account_ids: list[int]) -> dict[int, int]:
