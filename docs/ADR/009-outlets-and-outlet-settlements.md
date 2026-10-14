@@ -3,7 +3,7 @@
 - Estado: Aceptado · 2026-10-11 (aprobación de la arquitectura de R7 por Enzo, alternativa B, decisiones D1–D9 y ajustes 1–5)
 - Amplía: ADR 006 (plataforma modular), ADR 007 (módulo Rendiciones) y ADR 008 (ledger). No los reemplaza.
 
-Este ADR separa lo **DECIDIDO** (vale para todo R7) de lo **IMPLEMENTADO** (lo que ya existe en el código). Al cierre de R7‑3 están implementados el maestro de bocas, los responsables, la rendición de boca (con el cierre administrativo cero) y las entregas parciales con «Entregas a cuenta — {Boca}» (`OUTLET_ADVANCES`); quedan para R7‑4 las pantallas de boca completas, el móvil, la ayuda del conteo final y el E2E de punta a punta.
+Este ADR separa lo **DECIDIDO** (vale para todo R7) de lo **IMPLEMENTADO** (lo que ya existe en el código). Al cierre de R7‑4 está implementado todo R7: el maestro de bocas, los responsables, la rendición de boca (con el cierre administrativo cero), las entregas parciales con «Entregas a cuenta — {Boca}» (`OUTLET_ADVANCES`) y la operación de punta a punta (tablero Rendiciones › Bocas, ficha, detalle, ayuda del conteo final, historia, móvil y E2E), sin migración en R7‑4.
 
 ## Contexto
 Una boca de expendio es un punto de venta que rinde lo cobrado en el día, con entregas parciales de efectivo durante la jornada. Enzo pidió la propuesta completa antes de cualquier código (`PROPUESTA_R7_BOCA_DE_EXPENDIO.md`) y aprobó la alternativa B: la boca rinde con la misma rendición que el reparto, y lo entregado durante el día se lleva en una cuenta técnica por boca, sin una caja ficticia.
@@ -56,13 +56,16 @@ Una boca de expendio es un punto de venta que rinde lo cobrado en el día, con e
 ### 5. El ledger es la única fuente — DECIDIDO
 Todo movimiento de valores de la boca pasa por `ledger/service.py` (ADR 008). Ningún saldo de boca se guarda ni se edita; se deriva de las entradas.
 
+### 6. Operación diaria de la boca — DECIDIDO · IMPLEMENTADO (R7‑4, sin migración)
+Pedido de Enzo del 2026-10-14. La pantalla principal es **Rendiciones › Bocas** (`/rendiciones/boca`): todas las bocas de un día, con su estado (Sin rendición, Abierta, Cerrada, En corrección), sus cifras y acciones según el rol; la ficha `/bocas/{id}` sigue siendo el maestro y muestra la «Operación de Rendiciones» sin reemplazar el tablero. Mientras una rendición está abierta lo que falta es «Resta rendir o justificar», nunca una diferencia; la diferencia existe solo al cerrar. Dos rendiciones del mismo día nunca se suman. El conteo final se cuenta, nunca se deriva del esperado. Detalle en `DATA_MODEL.md §13.7.3`.
+
 ## División en PRs
 | PR | Contenido | Estado |
 |---|---|---|
 | R7‑1 | Maestro de bocas y responsables (`0021`, `0022`) | Implementado y aprobado (PR #34) |
 | R7‑2 | Rendición OUTLET sin entregas parciales (esperado nulo/≥ 0, sin pendientes ni combustible, «Cobranzas de boca», cierre, cierre administrativo cero; `0023`) | Implementado y aprobado (PR #35) |
-| R7‑3 | Entregas parciales `OUTLET_REMITTANCE`, su reverso y su consolidación al cierre (`0024`) | Implementado, en revisión |
-| R7‑4 | Pantallas de boca, móvil, ayuda del conteo final y E2E de punta a punta | Decidido, sin código |
+| R7‑3 | Entregas parciales `OUTLET_REMITTANCE`, su reverso y su consolidación al cierre (`0024`) | Implementado y aprobado (PR #36) |
+| R7‑4 | Pantallas de boca, móvil, ayuda del conteo final y E2E de punta a punta (sin migración) | Implementado, en revisión |
 
 ## Consecuencias
 - Una boca existe una vez para todos los módulos; Rendiciones la nombra por id y nunca guarda su nombre.

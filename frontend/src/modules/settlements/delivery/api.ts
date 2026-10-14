@@ -42,6 +42,12 @@ export interface Summary {
   /** Boca settlements only (R7-3): partial cash handed over to a cash box during the day, in effect. */
   remitted?: string;
   justified: string;
+  /** Boca (R7-4): what justifies besides the remittances (final cash, verified transfers, cheques, expenses). */
+  justified_other?: string;
+  /** Boca (R7-4): remittances the close in effect consolidated; null without a financial close in effect. */
+  remitted_in_effect_close?: string | null;
+  /** Boca (R7-4): expected $0 and nothing loaded; closing it is a $0 close without financial movements. */
+  without_movements?: boolean;
   /**
    * Null for a boca settlement while it is OPEN (R7-3): there is no shortage or surplus until it is closed;
    * `remaining` / `justified_above_expected` say how far it is from the expected amount meanwhile.
@@ -346,6 +352,17 @@ export interface Closing {
   legs: Leg[];
   /** What an administrative zero close certified (all amounts "0.00"); null for a financial close. */
   snapshot: Record<string, string> | null;
+  /** A boca's remittances this close consolidated (R7-4); absent for a delivery. */
+  remittances?: { remittance_id: number; amount: string }[];
+}
+
+/** A load or correction of a boca's Store Sys amount (R7-4), from the audit trail. */
+export interface ExpectedChange {
+  before: string | null;
+  after: string | null;
+  changed_by: number | null;
+  changed_by_name: string | null;
+  changed_at: string;
 }
 
 export interface Reopening {
@@ -367,6 +384,8 @@ export interface History {
   closings: Closing[];
   reopenings: Reopening[];
   differences: Difference[];
+  /** Boca only (R7-4). */
+  expected_changes?: ExpectedChange[];
 }
 
 export interface Denomination {

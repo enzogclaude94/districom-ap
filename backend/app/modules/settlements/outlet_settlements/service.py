@@ -149,17 +149,40 @@ def list_settlements(
     return [(row[0], row[1]) for row in rows], total
 
 
-def open_count(db: Session, outlet_id: int) -> int:
-    """Settlements of the boca still OPEN: never closed or reopened for correction."""
-    outlets.get(db, outlet_id)
-    return (
-        db.scalar(
-            select(func.count())
-            .select_from(Settlement)
-            .where(Settlement.type == OUTLET, Settlement.outlet_id == outlet_id, Settlement.status == "OPEN")
+def of_day(db: Session, business_date: date) -> list[Settlement]:
+    """Every boca settlement of a business day, by boca and number."""
+    return list(
+        db.scalars(
+            select(Settlement)
+            .where(Settlement.type == OUTLET, Settlement.business_date == business_date)
+            .order_by(Settlement.outlet_id, Settlement.sequence_number, Settlement.id)
         )
-        or 0
     )
+
+
+def board_outlets(db: Session, outlet_ids_with_settlements: set[int]) -> list[Outlet]:
+    """The bocas of the daily board: every active one, plus an inactive one with settlements that day."""
+    return [o for o in outlets.list_all(db, include_inactive=True) if o.active or o.id in outlet_ids_with_settlements]
+
+
+def of_outlet(db: Session, outlet_id: int) -> tuple[list[Settlement], Settlement | None]:
+    """The boca's OPEN settlements (oldest first) and its latest settlement."""
+    outlets.get(db, outlet_id)
+    scope = (Settlement.type == OUTLET, Settlement.outlet_id == outlet_id)
+    opened = list(
+        db.scalars(
+            select(Settlement)
+            .where(*scope, Settlement.status == "OPEN")
+            .order_by(Settlement.business_date, Settlement.sequence_number, Settlement.id)
+        )
+    )
+    last = db.scalars(
+        select(Settlement)
+        .where(*scope)
+        .order_by(Settlement.business_date.desc(), Settlement.sequence_number.desc(), Settlement.id.desc())
+        .limit(1)
+    ).first()
+    return opened, last
 
 
 def responsible_suggestions(db: Session, settlement: Settlement) -> list[Employee]:

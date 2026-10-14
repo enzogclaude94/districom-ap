@@ -50,3 +50,9 @@ export function differenceTone(difference: string): Tone {
 
 /** "Rendición n.º 2" */
 export const settlementTitle = (sequence: number) => `Rendición n.º ${sequence}`;
+
+/** The final count of a boca (R7-4, Enzo's words): only what stayed in it after the partial deliveries. */
+export const COUNT_HELP =
+  "Contá solamente el efectivo que quedó físicamente en la Boca después de las entregas parciales.";
+export const COUNT_EXAMPLE =
+  "Ejemplo: se cobraron $ 900.000 y ya se entregaron $ 700.000; quedan $ 200.000 en la Boca: el conteo final es $ 200.000.";

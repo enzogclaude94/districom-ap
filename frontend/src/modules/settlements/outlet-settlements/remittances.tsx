@@ -72,23 +72,42 @@ export function canRemit(settlement: Settlement, canOperate: boolean, isAdmin: b
   return settlement.financial_state === "BEING_CORRECTED" ? isAdmin : canOperate;
 }
 
+/**
+ * Where a remittance stands while its settlement is corrected (R7-4): the close in effect keeps the ones it
+ * consolidated until the new close, and the new close will consolidate the ones in effect now.
+ */
+export function correctionNote(row: Remittance) {
+  if (row.status === "REVERSED") return row.consolidated ? "Sigue en el cierre vigente hasta el nuevo cierre" : null;
+  return row.consolidated ? "Incluida en el cierre vigente" : "Se incluye en el nuevo cierre";
+}
+
 export function SettlementRemittances({
   settlement,
   canOperate,
   isAdmin,
   boxes,
   employees,
+  autoOpen = false,
 }: {
   settlement: Settlement;
   canOperate: boolean;
   isAdmin: boolean;
   boxes: Account[];
   employees: Person[];
+  /** Open «Entregar efectivo» as soon as the cash boxes are known (from the board of bocas). */
+  autoOpen?: boolean;
 }) {
   const [dialog, setDialog] = useState<{ kind: "remit" } | { kind: "reverse"; remittance: Remittance } | null>(null);
+  const [autoDismissed, setAutoDismissed] = useState(false);
   const rows = settlement.remittances ?? [];
-  const close = () => setDialog(null);
+  const allowed = canRemit(settlement, canOperate, isAdmin);
+  const remitting = dialog?.kind === "remit" || (autoOpen && !autoDismissed && allowed && boxes.length > 0);
+  const close = () => {
+    setDialog(null);
+    setAutoDismissed(true);
+  };
   const reversible = settlement.status === "OPEN" && isAdmin;
+  const correcting = settlement.financial_state === "BEING_CORRECTED";
   return (
     <Card>
       <CardHeader className="flex-row flex-wrap items-start justify-between gap-2">
@@ -99,7 +118,7 @@ export function SettlementRemittances({
             consolida. Una entrega no se edita ni se borra: un administrador la revierte con motivo.
           </CardDescription>
         </div>
-        {canRemit(settlement, canOperate, isAdmin) && (
+        {allowed && (
           <Button variant="secondary" size="sm" onClick={() => setDialog({ kind: "remit" })}>
             <Banknote aria-hidden />
             Entregar efectivo
@@ -110,7 +129,7 @@ export function SettlementRemittances({
         {rows.length === 0 ? (
           <p className="py-3 text-center text-sm text-muted-foreground">Sin entregas parciales.</p>
         ) : (
-          <Table aria-label="Entregas parciales">
+          <Table stacked aria-label="Entregas parciales">
             <TableHeader>
               <TableRow>
                 <TableHead>Hora</TableHead>
@@ -129,14 +148,19 @@ export function SettlementRemittances({
                 const reversed = row.status === "REVERSED";
                 return (
                   <TableRow key={row.id} className={cn(reversed && "text-muted-foreground")} data-testid="remittance">
-                    <TableCell className="whitespace-nowrap tabular-nums">
-                      {timeOf(row.delivered_at)}
-                      <span className="block text-xs text-muted-foreground">Cargada por {row.created_by_name}</span>
+                    <TableCell data-label="Hora" className="tabular-nums md:whitespace-nowrap">
+                      <span>
+                        {timeOf(row.delivered_at)}
+                        <span className="block text-xs text-muted-foreground">Cargada por {row.created_by_name}</span>
+                      </span>
                     </TableCell>
-                    <TableCell className={cn("text-right tabular-nums", reversed && "line-through")}>
+                    <TableCell
+                      data-label="Importe"
+                      className={cn("text-right tabular-nums", reversed && "line-through")}
+                    >
                       {formatMoney(row.amount)}
                     </TableCell>
-                    <TableCell>
+                    <TableCell data-label="Caja">
                       {row.operation_id != null ? (
                         <Link
                           href={`/rendiciones/cajas/operaciones/${row.operation_id}`}
@@ -148,20 +172,27 @@ export function SettlementRemittances({
                         row.destination_account_name
                       )}
                     </TableCell>
-                    <TableCell>{row.delivered_by_name ?? "—"}</TableCell>
-                    <TableCell>{row.reference ?? "—"}</TableCell>
-                    <TableCell>
-                      {reversed ? (
-                        <div className="space-y-0.5">
-                          <Badge>Revertida</Badge>
-                          <p className="text-xs">
-                            {row.reversed_by_name} · {row.reversed_at ? formatDateTime(row.reversed_at) : ""}
-                            {row.reversal_reason && <span className="block">Motivo: {row.reversal_reason}</span>}
+                    <TableCell data-label="Entregó">{row.delivered_by_name ?? "—"}</TableCell>
+                    <TableCell data-label="Referencia">{row.reference ?? "—"}</TableCell>
+                    <TableCell data-label="Estado">
+                      <div className="space-y-0.5">
+                        {reversed ? (
+                          <>
+                            <Badge>Revertida</Badge>
+                            <p className="text-xs">
+                              {row.reversed_by_name} · {row.reversed_at ? formatDateTime(row.reversed_at) : ""}
+                              {row.reversal_reason && <span className="block">Motivo: {row.reversal_reason}</span>}
+                            </p>
+                          </>
+                        ) : (
+                          <Badge tone="success">Entregada</Badge>
+                        )}
+                        {correcting && correctionNote(row) && (
+                          <p className="text-xs text-muted-foreground" data-testid="remittance-correction-note">
+                            {correctionNote(row)}
                           </p>
-                        </div>
-                      ) : (
-                        <Badge tone="success">Vigente</Badge>
-                      )}
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell>
                       {reversible && !reversed && (
@@ -181,9 +212,7 @@ export function SettlementRemittances({
           </Table>
         )}
       </CardContent>
-      {dialog?.kind === "remit" && (
-        <RemittanceDialog settlement={settlement} boxes={boxes} employees={employees} onClose={close} />
-      )}
+      {remitting && <RemittanceDialog settlement={settlement} boxes={boxes} employees={employees} onClose={close} />}
       {dialog?.kind === "reverse" && (
         <ReverseRemittanceDialog settlement={settlement} remittance={dialog.remittance} onClose={close} />
       )}
@@ -309,6 +338,10 @@ export function RemittanceDialog({
               </div>
             ))}
           </dl>
+          <p className="text-sm" data-testid="remittance-explanation">
+            Este efectivo entra ahora a {preview.legs[0]?.account_name ?? "la caja"} y quedará imputado a esta rendición
+            cuando se cierre.
+          </p>
           <p className="text-sm text-muted-foreground">
             Entregado en esta rendición: {formatMoney(preview.remitted_before)} → {formatMoney(preview.remitted_after)}
             {preview.expected !== null && ` · Esperado ${formatMoney(preview.expected)}`}

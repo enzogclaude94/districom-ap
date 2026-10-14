@@ -5,9 +5,17 @@ import { SettlementDetail } from "@/modules/settlements/delivery/settlement-deta
 
 export const metadata: Metadata = { title: "Rendición de boca" };
 
-export default async function OutletSettlementPage({ params }: PageProps<"/rendiciones/boca/[id]">) {
+/** A boca settlement; `?accion=entregar` (from the board of bocas) opens «Entregar efectivo». */
+export default async function OutletSettlementPage({ params, searchParams }: PageProps<"/rendiciones/boca/[id]">) {
   const { id } = await params;
+  const { accion } = await searchParams;
   const settlementId = Number(id);
   if (!Number.isSafeInteger(settlementId) || settlementId <= 0) notFound();
-  return <SettlementDetail settlementId={settlementId} type="OUTLET" />;
+  return (
+    <SettlementDetail
+      settlementId={settlementId}
+      type="OUTLET"
+      initialAction={accion === "entregar" ? "remit" : undefined}
+    />
+  );
 }

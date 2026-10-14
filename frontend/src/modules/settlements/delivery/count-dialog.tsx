@@ -4,11 +4,13 @@ import { useState } from "react";
 
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { cn } from "@/lib/cn";
 import { formatMoney } from "@/lib/format";
 import type { Account } from "@/modules/settlements/cash/api";
 
 import { settlementPath, type Denomination, type Settlement } from "./api";
 import { ActionDialog, selectClass } from "./form";
+import { COUNT_EXAMPLE, COUNT_HELP } from "./labels";
 import { fromCents, toCents } from "./money";
 import { useDeliveryAction } from "./use-delivery-action";
 
@@ -52,6 +54,7 @@ export function CountDialog({
   boxes: Account[];
   onClose: () => void;
 }) {
+  const outlet = settlement.type === "OUTLET";
   const [rows, setRows] = useState(() => initialRows(settlement, denominations));
   const action = useDeliveryAction(`count:${settlement.id}`, onClose);
   const total = rows.reduce((sum, row) => sum + quantityOf(row) * toCents(row.value), 0);
@@ -70,7 +73,7 @@ export function CountDialog({
 
   return (
     <ActionDialog
-      title="Conteo de efectivo"
+      title={outlet ? "Conteo final de efectivo" : "Conteo de efectivo"}
       description="Cantidad de billetes de cada denominación y la caja donde quedan."
       submitLabel="Guardar conteo"
       action={action}
@@ -91,7 +94,20 @@ export function CountDialog({
         summary: `Conteo de ${formatMoney(fromCents(total))}`,
       })}
     >
-      <Table>
+      {outlet && (
+        <div
+          className="space-y-1 rounded-md border border-border bg-muted px-3 py-2 text-sm"
+          data-testid="count-dialog-help"
+        >
+          <p className="font-medium">{COUNT_HELP}</p>
+          <p className="text-muted-foreground">{COUNT_EXAMPLE}</p>
+          <p>
+            Ya entregado en esta rendición:{" "}
+            <span className="font-medium tabular-nums">{formatMoney(settlement.summary.remitted ?? "0.00")}</span>
+          </p>
+        </div>
+      )}
+      <Table stacked>
         <TableHeader>
           <TableRow>
             <TableHead>Billete</TableHead>
@@ -103,8 +119,10 @@ export function CountDialog({
         <TableBody>
           {rows.map((row) => (
             <TableRow key={row.code}>
-              <TableCell className="whitespace-nowrap tabular-nums">{formatMoney(row.value)}</TableCell>
-              <TableCell>
+              <TableCell data-label="Billete" className="whitespace-nowrap tabular-nums">
+                {formatMoney(row.value)}
+              </TableCell>
+              <TableCell data-label="Cantidad">
                 <Input
                   aria-label={`Cantidad de billetes de ${formatMoney(row.value)}`}
                   inputMode="numeric"
@@ -114,10 +132,10 @@ export function CountDialog({
                   onChange={(event) => update(row.code, { quantity: event.target.value })}
                 />
               </TableCell>
-              <TableCell>
+              <TableCell data-label="Caja">
                 <select
                   aria-label={`Caja de los billetes de ${formatMoney(row.value)}`}
-                  className={selectClass}
+                  className={cn(selectClass, "max-md:w-44")}
                   value={row.destination ?? ""}
                   onChange={(event) =>
                     update(row.code, { destination: event.target.value ? Number(event.target.value) : null })
@@ -131,7 +149,7 @@ export function CountDialog({
                   ))}
                 </select>
               </TableCell>
-              <TableCell className="text-right whitespace-nowrap tabular-nums">
+              <TableCell data-label="Subtotal" className="text-right whitespace-nowrap tabular-nums">
                 {formatMoney(fromCents(quantityOf(row) * toCents(row.value)))}
               </TableCell>
             </TableRow>

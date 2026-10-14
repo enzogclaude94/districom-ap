@@ -23,16 +23,18 @@ import { outletSettlementApi, outletSettlementQueryKey } from "./api";
  */
 export function NewOutletSettlementDialog({
   initialOutletId,
+  initialBusinessDate,
   onClose,
   onCreated,
 }: {
   initialOutletId?: number;
+  initialBusinessDate?: string;
   onClose: () => void;
   onCreated: (settlement: Settlement) => void;
 }) {
   const dateId = useId();
   const confirmId = useId();
-  const [businessDate, setBusinessDate] = useState(todayIso);
+  const [businessDate, setBusinessDate] = useState(() => initialBusinessDate ?? todayIso());
   const [outletId, setOutletId] = useState<number | null>(initialOutletId ?? null);
   const [expected, setExpected] = useState("");
   const [reference, setReference] = useState("");

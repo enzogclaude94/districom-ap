@@ -42,17 +42,118 @@ function Legs({ legs }: { legs: Leg[] }) {
   );
 }
 
+const expectedText = (value: string | null) => (value === null ? "sin cargar" : formatMoney(value));
+
+/** True when `at` falls after a reopening and before the next close: the settlement was being corrected. */
+function duringCorrection(at: string, history: History) {
+  const time = Date.parse(at);
+  const reopened = history.reopenings.map((r) => Date.parse(r.reopened_at)).filter((r) => r <= time);
+  if (reopened.length === 0) return false;
+  const since = Math.max(...reopened);
+  return !history.closings.some((c) => {
+    const closed = Date.parse(c.closed_at);
+    return closed > since && closed <= time;
+  });
+}
+
+/** What a boca adds to the history (R7-4): its expected amount, its remittances and their reversals. */
+function outletEvents(settlement: Settlement, history: History): Event[] {
+  const events: Event[] = [];
+  const changes = history.expected_changes ?? [];
+  changes.forEach((change, i) => {
+    events.push({
+      at: change.changed_at,
+      rank: 0,
+      key: `expected-${i}`,
+      title:
+        change.before === null ? "Esperado cargado" : change.after === null ? "Esperado borrado" : "Esperado corregido",
+      by: change.changed_by_name ?? undefined,
+      children: (
+        <p>
+          Esperado (Store Sys): {expectedText(change.before)} → {expectedText(change.after)}.
+        </p>
+      ),
+    });
+  });
+  for (const remittance of settlement.remittances ?? []) {
+    const correcting = duringCorrection(remittance.created_at, history);
+    events.push({
+      at: remittance.created_at,
+      rank: 0,
+      key: `remittance-${remittance.id}`,
+      title: `Entrega parcial n.º ${remittance.id} registrada${correcting ? " durante la corrección" : ""}`,
+      by: remittance.created_by_name,
+      children: (
+        <p>
+          {formatMoney(remittance.amount)} a {remittance.destination_account_name}
+          {remittance.delivered_by_name && `, entregó ${remittance.delivered_by_name}`}
+          {remittance.reference && ` · ${remittance.reference}`}. Hora de la entrega{" "}
+          {formatTime(remittance.delivered_at)}.
+        </p>
+      ),
+    });
+    if (remittance.reversed_at) {
+      events.push({
+        at: remittance.reversed_at,
+        rank: 0,
+        key: `remittance-reversal-${remittance.id}`,
+        title: `Entrega parcial n.º ${remittance.id} revertida`,
+        by: remittance.reversed_by_name ?? undefined,
+        children: (
+          <p>
+            {formatMoney(remittance.amount)} salieron de {remittance.destination_account_name}.
+            {remittance.reversal_reason && ` Motivo: ${remittance.reversal_reason}`}
+          </p>
+        ),
+      });
+    }
+  }
+  return events;
+}
+
+const formatTime = (iso: string) =>
+  new Intl.DateTimeFormat("es-AR", {
+    timeZone: "America/Argentina/Buenos_Aires",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).format(new Date(iso));
+
+function ConsolidatedRemittances({ items }: { items: { remittance_id: number; amount: string }[] }) {
+  return (
+    <details className="mt-1" data-testid="consolidated-remittances">
+      <summary className="cursor-pointer text-primary">Entregas consolidadas en este cierre ({items.length})</summary>
+      <ul className="mt-1 space-y-0.5 text-xs text-muted-foreground">
+        {items.map((item) => (
+          <li key={item.remittance_id} className="flex justify-between gap-4 sm:max-w-md">
+            <span>Entrega parcial n.º {item.remittance_id}</span>
+            <span className="tabular-nums">{formatMoney(item.amount)}</span>
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
 /** Every event of the settlement, oldest first, built from its domain tables (never from the audit log). */
 export function timeline(settlement: Settlement, history: History): Event[] {
+  const outlet = settlement.type === "OUTLET";
+  const initialExpected = history.expected_changes?.[0]?.before ?? settlement.expected_amount;
   const events: Event[] = [
     {
       at: settlement.created_at,
       rank: 0,
       key: "created",
-      title: "Rendición creada",
+      title: outlet ? "Rendición abierta" : "Rendición creada",
       by: settlement.created_by_name,
-      children: <p>Fecha de negocio {formatDate(settlement.business_date)}.</p>,
+      children: (
+        <p>
+          Fecha de negocio {formatDate(settlement.business_date)}.
+          {outlet && ` Esperado (Store Sys): ${expectedText(initialExpected ?? null)}.`}
+        </p>
+      ),
     },
+    ...(outlet ? outletEvents(settlement, history) : []),
   ];
   for (const closing of history.closings) {
     if (closing.reversal_operation_id !== null) {
@@ -76,7 +177,7 @@ export function timeline(settlement: Settlement, history: History): Event[] {
       key: `close-${closing.settlement_version}`,
       title:
         (closing.settlement_version === 1 ? "Cierre" : `Nuevo cierre (versión ${closing.settlement_version})`) +
-        (closing.operation_id === null ? " administrativo cero" : ""),
+        (closing.operation_id === null ? " en $0" : ""),
       by: closing.closed_by_name,
       badges: closing.in_effect ? (
         <Badge tone="success">Vigente</Badge>
@@ -85,10 +186,7 @@ export function timeline(settlement: Settlement, history: History): Event[] {
       ),
       children:
         closing.operation_id === null ? (
-          <p>
-            Rendición de $0 sin movimientos: se cerró sin operación en Cajas, fecha de negocio{" "}
-            {formatDate(closing.business_date)}.
-          </p>
+          <p>Sin movimientos financieros: se cerró en $0, fecha de negocio {formatDate(closing.business_date)}.</p>
         ) : (
           <>
             <p>
@@ -96,6 +194,9 @@ export function timeline(settlement: Settlement, history: History): Event[] {
               {formatDate(closing.business_date)}.
             </p>
             <Legs legs={closing.legs} />
+            {outlet && (closing.remittances?.length ?? 0) > 0 && (
+              <ConsolidatedRemittances items={closing.remittances!} />
+            )}
           </>
         ),
     });
@@ -135,7 +236,7 @@ export function timeline(settlement: Settlement, history: History): Event[] {
           <p>Motivo: {reopening.reason}</p>
           <p className="text-muted-foreground">
             {reopening.close_operation_id === null ? (
-              "El cierre administrativo cero siguió vigente mientras se corregía; no había nada en Cajas."
+              "El cierre en $0 siguió vigente mientras se corregía; no había nada en Cajas."
             ) : (
               <>
                 El cierre ({operationLink(reopening.close_operation_id)}) siguió vigente en Cajas mientras se corregía.

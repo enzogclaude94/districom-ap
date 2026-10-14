@@ -378,7 +378,7 @@ def test_list_filters_and_open_count(r: Roles, centro: int, boca: Callable[[str]
     assert missing["difference"] is None
     assert r.viewer.get(OUT, params={"financial_state": "CLOSED"}).json()["total"] == 1
     assert r.viewer.get(OUT, params={"financial_state": "NOT_CLOSED"}).json()["total"] == 2
-    assert r.viewer.get(f"{BASE}/outlets/{centro}/settlements-summary").json() == {"outlet_id": centro, "open_count": 1}
+    assert r.viewer.get(f"{BASE}/outlets/{centro}/settlements-summary").json()["open_count"] == 1
     assert r.viewer.get(f"{BASE}/outlets/{norte}/settlements-summary").json()["open_count"] == 1
     assert b > 0
     assert error(r.viewer.get(f"{BASE}/outlets/999999/settlements-summary")) == (404, "outlet_not_found")

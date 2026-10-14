@@ -2,13 +2,13 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
 import { OutletDetail } from "@/features/outlets/outlet-detail";
-import { OutletOpenSettlements } from "@/modules/settlements/outlet-settlements/open-count";
+import { OutletOperation } from "@/modules/settlements/outlet-settlements/outlet-operation";
 import { OutletResponsibilities } from "@/modules/settlements/outlets/outlet-responsibilities";
 
 export const metadata: Metadata = { title: "Boca de expendio" };
 
 /**
- * The boca (platform) and, for Rendiciones users, its open settlements and responsables (module): composed
+ * The boca (platform) and, for Rendiciones users, its operation and responsables (module): composed
  * here, not imported.
  */
 export default async function OutletPage({ params }: PageProps<"/bocas/[id]">) {
@@ -18,7 +18,7 @@ export default async function OutletPage({ params }: PageProps<"/bocas/[id]">) {
   return (
     <>
       <OutletDetail outletId={outletId} />
-      <OutletOpenSettlements outletId={outletId} />
+      <OutletOperation outletId={outletId} />
       <OutletResponsibilities outletId={outletId} />
     </>
   );

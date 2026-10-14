@@ -91,7 +91,7 @@ export function SettlementCheques({
         {cheques.length === 0 ? (
           <p className="py-3 text-center text-sm text-muted-foreground">Sin cheques.</p>
         ) : (
-          <Table>
+          <Table stacked aria-label="Cheques de la rendición">
             <TableHeader>
               <TableRow>
                 <TableHead>Cheque</TableHead>
@@ -113,47 +113,54 @@ export function SettlementCheques({
                     data-testid={`cheque-row-${cheque.id}`}
                     className={cn(cheque.voided && "text-muted-foreground")}
                   >
-                    <TableCell>
-                      <span className="font-medium">
-                        {KIND_LABELS[cheque.kind]} · {PAYMENT_TYPE_LABELS[cheque.payment_type]}
-                      </span>
-                      <span className="block text-xs text-muted-foreground">
-                        N.º {cheque.cheque_number} · {cheque.bank_name}
-                      </span>
-                      {cheque.load_change_detail && (
-                        <span className="mt-1 block rounded-md border border-warning/40 bg-warning-soft px-2 py-1 text-xs">
-                          {cheque.load_change_detail}
+                    <TableCell data-label="Cheque">
+                      <span>
+                        <span className="font-medium">
+                          {KIND_LABELS[cheque.kind]} · {PAYMENT_TYPE_LABELS[cheque.payment_type]}
                         </span>
-                      )}
+                        <span className="block text-xs text-muted-foreground">
+                          N.º {cheque.cheque_number} · {cheque.bank_name}
+                        </span>
+                        {cheque.load_change_detail && (
+                          <span className="mt-1 block rounded-md border border-warning/40 bg-warning-soft px-2 py-1 text-xs">
+                            {cheque.load_change_detail}
+                          </span>
+                        )}
+                      </span>
                     </TableCell>
                     <TableCell
+                      data-label="Importe"
                       className={cn("text-right whitespace-nowrap tabular-nums", cheque.voided && "line-through")}
                     >
                       {formatMoney(cheque.amount)}
                     </TableCell>
-                    <TableCell>
-                      {cheque.drawer_name}
-                      <span className="block text-xs text-muted-foreground">Entregó: {cheque.delivered_by_name}</span>
+                    <TableCell data-label="Librador">
+                      <span>
+                        {cheque.drawer_name}
+                        <span className="block text-xs text-muted-foreground">Entregó: {cheque.delivered_by_name}</span>
+                      </span>
                     </TableCell>
-                    <TableCell>
-                      <Badge tone={STATE_TONES[cheque.state]}>{cheque.state_label}</Badge>
-                      <Effect cheque={cheque} />
-                      {cheque.kind === "PHYSICAL" && cheque.physical_receipt_confirmed_at && (
-                        <span className="block text-xs text-muted-foreground">
-                          En mano: {cheque.physical_receipt_confirmed_by_name},{" "}
-                          {formatDateTime(cheque.physical_receipt_confirmed_at)}
-                        </span>
-                      )}
-                      {cheque.verification_reason && (
-                        <span className="block text-xs text-muted-foreground">
-                          Motivo: {cheque.verification_reason}
-                        </span>
-                      )}
-                      {cheque.voided && cheque.void_reason && (
-                        <span className="block text-xs">Anulado: {cheque.void_reason}</span>
-                      )}
+                    <TableCell data-label="Estado">
+                      <span>
+                        <Badge tone={STATE_TONES[cheque.state]}>{cheque.state_label}</Badge>
+                        <Effect cheque={cheque} />
+                        {cheque.kind === "PHYSICAL" && cheque.physical_receipt_confirmed_at && (
+                          <span className="block text-xs text-muted-foreground">
+                            En mano: {cheque.physical_receipt_confirmed_by_name},{" "}
+                            {formatDateTime(cheque.physical_receipt_confirmed_at)}
+                          </span>
+                        )}
+                        {cheque.verification_reason && (
+                          <span className="block text-xs text-muted-foreground">
+                            Motivo: {cheque.verification_reason}
+                          </span>
+                        )}
+                        {cheque.voided && cheque.void_reason && (
+                          <span className="block text-xs">Anulado: {cheque.void_reason}</span>
+                        )}
+                      </span>
                     </TableCell>
-                    <TableCell className="whitespace-nowrap">
+                    <TableCell className="md:whitespace-nowrap">
                       {editable && declared && !cheque.voided && (
                         <>
                           <Button

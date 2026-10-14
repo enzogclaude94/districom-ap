@@ -148,21 +148,25 @@ class Plan:
     @property
     def administrative_zero(self) -> bool:
         """An OUTLET settlement of $0 without any movement: it closes without a ledger operation (R7-2-Q1)."""
-        totals = self.totals
-        return (
-            self.settlement.type == service.OUTLET
-            and not totals.expected_missing
-            and totals.expected == 0
-            and totals.cash_total == 0
-            and totals.transfers["VERIFIED"] == 0
-            and totals.declared_transfers_count == 0
-            and totals.cheques == 0
-            and totals.unverified_echeqs_count == 0
-            and totals.expenses == 0
-            and totals.pending == 0
-            and totals.remitted == 0
-            and not self.legs
-        )
+        return without_movements(self.settlement, self.totals) and not self.legs
+
+
+def without_movements(settlement: Settlement, totals: summary.Totals) -> bool:
+    """An OUTLET settlement whose expected amount is $0 and that has nothing loaded: what an administrative zero
+    close certifies (the close also checks it publishes no leg)."""
+    return (
+        settlement.type == service.OUTLET
+        and not totals.expected_missing
+        and totals.expected == 0
+        and totals.cash_total == 0
+        and totals.transfers["VERIFIED"] == 0
+        and totals.declared_transfers_count == 0
+        and totals.cheques == 0
+        and totals.unverified_echeqs_count == 0
+        and totals.expenses == 0
+        and totals.pending == 0
+        and totals.remitted == 0
+    )
 
 
 # --- financial state ------------------------------------------------------------------------------
