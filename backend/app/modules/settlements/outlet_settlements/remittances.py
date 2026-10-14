@@ -401,6 +401,25 @@ def remitted_total(db: Session, settlement_id: int) -> Decimal:
     return Decimal(total or 0)
 
 
+def not_consolidated_total(db: Session, outlet_id: int) -> Decimal:
+    """Cash of the boca handed over in effect that no close in effect consolidated yet: remittances of OPEN
+    settlements, and during a correction those recorded after the close still in effect."""
+    consolidated = select(SettlementClosingRemittance.id).where(
+        SettlementClosingRemittance.remittance_id == OutletRemittance.id,
+        SettlementClosingRemittance.close_operation_id == Settlement.current_close_operation_id,
+    )
+    total = db.scalar(
+        select(func.coalesce(func.sum(OutletRemittance.amount), 0))
+        .join(Settlement, Settlement.id == OutletRemittance.settlement_id)
+        .where(
+            OutletRemittance.outlet_id == outlet_id,
+            OutletRemittance.reversal_operation_id.is_(None),
+            ~consolidated.exists(),
+        )
+    )
+    return Decimal(total or 0)
+
+
 def consolidated_ids(db: Session, close_operation_id: int | None) -> set[int]:
     """Remittances the close in effect consolidated (none without a financial close in effect)."""
     if close_operation_id is None:

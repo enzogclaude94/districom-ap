@@ -14,11 +14,11 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Query, Response
 
+from app.core.clock import business_today
 from app.modules.settlements.cheques import schemas as cs
 from app.modules.settlements.cheques import service as cheques
 from app.modules.settlements.delivery import additions, closing, expenses, service, transfers
 from app.modules.settlements.delivery import schemas as ds
-from app.modules.settlements.delivery import views as delivery_views
 from app.modules.settlements.delivery.routing import OutletSettlementId
 from app.modules.settlements.outlet_settlements import remittances, views
 from app.modules.settlements.outlet_settlements import schemas as s
@@ -76,6 +76,15 @@ def list_outlet_settlements(
     return s.OutletSettlementPage(items=views.items(db, rows), total=total)
 
 
+@router.get(
+    "/outlet-settlements/board",
+    response_model=s.OutletBoardOut,
+    summary="Tablero diario de bocas: cada boca con sus rendiciones del día",
+)
+def outlet_settlements_board(db: DbSession, _: Viewer, business_date: date | None = None) -> s.OutletBoardOut:
+    return views.board(db, business_date or business_today())
+
+
 @router.post(
     "/outlet-settlements",
     response_model=s.OutletSettlementOut,
@@ -96,7 +105,7 @@ def create_outlet_settlement(
     summary="Rendiciones abiertas de una boca (para su ficha)",
 )
 def outlet_settlements_summary(outlet_id: int, db: DbSession, _: Viewer) -> s.OutletSettlementsSummary:
-    return s.OutletSettlementsSummary(outlet_id=outlet_id, open_count=outlet_settlements.open_count(db, outlet_id))
+    return views.outlet_summary(db, outlet_id)
 
 
 @router.get(PATH, response_model=s.OutletSettlementOut, summary="Rendición de boca con su tablero")
@@ -400,8 +409,8 @@ def reopen_outlet_settlement(
 
 @router.get(
     f"{PATH}/history",
-    response_model=ds.HistoryOut,
-    summary="Cierres (financieros y administrativos), reaperturas y diferencias",
+    response_model=s.OutletHistoryOut,
+    summary="Cierres (con sus entregas consolidadas), reaperturas, diferencias y cambios del esperado",
 )
-def outlet_settlement_history(settlement_id: OutletSettlementId, db: DbSession, _: Viewer) -> ds.HistoryOut:
-    return delivery_views.history(db, settlement_id)
+def outlet_settlement_history(settlement_id: OutletSettlementId, db: DbSession, _: Viewer) -> s.OutletHistoryOut:
+    return views.history(db, settlement_id)

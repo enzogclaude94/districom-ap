@@ -209,8 +209,101 @@ class OutletClosingPreviewOut(ds.ClosingPreviewOut):
     responsible_suggestions: list[ResponsibleSuggestion]
 
 
+class OutletSettlementRef(BaseModel):
+    id: int
+    business_date: date
+    sequence_number: int
+    status: str
+    financial_state: ds.FinancialState
+    administrative_zero: bool
+
+
 class OutletSettlementsSummary(BaseModel):
-    """What the ficha of a boca shows Rendiciones users."""
+    """What the ficha of a boca shows Rendiciones users (R7-4): its operation, never a replacement of the board."""
 
     outlet_id: int
     open_count: int
+    # OPEN settlements (never closed or being corrected), oldest first.
+    open_settlements: list[OutletSettlementRef] = []
+    # The latest settlement of the boca, whatever its state; null when it never had one.
+    last_settlement: OutletSettlementRef | None = None
+    # Cash the boca already handed over (remittances in effect) that no close in effect consolidated yet.
+    remitted_not_consolidated: Money = Decimal("0.00")
+
+
+# --- daily board (R7-4) ---------------------------------------------------------------------------
+
+
+class OutletBoardSettlement(OutletSettlementRef):
+    """The figures of one settlement on the daily board. Never mixed with another settlement's."""
+
+    expected_amount: Money | None
+    remitted: Money
+    cash_total: Money
+    transfers_verified: Money
+    cheques: Money
+    expenses: Money
+    justified: Money
+    # While OPEN: expected - justified when >= 0 (null without an expected amount).
+    remaining: Money | None
+    # While OPEN: justified - expected when the justified total already goes above it.
+    justified_above_expected: Money | None
+    # Only when CLOSED: the difference of the close in effect.
+    difference: Money | None
+    difference_kind: Literal["SHORTAGE", "SURPLUS", "BALANCED"] | None
+
+
+class OutletBoardRow(BaseModel):
+    outlet_id: int
+    outlet_code: str
+    outlet_name: str
+    outlet_active: bool
+    # Every settlement of the boca that day, by number (with their figures).
+    settlements: list[OutletBoardSettlement]
+    # The one the board shows: the first OPEN (never closed or being corrected) by number, else the last one;
+    # null for a boca without a settlement that day.
+    current_id: int | None
+
+
+class OutletBoardCounts(BaseModel):
+    without_settlement: int
+    open: int
+    being_corrected: int
+    closed: int
+
+
+class OutletBoardOut(BaseModel):
+    """Rendiciones > Bocas for one business day: every active boca, plus an inactive one with settlements that
+    day, by code."""
+
+    business_date: date
+    rows: list[OutletBoardRow]
+    counts: OutletBoardCounts
+
+
+# --- history (R7-4) -------------------------------------------------------------------------------
+
+
+class ClosingRemittanceOut(BaseModel):
+    remittance_id: int
+    amount: Money
+
+
+class OutletClosingOut(ds.ClosingOut):
+    # The remittances this close consolidated, for their amount (empty for a zero close).
+    remittances: list[ClosingRemittanceOut] = Field(default_factory=list)
+
+
+class ExpectedChangeOut(BaseModel):
+    """A load or correction of the Store Sys amount, from the audit trail."""
+
+    before: Money | None
+    after: Money | None
+    changed_by: int | None
+    changed_by_name: str | None
+    changed_at: datetime
+
+
+class OutletHistoryOut(ds.HistoryOut):
+    closings: list[OutletClosingOut]  # type: ignore[assignment]
+    expected_changes: list[ExpectedChangeOut]

@@ -1,6 +1,7 @@
 """Responses of the boca de expendio settlements API, built with the same board as a delivery settlement."""
 
 from collections.abc import Iterable
+from datetime import date
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -14,8 +15,10 @@ from app.modules.settlements.ledger import service as ledger
 from app.modules.settlements.ledger.accounts import advances_account_of
 from app.modules.settlements.outlet_settlements import remittances
 from app.modules.settlements.outlet_settlements import schemas as s
-from app.modules.settlements.outlet_settlements.models import OutletRemittance
+from app.modules.settlements.outlet_settlements import service as outlet_settlements
+from app.modules.settlements.outlet_settlements.models import OutletRemittance, SettlementClosingRemittance
 from app.modules.settlements.outlet_settlements.service import responsible_suggestions
+from app.platform.audit.models import AuditEvent
 from app.platform.auth.models import User
 from app.platform.outlets import service as outlets
 from app.platform.outlets.models import Outlet
@@ -164,3 +167,150 @@ def _summary(board: ds.Summary, row: Settlement, *, closing: bool = False) -> s.
 
 def _suggestions(db: Session, row: Settlement) -> list[s.ResponsibleSuggestion]:
     return [s.ResponsibleSuggestion(employee_id=e.id, full_name=e.full_name) for e in responsible_suggestions(db, row)]
+
+
+# --- daily board (R7-4) ---------------------------------------------------------------------------
+
+
+def board(db: Session, business_date: date) -> s.OutletBoardOut:
+    """Rendiciones > Bocas: one row per boca, each settlement with its own figures (never added together)."""
+    rows = outlet_settlements.of_day(db, business_date)
+    totals = summary.totals(db, [row.id for row in rows])
+    by_outlet: dict[int, list[Settlement]] = {}
+    for row in rows:
+        by_outlet.setdefault(row.outlet_id or 0, []).append(row)
+    out: list[s.OutletBoardRow] = []
+    counts = {"without_settlement": 0, "open": 0, "being_corrected": 0, "closed": 0}
+    for outlet in outlet_settlements.board_outlets(db, set(by_outlet)):
+        settlements = by_outlet.get(outlet.id, [])
+        current = _current(settlements)
+        state = closing.financial_state(current) if current is not None else None
+        key = {None: "without_settlement", "NOT_CLOSED": "open", "BEING_CORRECTED": "being_corrected"}.get(
+            state, "closed"
+        )
+        counts[key] += 1
+        out.append(
+            s.OutletBoardRow(
+                outlet_id=outlet.id,
+                outlet_code=outlet.code,
+                outlet_name=outlet.name,
+                outlet_active=outlet.active,
+                settlements=[_board_settlement(row, totals[row.id]) for row in settlements],
+                current_id=current.id if current is not None else None,
+            )
+        )
+    return s.OutletBoardOut(business_date=business_date, rows=out, counts=s.OutletBoardCounts(**counts))
+
+
+def _current(settlements: list[Settlement]) -> Settlement | None:
+    """The first OPEN settlement by number (what still needs work), else the last one."""
+    for row in settlements:
+        if row.status == "OPEN":
+            return row
+    return settlements[-1] if settlements else None
+
+
+def _board_settlement(row: Settlement, t: summary.Totals) -> s.OutletBoardSettlement:
+    remaining = above = None
+    if row.expected_amount is not None:
+        gap = t.expected - t.justified
+        remaining, above = (gap, None) if gap >= 0 else (ZERO, -gap)
+    closed = row.status == "CLOSED"
+    return s.OutletBoardSettlement(
+        **_ref(row).model_dump(),
+        expected_amount=row.expected_amount,
+        remitted=t.remitted,
+        cash_total=t.cash_total,
+        transfers_verified=t.transfers["VERIFIED"],
+        cheques=t.cheques,
+        expenses=t.expenses,
+        justified=t.justified,
+        remaining=None if closed else remaining,
+        justified_above_expected=None if closed else above,
+        difference=t.difference if closed else None,
+        difference_kind=t.difference_kind if closed else None,
+    )
+
+
+def _ref(row: Settlement) -> s.OutletSettlementRef:
+    return s.OutletSettlementRef(
+        id=row.id,
+        business_date=row.business_date,
+        sequence_number=row.sequence_number,
+        status=row.status,
+        financial_state=closing.financial_state(row),
+        administrative_zero=closing.administrative_close_in_effect(row),
+    )
+
+
+def outlet_summary(db: Session, outlet_id: int) -> s.OutletSettlementsSummary:
+    opened, last = outlet_settlements.of_outlet(db, outlet_id)
+    return s.OutletSettlementsSummary(
+        outlet_id=outlet_id,
+        open_count=len(opened),
+        open_settlements=[_ref(row) for row in opened],
+        last_settlement=_ref(last) if last is not None else None,
+        remitted_not_consolidated=remittances.not_consolidated_total(db, outlet_id),
+    )
+
+
+# --- history (R7-4) -------------------------------------------------------------------------------
+
+
+def history(db: Session, settlement_id: int) -> s.OutletHistoryOut:
+    """The delivery history plus what a boca adds: the remittances each close consolidated and every
+    load or correction of the expected amount."""
+    base = delivery_views.history(db, settlement_id)
+    operation_ids = [c.operation_id for c in base.closings if c.operation_id is not None]
+    consolidated: dict[int, list[s.ClosingRemittanceOut]] = {}
+    if operation_ids:
+        for link in db.scalars(
+            select(SettlementClosingRemittance)
+            .where(SettlementClosingRemittance.close_operation_id.in_(operation_ids))
+            .order_by(SettlementClosingRemittance.remittance_id)
+        ):
+            consolidated.setdefault(link.close_operation_id, []).append(
+                s.ClosingRemittanceOut(remittance_id=link.remittance_id, amount=link.amount)
+            )
+    values = base.model_dump()
+    values["closings"] = [
+        s.OutletClosingOut(**c.model_dump(), remittances=consolidated.get(c.operation_id or 0, []))
+        for c in base.closings
+    ]
+    return s.OutletHistoryOut(**values, expected_changes=_expected_changes(db, settlement_id))
+
+
+def _expected_changes(db: Session, settlement_id: int) -> list[s.ExpectedChangeOut]:
+    events = [
+        e
+        for e in db.scalars(
+            select(AuditEvent)
+            .where(
+                AuditEvent.event_type == "settlements.settlement.updated",
+                AuditEvent.entity_type == "settlement",
+                AuditEvent.entity_id == str(settlement_id),
+            )
+            .order_by(AuditEvent.occurred_at, AuditEvent.id)
+        )
+        if _expected(e, "before") != _expected(e, "after")
+    ]
+    names = dict(
+        db.execute(
+            select(User.id, User.full_name).where(User.id.in_({e.user_id for e in events if e.user_id is not None}))
+        ).all()
+    )
+    return [
+        s.ExpectedChangeOut(
+            before=_expected(e, "before"),
+            after=_expected(e, "after"),
+            changed_by=e.user_id,
+            changed_by_name=names.get(e.user_id) if e.user_id is not None else None,
+            changed_at=e.occurred_at,
+        )
+        for e in events
+    ]
+
+
+def _expected(event: AuditEvent, side: str) -> Decimal | None:
+    value = ((event.payload or {}).get(side) or {}).get("expected_amount")
+    return Decimal(value) if value is not None else None
