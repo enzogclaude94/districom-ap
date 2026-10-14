@@ -75,6 +75,8 @@ class Summary(BaseModel):
     unverified_echeqs_count: int = 0
     pending: Money
     expenses: Money
+    # Cash a boca already handed over to a cash box, in effect (R7-3); always 0 for a delivery settlement.
+    remitted: Money = Decimal("0.00")
     justified: Money
     # justified - expected: negative is a shortage, positive a surplus.
     difference: Money

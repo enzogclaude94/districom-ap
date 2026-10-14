@@ -51,8 +51,18 @@ only after an administrative zero close. Crossings:
 
 Reopening a zero close never invents a reversal of an operation that never existed.
 
-Lock order, always: the settlement row, its pending collections by id, its cheques by id, then (inside the ledger) the
-accounts that lose value, in id order. Load changes lock the settlement row too, so they never interleave with a close.
+Remittances (OUTLET, R7-3): the cash a boca handed over during the day already entered its cash boxes with each
+`OUTLET_REMITTANCE`. They justify like cash, and the close consolidates the ones in effect: «Entregas a cuenta —
+{Boca}» +their total, the cash boxes untouched by them (only the final count moves them). Example: expected
+1.000.000, remittances 400.000 + 300.000, final count 200.000, a transfer of 100.000 → «Cobranzas de boca»
+-1.000.000, «Entregas a cuenta» +700.000, Caja +200.000, Banco +100.000. Each close freezes in
+`settlement_closing_remittances` the remittances it consolidated; a reopening does not touch them, and a
+remittance reversed during a correction stays consolidated by the old close until the new one replaces it. An
+administrative zero close needs no remittance in effect.
+
+Lock order, always: the settlement row, its pending collections by id, its cheques by id, its remittances by id
+and the boca's «Entregas a cuenta», then (inside the ledger) the accounts that lose value, in id order. Load changes
+lock the settlement row too, so they never interleave with a close.
 """
 
 import hashlib
@@ -84,7 +94,9 @@ from app.modules.settlements.delivery.models import (
     SettlementTransfer,
 )
 from app.modules.settlements.ledger import service as ledger
-from app.modules.settlements.ledger.accounts import employee_account_id
+from app.modules.settlements.ledger.accounts import advances_account_of, employee_account_id
+from app.modules.settlements.outlet_settlements import remittances
+from app.modules.settlements.outlet_settlements.models import OutletRemittance
 from app.modules.settlements.pending import service as pending_collections
 from app.modules.settlements.pending.models import PendingCollection
 from app.platform.audit.service import record_change
@@ -148,6 +160,7 @@ class Plan:
             and totals.unverified_echeqs_count == 0
             and totals.expenses == 0
             and totals.pending == 0
+            and totals.remitted == 0
             and not self.legs
         )
 
@@ -300,6 +313,7 @@ def preview_token(db: Session, plan: Plan) -> str:
         "expenses": sorted([eid, category, service.money(amount)] for eid, category, amount in spent),
         "pendings": pending_collections.preview_rows(db, sid),
         "cheques": cheques.preview_rows(db, sid),
+        "remittances": remittances.preview_rows(db, sid),
         "cash_by_box": sorted([box, service.money(t.total)] for box, t in totals.by_box.items()),
         "verified_by_bank": sorted([bank, service.money(amount)] for bank, amount in plan.verified_by_bank.items()),
         "difference": service.money(plan.difference),
@@ -318,9 +332,10 @@ def close(db: Session, actor: User, settlement_id: int, body: s.CloseIn) -> serv
     settlement = _lock(db, settlement_id)
     pendings = pending_collections.lock_for_close(db, settlement)
     locked_cheques = cheques.lock_for_close(db, settlement)
+    in_effect = remittances.lock_for_close(db, settlement)
     plan = _plan(db, settlement)
     allocations = _normalize(body.allocations)
-    fingerprint = _fingerprint(plan, body.version, allocations, pendings, locked_cheques)
+    fingerprint = _fingerprint(plan, body.version, allocations, pendings, locked_cheques, in_effect)
 
     existing = db.scalars(
         select(SettlementClosing).where(
@@ -406,6 +421,7 @@ def close(db: Session, actor: User, settlement_id: int, body: s.CloseIn) -> serv
 
     pending_collections.publish(db, actor, settlement, pendings, operation.id, settlement.current_close_operation_id)
     cheques.publish(db, actor, settlement, locked_cheques, operation.id, settlement.current_close_operation_id)
+    remittances.publish(db, settlement, in_effect, operation.id)
     expenses.publish_fuel(db, settlement, operation.id)
     now = datetime.now(UTC)
     superseded = db.execute(
@@ -575,6 +591,7 @@ def zero_snapshot(settlement: Settlement) -> dict[str, Any]:
         "cheques": zero,
         "expenses": zero,
         "pending": zero,
+        "remittances": zero,
         "difference": zero,
     }
 
@@ -753,6 +770,12 @@ def _plan(db: Session, settlement: Settlement) -> Plan:
         legs[key] = legs.get(key, ZERO) + amount
 
     add(("account", ledger.system_account_id(db, service.profile(settlement).collections_account)), -totals.expected)
+    if totals.remitted and settlement.outlet_id is not None:
+        # The boca's remittances already entered their cash boxes: the close consolidates them (R7-3).
+        advances = advances_account_of(db, settlement.outlet_id)
+        if advances is None:  # a remittance creates it; never missing when there is one
+            raise AppError(500, "missing_outlet_advances_account", "Falta la cuenta de entregas de la boca.")
+        add(("account", advances), totals.remitted)
     for box_id, box in totals.by_box.items():
         add(("account", box_id), box.total)
     for bank_id, amount in plan.verified_by_bank.items():
@@ -878,6 +901,7 @@ def _fingerprint(
     allocations: list[Allocation],
     pendings: list[PendingCollection],
     locked_cheques: list[Cheque],
+    in_effect: list[OutletRemittance],
 ) -> str:
     """SHA-256 of everything the close means; who sends it does not change what it is."""
     totals = plan.totals
@@ -905,6 +929,9 @@ def _fingerprint(
     portfolio = sorted([c.id, service.money(c.amount)] for c in cheques.justifying(locked_cheques))
     if portfolio:  # same: absent when there are none, so a close made before R4 keeps its fingerprint
         payload["cheques"] = portfolio
+    consolidated = sorted([r.id, service.money(r.amount)] for r in in_effect)
+    if consolidated:  # same: absent when there are none (R7-3)
+        payload["remittances"] = consolidated
     if plan.settlement.type != service.DELIVERY:  # absent for delivery, so its earlier closes keep their fingerprint
         payload["type"] = plan.settlement.type
         payload["outlet"] = plan.settlement.outlet_id

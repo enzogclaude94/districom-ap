@@ -2,8 +2,9 @@
 
 The same roles and the same loads as a delivery settlement (`delivery/router.py`), on the same services:
 viewer reads; operator opens a settlement, loads it (count, additions, transfers and their verification,
-expenses, cheques) and closes it, allocating the difference to employees; admin also assigns a difference
-to the company and reopens a closed settlement. There are no pending collections and no fuel. Each path
+expenses, cheques, remittances to a cash box) and closes it, allocating the difference to employees; admin also
+assigns a difference to the company, reopens a closed settlement, reverses a remittance and records one while the
+settlement is being corrected (R7-3). There are no pending collections and no fuel. Each path
 reaches only OUTLET settlements (`routing.OutletSettlementId`). Creations are idempotent by
 `client_request_id`: 201 when created, 200 for a repeated request.
 """
@@ -19,9 +20,9 @@ from app.modules.settlements.delivery import additions, closing, expenses, servi
 from app.modules.settlements.delivery import schemas as ds
 from app.modules.settlements.delivery import views as delivery_views
 from app.modules.settlements.delivery.routing import OutletSettlementId
+from app.modules.settlements.outlet_settlements import remittances, views
 from app.modules.settlements.outlet_settlements import schemas as s
 from app.modules.settlements.outlet_settlements import service as outlet_settlements
-from app.modules.settlements.outlet_settlements import views
 from app.platform.auth.access import require_module_access
 from app.platform.auth.deps import DbSession
 from app.platform.auth.models import User
@@ -309,6 +310,52 @@ def decide_outlet_echeq_verification(
 ) -> s.OutletSettlementOut:
     cheques.decide_verification(db, user, settlement_id, cheque_id, body)
     return _detail(db, settlement_id, None, response)
+
+
+# --- remittances (R7-3) ---------------------------------------------------------------------------
+
+
+@router.post(
+    f"{PATH}/remittances/preview",
+    response_model=s.RemittancePreviewOut,
+    summary="Qué publicaría «Entregar efectivo» (para confirmar antes de registrarla)",
+)
+def preview_outlet_remittance(
+    settlement_id: OutletSettlementId, body: s.RemittancePreviewIn, db: DbSession, user: Operator
+) -> s.RemittancePreviewOut:
+    settlement = service.get(db, settlement_id)
+    plan = remittances.plan(db, user, settlement, body)
+    assert settlement.outlet_id is not None
+    return views.remittance_preview(plan, views.advances_account(db, settlement.outlet_id))
+
+
+@router.post(
+    f"{PATH}/remittances",
+    response_model=s.OutletSettlementOut,
+    status_code=201,
+    responses=CREATED_RESPONSES,
+    summary="Entregar efectivo a una caja (operator; en corrección, solo admin)",
+)
+def create_outlet_remittance(
+    settlement_id: OutletSettlementId, body: s.RemittanceIn, db: DbSession, user: Operator, response: Response
+) -> s.OutletSettlementOut:
+    return _detail(db, settlement_id, remittances.create(db, user, settlement_id, body), response)
+
+
+@router.post(
+    f"{PATH}/remittances/{{remittance_id}}/reverse",
+    response_model=s.OutletSettlementOut,
+    summary="Revertir una entrega, con motivo (admin)",
+)
+def reverse_outlet_remittance(
+    settlement_id: OutletSettlementId,
+    remittance_id: int,
+    body: s.RemittanceReversalIn,
+    db: DbSession,
+    user: Admin,
+) -> s.OutletSettlementOut:
+    remittances.reverse(db, user, settlement_id, remittance_id, body)
+    return views.settlement(db, settlement_id)
 
 
 # --- close and reopen -----------------------------------------------------------------------------

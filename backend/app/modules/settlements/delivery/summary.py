@@ -1,7 +1,10 @@
 """The board of a settlement: every official total is computed here, never in the frontend.
 
-justified = cash (count + additions not voided) + VERIFIED transfers + cheques + pending + expenses
+justified = remittances + cash (count + additions not voided) + VERIFIED transfers + cheques + pending + expenses
 difference = justified - expected (negative: shortage, positive: surplus)
+
+Remittances (R7-3) are the cash a boca already handed over to a cash box during the day, in effect (not
+reversed); a delivery settlement has none. The final count is what stays physically in the boca after them.
 
 DECLARED and REJECTED transfers are shown but never justify money (Enzo's R2-P3). Cheques (R4-1) count
 when they justify (a physical one confirmed in hand, a verified ECHEQ, not voided); a DECLARED ECHEQ is
@@ -26,6 +29,7 @@ from app.modules.settlements.delivery.models import (
     Settlement,
     SettlementTransfer,
 )
+from app.modules.settlements.outlet_settlements.models import OutletRemittance
 from app.modules.settlements.pending.models import PendingCollection
 
 ZERO = Decimal("0.00")
@@ -55,6 +59,8 @@ class Totals:
     cheques: Decimal = ZERO
     unverified_echeqs_count: int = 0
     pending: Decimal = ZERO
+    # Remittances of a boca in effect (R7-3); always 0 for a delivery settlement.
+    remitted: Decimal = ZERO
 
     @property
     def cash_counted(self) -> Decimal:
@@ -70,7 +76,9 @@ class Totals:
 
     @property
     def justified(self) -> Decimal:
-        return self.cash_total + self.transfers["VERIFIED"] + self.cheques + self.pending + self.expenses
+        return (
+            self.remitted + self.cash_total + self.transfers["VERIFIED"] + self.cheques + self.pending + self.expenses
+        )
 
     @property
     def difference(self) -> Decimal:
@@ -165,4 +173,11 @@ def totals(db: Session, settlement_ids: Sequence[int]) -> dict[int, Totals]:
     for owner, count in unverified:
         if owner is not None:
             result[owner].unverified_echeqs_count = count
+    remitted = db.execute(
+        select(OutletRemittance.settlement_id, func.sum(OutletRemittance.amount))
+        .where(OutletRemittance.settlement_id.in_(ids), OutletRemittance.reversal_operation_id.is_(None))
+        .group_by(OutletRemittance.settlement_id)
+    )
+    for owner, amount in remitted:
+        result[owner].remitted = amount
     return result
