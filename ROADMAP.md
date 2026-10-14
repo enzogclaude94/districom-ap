@@ -44,8 +44,8 @@ DistriCom es una plataforma modular (ADR 006). Este roadmap tiene tres carriles:
 | R4 | Cartera de cheques | **DONE** (aprobada por Enzo el 2026-10-09; PRs #17, #18 y #19) | R2 · R3 |
 | R5 | Combustible y vehículos | **DONE** (R5‑1 a R5‑4; `0014`–`0017` congeladas) | R2 |
 | R6 | Pagos a proveedores y terceros | **DONE** (2026-10-11) | R1 · R4 |
-| R7 | Boca de expendio | IN_PROGRESS (arquitectura aprobada 2026-10-11, ADR 009; R7‑1 a R7‑3 DONE; R7‑4 en revisión) | R2–R5 |
-| R8 | Cuenta interna de empleados y liquidación semanal | PLANNED | R1 · R2 |
+| R7 | Boca de expendio | **DONE** (2026-10-14; R7‑1 a R7‑4, ADR 009) | R2–R5 |
+| R8 | Cuenta interna y liquidación de empleados | PLANNED (propuesta arquitectónica pendiente de aprobación) | R1 · R2 |
 | R9 | Endurecimiento | PLANNED | todas |
 
 Cada fase empieza solo con aprobación explícita de Enzo y termina con un informe y una pausa para revisión.
@@ -241,10 +241,12 @@ Arquitectura aprobada por Enzo el 2026-10-11 (alternativa B, D1–D9, ajustes 1�
 | R7‑1 | Maestro de bocas en plataforma (`0021`) y responsables por vigencia en Rendiciones (`0022`), pantalla `/bocas` | **DONE** (PR #34, aprobada por Enzo el 2026-10-11 con sus desvíos documentados; mergeado `2ce4ebd`, CI de main 4/4; `0021` y `0022` congeladas) |
 | R7‑2 | Rendición `OUTLET` sin entregas parciales (esperado nulo/≥ 0, sin pendientes ni combustible, «Cobranzas de boca», cierre, cierre administrativo cero); `0023` | **DONE** (PR #35, aprobada por Enzo el 2026-10-13 con sus desvíos; mergeado `352a512`; `0023` congelada) |
 | R7‑3 | Entregas parciales `OUTLET_REMITTANCE` a una caja, «Entregas a cuenta — {Boca}»; `0024` | **DONE** (PR #36, aprobada por Enzo el 2026-10-14 con sus seis desvíos; mergeado `e8b83d4`, CI de main 4/4; `0024` congelada) |
-| R7‑4 | Consolidación, experiencia operativa y cierre de boca: tablero Rendiciones › Bocas, ficha, detalle, ayuda del conteo final, móvil y E2E de punta a punta; sin migración | IN_REVIEW (autorizada por Enzo el 2026-10-14; PR #37, sin migración, esperando su aprobación) |
+| R7‑4 | Consolidación, experiencia operativa y cierre de boca: tablero Rendiciones › Bocas, ficha, detalle, ayuda del conteo final, móvil y E2E de punta a punta; sin migración | **DONE** (PR #37, aprobada por Enzo el 2026-10-14; mergeado `cab4909`; sin migración) |
 
-### R8 — Empleados: cuenta interna y liquidación semanal
-**Alcance:** condiciones de pago, consumos, adelantos, préstamos y cuotas, liquidación semanal (sueldo, bonos, incentivos, faltantes, sobrantes) y su pago.
+R7 **DONE** el 2026-10-14: aprobada por Enzo (R7‑1 a R7‑4: maestro de bocas, responsables, rendición `OUTLET`, cierre administrativo cero, «Cobranzas de boca», entregas parciales, «Entregas a cuenta — {Boca}», múltiples rendiciones, tablero, ficha, detalle, móvil, historia, snapshots y E2E); PR #37 mergeado (`cab4909`); `0021`–`0024` congeladas. Deudas conocidas fuera de R7: fondo fijo, caja propia de boca, remesas de cheques, pendientes/fiado en boca, exportaciones.
+
+### R8 — Empleados: cuenta interna y liquidación
+**Alcance:** cuenta interna y liquidación económica del empleado (no RRHH completo): sueldo, bonos, incentivos, faltantes y sobrantes ya asignados, consumos, adelantos, préstamos y cuotas (con postergación), otros ajustes y el pago de la liquidación. Sin asumir periodicidad semanal ni reutilizar `PAYMENT` sin análisis: Enzo pidió primero una propuesta arquitectónica completa (2026-10-14); sin código hasta su aprobación.
 
 ### R9 — Endurecimiento
 **Alcance:** reportes de cierre diario, contrato para recibir el importe esperado desde Store Sys (sin implementar la integración), performance, E2E del flujo de punta a punta.
