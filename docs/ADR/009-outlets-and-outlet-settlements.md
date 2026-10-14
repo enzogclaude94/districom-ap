@@ -65,7 +65,7 @@ Pedido de Enzo del 2026-10-14. La pantalla principal es **Rendiciones › Bocas*
 | R7‑1 | Maestro de bocas y responsables (`0021`, `0022`) | Implementado y aprobado (PR #34) |
 | R7‑2 | Rendición OUTLET sin entregas parciales (esperado nulo/≥ 0, sin pendientes ni combustible, «Cobranzas de boca», cierre, cierre administrativo cero; `0023`) | Implementado y aprobado (PR #35) |
 | R7‑3 | Entregas parciales `OUTLET_REMITTANCE`, su reverso y su consolidación al cierre (`0024`) | Implementado y aprobado (PR #36) |
-| R7‑4 | Pantallas de boca, móvil, ayuda del conteo final y E2E de punta a punta (sin migración) | Implementado, en revisión |
+| R7‑4 | Pantallas de boca, móvil, ayuda del conteo final y E2E de punta a punta (sin migración) | Implementado y aprobado (PR #37) |
 
 ## Consecuencias
 - Una boca existe una vez para todos los módulos; Rendiciones la nombra por id y nunca guarda su nombre.

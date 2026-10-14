@@ -4,6 +4,10 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Changed — R7 DONE
+- **R7 DONE** (aprobada por Enzo el 2026-10-14: R7‑1 a R7‑4; PR #37 mergeado `cab4909`; `0021`–`0024` congeladas). Las deudas conocidas (fondo fijo, caja propia de boca, remesas de cheques, pendientes/fiado en boca, exportaciones) quedan fuera de R7.
+- **R8 renombrada** «Cuenta interna y liquidación de empleados»: no se asume liquidación semanal; espera una propuesta arquitectónica aprobada antes de cualquier código.
+
 ### Added — La boca de punta a punta (R7‑4)
 - **R7‑3 DONE** (aprobada por Enzo el 2026-10-14 con sus seis desvíos; PR #36 mergeado `e8b83d4`, CI de main 4/4, `0024` congelada). **R7‑4 autorizada**, sin migración.
 - **Rendiciones › Bocas** («Bocas» en el menú, `/rendiciones/boca`): tablero del día con todas las bocas (fecha elegible, hoy por defecto), su estado (Sin rendición, Abierta, Cerrada, En corrección), esperado, entregas parciales, efectivo final, transferencias verificadas, cheques, gastos, total justificado y «Resta rendir o justificar» (o «Justificado por encima del esperado»); la diferencia solo con la rendición cerrada. Esperado sin cargar: «Sin cargar» y «—». Dos rendiciones del mismo día: «2 rendiciones este día» y cada una con sus cifras, nunca sumadas. Acciones: Abrir rendición, Ver rendición, Entregar efectivo, Ver corrección (Entregar efectivo en corrección solo admin). «Todas las rendiciones» conserva la lista con filtros. API `GET /outlet-settlements/board`.
