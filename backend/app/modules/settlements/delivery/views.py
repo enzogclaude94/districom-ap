@@ -398,6 +398,7 @@ def summary_out(totals: summary.Totals, accounts: dict[int, str]) -> s.Summary:
         unverified_echeqs_count=totals.unverified_echeqs_count,
         pending=totals.pending,
         expenses=totals.expenses,
+        remitted=totals.remitted,
         justified=totals.justified,
         difference=totals.difference,
         difference_kind=totals.difference_kind,

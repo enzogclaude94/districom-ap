@@ -674,6 +674,8 @@ def test_the_board_is_computed_by_the_backend(as_role, ids, opened, category) ->
         "unverified_echeqs_count": 0,
         "pending": "0.00",
         "expenses": "1500.00",
+        # Boca remittances (R7-3); a delivery never has any.
+        "remitted": "0.00",
         "justified": "78500.00",
         "difference": "-21500.00",
         "difference_kind": "SHORTAGE",

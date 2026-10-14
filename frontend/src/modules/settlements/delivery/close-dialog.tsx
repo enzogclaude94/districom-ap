@@ -53,6 +53,7 @@ function Amounts({ preview, outlet }: { preview: ClosingPreview; outlet: boolean
   return (
     <dl className="rounded-md border border-border px-3 py-2 text-sm" aria-label="Importes del cierre">
       <Line label="Esperado" value={s.expected} />
+      {outlet && <Line label="Entregas parciales" value={s.remitted ?? "0.00"} />}
       {s.cash_by_box.map((box) => (
         <Line key={box.account_id} label={`Efectivo en ${box.account_name}`} value={box.total} />
       ))}

@@ -19,7 +19,9 @@ import { cn } from "@/lib/cn";
 import { formatDate, formatDateTime, formatMoney } from "@/lib/format";
 import { cashApi, cashQueryKey } from "@/modules/settlements/cash/api";
 import { SettlementCheques } from "@/modules/settlements/cheques/settlement-cheques";
+import type { Account } from "@/modules/settlements/cash/api";
 import { outletSettlementApi } from "@/modules/settlements/outlet-settlements/api";
+import { SettlementRemittances } from "@/modules/settlements/outlet-settlements/remittances";
 import { SettlementPendings } from "@/modules/settlements/pending/settlement-pendings";
 
 import {
@@ -98,7 +100,13 @@ function Board({ settlement }: { settlement: Settlement }) {
         tone={missing ? "text-warning" : undefined}
         note={missing && <span className="text-warning">Cargalo antes de cerrar</span>}
       />
-      <Stat label="Efectivo" value={formatMoney(s.cash_total)} />
+      {isOutlet(settlement) && (
+        <Stat
+          label="Entregas parciales"
+          value={<span data-testid="board-remitted">{formatMoney(s.remitted ?? "0.00")}</span>}
+        />
+      )}
+      <Stat label={isOutlet(settlement) ? "Efectivo final" : "Efectivo"} value={formatMoney(s.cash_total)} />
       <Stat
         label="Transferencias verificadas"
         value={formatMoney(s.transfers_verified)}
@@ -115,18 +123,50 @@ function Board({ settlement }: { settlement: Settlement }) {
       <Stat label="Gastos" value={formatMoney(s.expenses)} />
       {!isOutlet(settlement) && <Stat label="Pendiente" value={formatMoney(s.pending)} />}
       <Stat label="Justificado" value={formatMoney(s.justified)} />
-      <Stat
-        label="Diferencia"
-        value={<span data-testid="board-difference">{missing ? "—" : differenceText(s.difference)}</span>}
-        tone={
-          s.difference_kind === "SHORTAGE"
-            ? "text-danger"
-            : s.difference_kind === "SURPLUS"
-              ? "text-warning"
-              : "text-success"
-        }
-      />
+      {s.difference === null ? (
+        <Remaining summary={s} missing={missing} />
+      ) : (
+        <Stat
+          label="Diferencia"
+          value={<span data-testid="board-difference">{missing ? "—" : differenceText(s.difference)}</span>}
+          tone={
+            s.difference_kind === "SHORTAGE"
+              ? "text-danger"
+              : s.difference_kind === "SURPLUS"
+                ? "text-warning"
+                : "text-success"
+          }
+        />
+      )}
     </section>
+  );
+}
+
+/**
+ * A boca while OPEN (R7-3): how far the justified total is from the expected amount, never a shortage or a
+ * surplus. The difference exists only once the settlement is closed.
+ */
+function Remaining({ summary, missing }: { summary: Settlement["summary"]; missing: boolean }) {
+  const above = summary.justified_above_expected;
+  if (above) {
+    return (
+      <Stat
+        label="Justificado por encima del esperado"
+        value={<span data-testid="board-remaining">{formatMoney(above)}</span>}
+        note={<span className="text-muted-foreground">La diferencia se calcula al cerrar.</span>}
+      />
+    );
+  }
+  return (
+    <Stat
+      label="Resta justificar"
+      value={
+        <span data-testid="board-remaining">
+          {missing || summary.remaining == null ? "—" : formatMoney(summary.remaining)}
+        </span>
+      }
+      note={<span className="text-muted-foreground">La diferencia se calcula al cerrar.</span>}
+    />
   );
 }
 
@@ -177,19 +217,37 @@ function Load({
   isAdmin,
   open,
   employees,
+  canOperate,
+  boxes,
 }: {
   settlement: Settlement;
   editable: boolean;
   isAdmin: boolean;
   open: (dialog: Open) => void;
   employees: Person[];
+  canOperate: boolean;
+  boxes: Account[];
 }) {
   const s = settlement.summary;
+  const outlet = isOutlet(settlement);
   return (
     <div className="space-y-4">
+      {outlet && (
+        <SettlementRemittances
+          settlement={settlement}
+          canOperate={canOperate}
+          isAdmin={isAdmin}
+          boxes={boxes}
+          employees={employees}
+        />
+      )}
       <Section
-        title="Conteo de efectivo"
-        description="Billetes por denominación y la caja donde quedan."
+        title={outlet ? "Conteo final de efectivo" : "Conteo de efectivo"}
+        description={
+          outlet
+            ? "Lo que queda físicamente en la boca después de las entregas parciales: billetes por denominación y la caja donde quedan."
+            : "Billetes por denominación y la caja donde quedan."
+        }
         action={
           editable && (
             <Button variant="secondary" size="sm" onClick={() => open({ kind: "count" })}>
@@ -724,6 +782,8 @@ export function SettlementDetail({ settlementId, type = "DELIVERY" }: { settleme
             isAdmin={isAdmin}
             open={setDialog}
             employees={employees.data ?? []}
+            canOperate={canOperate}
+            boxes={boxes}
           />
         ) : (
           <HistoryTab settlement={settlement} />

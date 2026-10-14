@@ -39,9 +39,54 @@ export interface Summary {
   cheques: string;
   pending: string;
   expenses: string;
+  /** Boca settlements only (R7-3): partial cash handed over to a cash box during the day, in effect. */
+  remitted?: string;
   justified: string;
-  difference: string;
-  difference_kind: DifferenceKind;
+  /**
+   * Null for a boca settlement while it is OPEN (R7-3): there is no shortage or surplus until it is closed;
+   * `remaining` / `justified_above_expected` say how far it is from the expected amount meanwhile.
+   */
+  difference: string | null;
+  difference_kind: DifferenceKind | null;
+  /** Boca, while OPEN: expected − justified when that is ≥ 0; null without an expected amount. */
+  remaining?: string | null;
+  /** Boca, while OPEN: justified − expected when the justified total already goes above it. */
+  justified_above_expected?: string | null;
+}
+
+/** A partial cash handover of a boca to a cash box (R7-3). Never edited nor deleted: reversed with a reason. */
+export interface Remittance {
+  id: number;
+  amount: string;
+  delivered_at: string;
+  destination_account_id: number;
+  destination_account_name: string;
+  delivered_by_employee_id: number | null;
+  delivered_by_name: string | null;
+  reference: string | null;
+  operation_id: number | null;
+  status: "IN_EFFECT" | "REVERSED";
+  /** Consolidated by the close in effect (a reversed one may still be, until the new close of a correction). */
+  consolidated: boolean;
+  created_by: number;
+  created_by_name: string;
+  created_at: string;
+  reversal_operation_id: number | null;
+  reversed_by: number | null;
+  reversed_by_name: string | null;
+  reversed_at: string | null;
+  reversal_reason: string | null;
+}
+
+/** What «Entregar efectivo» would publish, confirmed by the user before it does. */
+export interface RemittancePreview {
+  legs: { account_id: number | null; account_name: string; amount: string }[];
+  remitted_before: string;
+  remitted_after: string;
+  expected: string | null;
+  /** How much the remittances in effect would go above the expected amount; null when they would not. */
+  excess: string | null;
+  warning: string | null;
 }
 
 export interface SettlementItem {
@@ -248,6 +293,8 @@ export interface Settlement {
   pending_collections: Pending[];
   /** The cheques received in this delivery, voided ones included (R4). */
   cheques: Cheque[];
+  /** Boca settlements only (R7-3): its partial handovers, reversed ones included. */
+  remittances?: Remittance[];
 }
 
 export interface Leg {

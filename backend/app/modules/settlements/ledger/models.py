@@ -58,6 +58,10 @@ ACCOUNT_KINDS = (
     # R7-2: counterpart of the close of a boca de expendio settlement («Cobranzas de boca»): what the boca had
     # to render leaves it. Technical, never available money; only that close and its reversal touch it.
     "OUTLET_COLLECTIONS",
+    # R7-3: «Entregas a cuenta — {Boca}», one per boca (created on first use): cash the boca already handed over
+    # to a cash box, not yet consolidated by the close of its settlement. Technical, never available money; only
+    # the boca's remittances, the closes of its settlements and their reversals touch it.
+    "OUTLET_ADVANCES",
 )
 # Accounts whose every leg is one cheque (`ledger_entries.cheque_id`), and only those.
 CHEQUE_KINDS = ("CHEQUE_PORTFOLIO", "CHEQUES_IN_TRANSIT")
@@ -104,6 +108,8 @@ OPERATION_TYPES = (
     "DIRECT_EXPENSE",
     # R6-1: a payment made to a third party; its document is the payment.
     "PAYMENT",
+    # R7-3: cash a boca hands over to a cash box before its settlement closes; its document is the remittance.
+    "OUTLET_REMITTANCE",
 )
 CHEQUE_DOCUMENT_TYPES = ("CHEQUE_DEPOSIT", "CHEQUE_CREDIT", "CHEQUE_REJECTION", "CHEQUE_RETURN")
 # Operations whose description is the mandatory reason.
@@ -138,7 +144,11 @@ class Account(IdMixin, TimestampMixin, Base):
         CheckConstraint("kind <> 'CASH_BOX' OR NOT allow_negative", name="cash_box_not_negative"),
         # An internal account belongs to exactly one employee, and only internal accounts have one.
         CheckConstraint("(kind = 'EMPLOYEE') = (employee_id IS NOT NULL)", name="employee_link"),
+        # «Entregas a cuenta» belongs to exactly one boca, and only it has one (R7-3); it may be negative.
+        CheckConstraint("(kind = 'OUTLET_ADVANCES') = (outlet_id IS NOT NULL)", name="outlet_link"),
+        CheckConstraint("kind <> 'OUTLET_ADVANCES' OR allow_negative", name="outlet_advances_may_be_negative"),
         Index("uq_accounts_employee_id", "employee_id", unique=True, postgresql_where=text("employee_id IS NOT NULL")),
+        Index("uq_accounts_outlet_id", "outlet_id", unique=True, postgresql_where=text("outlet_id IS NOT NULL")),
         Index("uq_accounts_code", "code", unique=True, postgresql_where=text("code IS NOT NULL")),
         Index(
             "uq_accounts_technical_kind",
@@ -159,6 +169,8 @@ class Account(IdMixin, TimestampMixin, Base):
     active: Mapped[bool] = mapped_column(Boolean, server_default="true")
     # EMPLOYEE accounts only (R2): positive balance = the employee owes the company, negative = the opposite.
     employee_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("employees.id", ondelete="RESTRICT"))
+    # OUTLET_ADVANCES accounts only (R7-3): negative = cash the boca handed over, not yet consolidated.
+    outlet_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("outlets.id", ondelete="RESTRICT"))
 
     @validates("name")
     def _set_name_key(self, _: str, name: str) -> str:
@@ -210,6 +222,14 @@ class FinancialOperation(IdMixin, Base):
             "source_id",
             unique=True,
             postgresql_where=text("type = 'PAYMENT'"),
+        ),
+        # A remittance of a boca has exactly one operation (R7-3).
+        Index(
+            "uq_financial_operations_outlet_remittance",
+            "source_type",
+            "source_id",
+            unique=True,
+            postgresql_where=text("type = 'OUTLET_REMITTANCE'"),
         ),
         {"schema": SCHEMA},
     )

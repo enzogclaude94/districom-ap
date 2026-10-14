@@ -19,7 +19,8 @@ export type AccountKind =
   | "MERCHANDISE_PAYMENTS"
   | "THIRD_PARTY_REFUNDS"
   | "OTHER_PAYMENTS"
-  | "OUTLET_COLLECTIONS";
+  | "OUTLET_COLLECTIONS"
+  | "OUTLET_ADVANCES";
 
 export type OperationType =
   | "OPENING_BALANCE"
@@ -40,6 +41,7 @@ export type OperationType =
   | "CHEQUE_RETURN"
   | "DIRECT_EXPENSE"
   | "PAYMENT"
+  | "OUTLET_REMITTANCE"
   | "REVERSAL";
 
 export interface Account {

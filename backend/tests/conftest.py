@@ -43,6 +43,8 @@ TRUNCATED_TABLES = (
     "settlements.cheque_rejections",
     "settlements.cheque_returns",
     "settlements.cheque_events",
+    "settlements.settlement_closing_remittances",
+    "settlements.outlet_remittances",
     "settlements.settlement_closing_cheques",
     "settlements.cheques",
     "settlements.pending_collection_events",
@@ -70,6 +72,8 @@ TRUNCATED_TABLES = (
 # removed afterwards.
 # The official bank catalog as migration 0011 seeds it (JSON), restored after each test.
 SEEDED_BANKS = "[]"
+# The accounts the migrations seed, as JSON rows, restored after each test.
+SEEDED_ACCOUNT_ROWS = "[]"
 SEEDED_ACCOUNTS = (
     "main_cash",
     "change_cash",
@@ -102,7 +106,7 @@ def migrated_db() -> None:
     cfg = alembic_config()
     command.downgrade(cfg, "base")
     command.upgrade(cfg, "head")
-    global SEEDED_BANKS
+    global SEEDED_BANKS, SEEDED_ACCOUNT_ROWS
     engine = create_engine(os.environ["DATABASE_URL"])
     with engine.connect() as conn:
         SEEDED_BANKS = conn.execute(
@@ -110,6 +114,9 @@ def migrated_db() -> None:
                 "SELECT coalesce(jsonb_agg(jsonb_build_object('id', id, 'bcra_code', bcra_code, 'name', name, "
                 "'source', source)), '[]')::text FROM financial_institutions WHERE source = 'BCRA'"
             )
+        ).scalar_one()
+        SEEDED_ACCOUNT_ROWS = conn.execute(
+            text("SELECT coalesce(jsonb_agg(to_jsonb(a) ORDER BY a.id), '[]')::text FROM settlements.accounts a")
         ).scalar_one()
     engine.dispose()
 
@@ -123,6 +130,22 @@ def db(migrated_db: None) -> Iterator[Session]:
     session.close()
     with session.get_bind().begin() as conn:  # type: ignore[union-attr]
         conn.execute(text(f"TRUNCATE {', '.join(TRUNCATED_TABLES)} RESTART IDENTITY CASCADE"))
+        # A boca's «Entregas a cuenta» (R7-3) references its boca, so TRUNCATE users CASCADE (through the bocas)
+        # empties the accounts too: put back the ones the migrations seeded, with their ids.
+        conn.execute(
+            text(
+                "INSERT INTO settlements.accounts OVERRIDING SYSTEM VALUE "
+                "SELECT * FROM jsonb_populate_recordset(NULL::settlements.accounts, CAST(:rows AS jsonb)) "
+                "WHERE NOT EXISTS (SELECT 1 FROM settlements.accounts)"
+            ),
+            {"rows": SEEDED_ACCOUNT_ROWS},
+        )
+        conn.execute(
+            text(
+                "SELECT setval(pg_get_serial_sequence('settlements.accounts', 'id'), "
+                "(SELECT coalesce(max(id), 0) + 1 FROM settlements.accounts), false)"
+            )
+        )
         # TRUNCATE users CASCADE empties the bank catalog too (a manual entry names its author): put back
         # the official entries the migration seeded, with their ids.
         conn.execute(text("TRUNCATE financial_institutions CASCADE"))

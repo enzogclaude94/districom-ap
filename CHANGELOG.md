@@ -4,6 +4,18 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Added — Entregas parciales de boca (R7‑3)
+- **R7‑2 DONE** (aprobada por Enzo el 2026-10-13 con sus desvíos; PR #35 mergeado `352a512`, `0023` congelada). **R7‑3 autorizada** con las respuestas a R7‑3‑Q1 a Q3.
+- **Entregar efectivo** (migración `0024`): durante el día la boca entrega efectivo a cualquier caja activa (Caja principal por defecto). Cada entrega es un documento (`settlements.outlet_remittances`) con su operación `OUTLET_REMITTANCE` en Cajas: «Entregas a cuenta — {Boca}» −X, la caja +X, en el momento. Hora de la entrega (no futura, del día de la rendición en hora de Argentina), quién la llevó (opcional; sugeridos los responsables del día), referencia. Operator o admin con la rendición abierta; solo admin en corrección; nunca cerrada.
+- **«Entregas a cuenta — {Boca}»** (`OUTLET_ADVANCES`): una cuenta técnica por boca, creada en su primera entrega, cerrada a todo lo que no sea una entrega de esa boca, el cierre de una rendición de esa boca y sus reversos (servicio, reglas del ledger y base). No es dinero disponible.
+- **Revertir una entrega:** solo admin, con motivo, en una rendición abierta o en corrección; queda tachada con el motivo, quién y cuándo, y Cajas registra el reverso si la caja lo cubre. Nunca se edita el importe ni se borra.
+- **Por encima del esperado:** no se bloquea; se confirma con «Con esta entrega lo entregado supera el importe esperado en $X.» Antes de registrar, la pantalla muestra el movimiento exacto en Cajas y pide confirmarlo.
+- **Cierre:** lo entregado se suma al justificado y el cierre lo consolida (+Σ entregas vigentes en la cuenta de la boca) sin volver a mover la caja; `settlement_closing_remittances` congela qué entregas consolidó cada cierre. Una boca con varias rendiciones el mismo día nunca mezcla sus entregas; la base verifica el saldo de cada boca. El cierre cero exige cero entregas vigentes. Cualquier cambio de entregas vence la vista previa.
+- **Tablero de boca mientras está abierta:** «Entregas parciales», «Efectivo final» y «Resta justificar» (o «Justificado por encima del esperado»); sin faltante ni sobrante hasta el cierre (`difference` nulo en el detalle y en la lista mientras está abierta).
+- **Reapertura:** no toca las entregas; el cierre anterior sigue vigente y la cuenta de la boca se concilia en el nuevo cierre.
+- **Downgrade de `0024`** rechazado si ya existe una entrega.
+- **Tests:** API, SQL directo (las 18 barreras), concurrencia, migración, frontend y E2E (`docs/TESTING.md`).
+
 ### Added — Rendición de boca sin entregas parciales (R7‑2)
 - **R7‑1 DONE** (aprobada por Enzo el 2026-10-11; PR #34 mergeado, `0021` y `0022` congeladas). **R7‑2 autorizada** con la respuesta a R7‑2‑Q1 (cierre administrativo cero).
 - **Rendición de boca** (`type = OUTLET` en `settlements.settlements`, migración `0023`): la boca reemplaza al repartidor (`outlet_id` obligatorio, `employee_id` nulo); reparto no cambia. Alta por operator, idempotente, con la boca activa y lock por boca y día; la Rendición 2 del mismo día pide confirmación explícita. Una boca desactivada después termina sus rendiciones abiertas.

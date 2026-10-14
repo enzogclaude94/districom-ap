@@ -8,6 +8,7 @@ const operatorPassword = process.env.E2E_OPERATOR_PASSWORD ?? "operator-password
 
 interface Account {
   code: string | null;
+  kind?: string;
   name: string;
   balance: string;
 }
@@ -112,7 +113,8 @@ test("boca settlement: open without expected, zero close, reopen, cash and finan
     (dialog) => dialog.getByLabel("Cantidad de billetes de $ 20.000,00").fill("1"),
     "Guardar conteo",
   );
-  await expect(page.getByTestId("board-difference")).toHaveText("Balanceada");
+  // While open there is no difference (R7-3): what remains to justify.
+  await expect(page.getByTestId("board-remaining")).toHaveText("$ 0,00");
   await page.getByRole("button", { name: "Cerrar rendición" }).click();
   const financial = page.getByRole("dialog");
   await expect(financial.getByTestId("balanced")).toBeVisible();
@@ -130,4 +132,92 @@ test("boca settlement: open without expected, zero close, reopen, cash and finan
   await expect(history).toContainText("Cierre administrativo cero");
   await expect(history).toContainText("Reapertura (versión 1 → 2)");
   await expect(history).toContainText("Nuevo cierre (versión 2)");
+});
+
+test("boca settlement: partial remittances, a reversal and the close that consolidates them", async ({
+  page,
+  isMobile,
+}) => {
+  test.skip(isMobile, "full flow runs on desktop");
+  const stamp = String(Date.now()).slice(-8);
+  const code = `E-${stamp}`;
+  const name = `Boca Entregas ${stamp}`;
+  const advancesName = `Entregas a cuenta — ${name}`;
+  const advances = async () => {
+    const accounts = await api<Account[]>(page.request, "GET", "/settlements/accounts?include_inactive=true");
+    const account = accounts.find((a) => a.name === advancesName);
+    return account ? cents(account.balance) : null;
+  };
+
+  await login(page, "/bocas", adminEmail, adminPassword);
+  await api(page.request, "POST", "/outlets", { code, name });
+  const before = await balances(page);
+
+  // 1. Operator: a boca settlement of $50.000.
+  await switchUser(page, operatorEmail, operatorPassword, "/rendiciones/boca");
+  await page.getByRole("button", { name: "Nueva rendición" }).click();
+  const create = page.getByRole("dialog");
+  await create.getByLabel("Fecha").fill(businessDay(-1));
+  await create.getByLabel("Boca").selectOption({ label: `${name} (${code})` });
+  await create.getByLabel(/Importe esperado/).fill("50.000");
+  await create.getByRole("button", { name: "Crear rendición" }).click();
+  await expect(page).toHaveURL(/\/rendiciones\/boca\/\d+$/);
+  const settlementId = Number(page.url().split("/").pop());
+
+  // 2. Two handovers to Caja principal, each reviewed before it is recorded; the second is a mistake.
+  for (const [amount, time] of [
+    ["30.000", "13:00"],
+    ["5.000", "15:30"],
+  ] as const) {
+    await page.getByRole("button", { name: "Entregar efectivo" }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByLabel("Caja que recibe")).toHaveValue(/\d+/);
+    await dialog.getByLabel("Importe").fill(amount);
+    await dialog.getByLabel("Hora de la entrega").fill(time);
+    await dialog.getByRole("button", { name: "Revisar entrega" }).click();
+    const confirmation = dialog.getByTestId("remittance-confirmation");
+    await expect(confirmation).toContainText(`Caja principal+$ ${amount},00`);
+    await expect(confirmation).toContainText(`${advancesName}-$ ${amount},00`);
+    await dialog.getByRole("button", { name: "Confirmar entrega" }).click();
+    await expect(dialog).toBeHidden();
+  }
+  await expect(page.getByTestId("board-remitted")).toHaveText("$ 35.000,00");
+  await expect(page.getByTestId("board-remaining")).toHaveText("$ 15.000,00");
+  expect((await balances(page)).main_cash - before.main_cash).toBe(3_500_000);
+  expect(await advances()).toBe(-3_500_000);
+  await expect(page.getByRole("button", { name: "Revertir" })).toHaveCount(0);
+
+  // 3. Admin reverses the mistaken one, with a reason: it stays, struck through.
+  await switchUser(page, adminEmail, adminPassword, `/rendiciones/boca/${settlementId}`);
+  await page.getByTestId("remittance").nth(1).getByRole("button", { name: "Revertir" }).click();
+  const reversal = page.getByRole("dialog");
+  await reversal.getByLabel("Motivo").fill("Se cargó dos veces");
+  await reversal.getByRole("button", { name: "Revertir", exact: true }).click();
+  await expect(reversal).toBeHidden();
+  await expect(page.getByTestId("remittance").nth(1)).toContainText("Revertida");
+  await expect(page.getByTestId("remittance").nth(1)).toContainText("Motivo: Se cargó dos veces");
+  await expect(page.getByTestId("board-remitted")).toHaveText("$ 30.000,00");
+  expect(await advances()).toBe(-3_000_000);
+
+  // 4. Operator counts what stayed in the boca ($20.000) and closes balanced: the close consolidates the
+  // handovers without moving the cash box again.
+  await switchUser(page, operatorEmail, operatorPassword, `/rendiciones/boca/${settlementId}`);
+  await dialogAction(
+    page,
+    page.getByRole("button", { name: "Cargar conteo" }),
+    (dialog) => dialog.getByLabel("Cantidad de billetes de $ 20.000,00").fill("1"),
+    "Guardar conteo",
+  );
+  await expect(page.getByTestId("board-remaining")).toHaveText("$ 0,00");
+  await page.getByRole("button", { name: "Cerrar rendición" }).click();
+  const closing = page.getByRole("dialog");
+  await expect(closing.getByTestId("balanced")).toBeVisible();
+  await closing.getByRole("button", { name: "Confirmar cierre" }).click();
+  await expect(closing).toBeHidden();
+  await expect(page.getByTestId("financial-state")).toHaveText("Cerrada");
+  await expect(page.getByRole("button", { name: "Entregar efectivo" })).toHaveCount(0);
+  const after = await balances(page);
+  expect(after.main_cash - before.main_cash).toBe(5_000_000);
+  expect(after.outlet_collections - before.outlet_collections).toBe(-5_000_000);
+  expect(await advances()).toBe(0);
 });

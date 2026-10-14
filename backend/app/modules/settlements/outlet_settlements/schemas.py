@@ -7,12 +7,12 @@ a driver) and that its expected amount may be unknown (NULL) or 0 while it is lo
 
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from app.modules.settlements.cash.schemas import Money
+from app.modules.settlements.cash.schemas import Amount, Money, Reason
 from app.modules.settlements.cheques.schemas import ChequeOut
 from app.modules.settlements.delivery import schemas as ds
 from app.modules.settlements.pending.schemas import PendingOut
@@ -42,8 +42,19 @@ class OutletSettlementPatch(ds.SettlementPatch):
 
 
 class OutletSummary(ds.Summary):
+    """The board of a boca (R7-3): what was handed over (`remitted`), what stayed and justifies (`cash_total`,
+    transfers, cheques, expenses) and, while the settlement is OPEN, how far it is from the expected amount, never
+    a shortage or surplus: the difference exists only once it is closed."""
+
     # The Store Sys amount is not loaded yet: `expected` reads 0 and the difference means nothing until it is.
     expected_missing: bool
+    # Null while OPEN (never closed or being corrected): there is no difference until the close.
+    difference: Money | None  # type: ignore[assignment]
+    difference_kind: Literal["SHORTAGE", "SURPLUS", "BALANCED"] | None  # type: ignore[assignment]
+    # expected - justified while that is >= 0; null without an expected amount.
+    remaining: Money | None = None
+    # justified - expected when the justified total already goes above it; null otherwise.
+    justified_above_expected: Money | None = None
 
 
 class ResponsibleSuggestion(BaseModel):
@@ -52,6 +63,75 @@ class ResponsibleSuggestion(BaseModel):
 
     employee_id: int
     full_name: str
+
+
+# --- remittances (R7-3) ---------------------------------------------------------------------------
+
+
+class RemittancePreviewIn(ds.StrictIn):
+    amount: Amount
+    # An active cash box (the screen proposes Caja principal); never a bank nor a technical account.
+    destination_account_id: int
+    # When it happened (with its time zone): not in the future and on the settlement's business date.
+    delivered_at: datetime
+    # Who carried the cash, optional; the screen suggests the boca's responsables of that day.
+    delivered_by_employee_id: int | None = None
+    reference: str | None = Field(default=None, max_length=100)
+
+
+class RemittanceIn(RemittancePreviewIn):
+    # Generated once per user action and resent on retries.
+    client_request_id: UUID
+    # Required when the remittances in effect would go above the expected amount (never blocked).
+    confirm_above_expected: bool = False
+
+
+class RemittanceReversalIn(ds.StrictIn):
+    client_request_id: UUID
+    reason: Reason
+
+
+class RemittanceLegOut(BaseModel):
+    # Null for the boca's «Entregas a cuenta» before its first remittance creates it.
+    account_id: int | None
+    account_name: str
+    amount: Money
+
+
+class RemittancePreviewOut(BaseModel):
+    """What «Entregar efectivo» would publish, for the user to confirm before it does."""
+
+    legs: list[RemittanceLegOut]
+    remitted_before: Money
+    remitted_after: Money
+    expected: Money | None
+    # How much the remittances in effect would go above the expected amount; null when they would not.
+    excess: Money | None
+    warning: str | None
+
+
+class RemittanceOut(BaseModel):
+    id: int
+    amount: Money
+    delivered_at: datetime
+    destination_account_id: int
+    destination_account_name: str
+    delivered_by_employee_id: int | None
+    delivered_by_name: str | None
+    reference: str | None
+    operation_id: int | None
+    # IN_EFFECT or REVERSED.
+    status: Literal["IN_EFFECT", "REVERSED"]
+    # Consolidated by the close in effect (a reversed one may still be, until the new close of a correction).
+    consolidated: bool
+    created_by: int
+    created_by_name: str
+    created_at: datetime
+    reversal_operation_id: int | None
+    reversed_by: int | None
+    reversed_by_name: str | None
+    reversed_at: datetime | None
+    reversal_reason: str | None
 
 
 class OutletSettlementItem(BaseModel):
@@ -69,7 +149,7 @@ class OutletSettlementItem(BaseModel):
     administrative_zero: bool
     created_at: datetime
     justified: Money
-    # Null while the expected amount is not loaded.
+    # Null while the settlement is OPEN (no difference until the close, R7-3) or the expected amount is not loaded.
     difference: Money | None
 
 
@@ -108,6 +188,8 @@ class OutletSettlementOut(BaseModel):
     # Always empty: a boca has no pending collections (kept so the board has one shape).
     pending_collections: list[PendingOut]
     cheques: list[ChequeOut] = []
+    # Partial deliveries of the day (R7-3), reversed ones included.
+    remittances: list[RemittanceOut] = []
     summary: OutletSummary
     financial_state: ds.FinancialState
     financial_state_detail: str
