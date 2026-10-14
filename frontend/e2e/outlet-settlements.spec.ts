@@ -78,7 +78,9 @@ test("boca settlement: open without expected, zero close, reopen, cash and finan
   await expect(page.getByTestId("without-movements")).toBeVisible();
   await page.getByRole("button", { name: "Cerrar rendición en $0" }).click();
   const zero = page.getByRole("dialog");
-  await expect(zero.getByTestId("administrative-zero")).toHaveText("Sin movimientos financieros. La rendición se cierra en $0.");
+  await expect(zero.getByTestId("administrative-zero")).toHaveText(
+    "Sin movimientos financieros. La rendición se cierra en $0.",
+  );
   await zero.getByRole("button", { name: "Cerrar rendición en $0" }).click();
   await expect(zero).toBeHidden();
   await expect(page.getByTestId("financial-state")).toHaveText("Cerrada");

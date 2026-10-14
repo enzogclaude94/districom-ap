@@ -145,7 +145,7 @@ export function OutletSettlementList({ initialOutletId }: { initialOutletId?: nu
       ) : (
         <Card>
           <CardContent className="pt-3">
-            <Table>
+            <Table stacked aria-label="Rendiciones de boca">
               <TableHeader>
                 <TableRow>
                   <TableHead>Fecha</TableHead>
@@ -163,32 +163,36 @@ export function OutletSettlementList({ initialOutletId }: { initialOutletId?: nu
               <TableBody>
                 {list.data.items.map((item) => (
                   <TableRow key={item.id}>
-                    <TableCell className="whitespace-nowrap tabular-nums">{formatDate(item.business_date)}</TableCell>
-                    <TableCell className="whitespace-nowrap">{item.outlet_name}</TableCell>
-                    <TableCell className="whitespace-nowrap">
+                    <TableCell data-label="Fecha" className="whitespace-nowrap tabular-nums">
+                      {formatDate(item.business_date)}
+                    </TableCell>
+                    <TableCell data-label="Boca" className="whitespace-nowrap">
+                      {item.outlet_name}
+                    </TableCell>
+                    <TableCell data-label="Rendición" className="whitespace-nowrap">
                       {settlementTitle(item.sequence_number)}
                       {item.external_reference && (
                         <span className="block text-xs text-muted-foreground">{item.external_reference}</span>
                       )}
                     </TableCell>
-                    <TableCell className="text-right whitespace-nowrap tabular-nums">
+                    <TableCell data-label="Esperado" className="text-right whitespace-nowrap tabular-nums">
                       {item.expected_amount === null ? (
                         <span className="text-warning">Sin cargar</span>
                       ) : (
                         formatMoney(item.expected_amount)
                       )}
                     </TableCell>
-                    <TableCell className="text-right whitespace-nowrap tabular-nums">
+                    <TableCell data-label="Justificado" className="text-right whitespace-nowrap tabular-nums">
                       {formatMoney(item.justified)}
                     </TableCell>
-                    <TableCell className="whitespace-nowrap">
+                    <TableCell data-label="Diferencia" className="whitespace-nowrap">
                       {item.difference === null ? (
                         "—"
                       ) : (
                         <Badge tone={differenceTone(item.difference)}>{differenceText(item.difference)}</Badge>
                       )}
                     </TableCell>
-                    <TableCell className="whitespace-nowrap">
+                    <TableCell data-label="Estado" className="whitespace-nowrap">
                       <Badge tone={FINANCIAL_STATE_TONES[item.financial_state]}>
                         {FINANCIAL_STATE_LABELS[item.financial_state]}
                       </Badge>
