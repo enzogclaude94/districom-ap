@@ -35,6 +35,7 @@ def settlement(db: Session, settlement_id: int) -> s.OutletSettlementOut:
     board = delivery_views.board(db, row)
     board["summary"] = _summary(board["summary"], row)
     items = remittance_items(db, row)
+    board["summary"].without_movements = closing.without_movements(row, summary.totals(db, [row.id])[row.id])
     if row.current_close_operation_id is not None:
         board["summary"].remitted_in_effect_close = sum((r.amount for r in items if r.consolidated), ZERO)
     return s.OutletSettlementOut(

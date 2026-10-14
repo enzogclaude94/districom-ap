@@ -60,6 +60,8 @@ class OutletSummary(ds.Summary):
     # Remittances the close in effect consolidated; null without a financial close in effect. During a
     # correction it is what stays in effect until the new close, next to `remitted` (the current proposal).
     remitted_in_effect_close: Money | None = None
+    # Expected $0 and nothing loaded: closing it is an administrative zero close, without financial movements.
+    without_movements: bool = False
 
 
 class ResponsibleSuggestion(BaseModel):

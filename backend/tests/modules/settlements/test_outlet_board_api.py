@@ -292,3 +292,12 @@ def test_history_of_a_zero_close_has_no_remittances(r: Roles, centro: int) -> No
     assert close(r.operator, sid).status_code == 201
     [only] = r.viewer.get(f"{OUT}/{sid}/history").json()["closings"]
     assert (only["kind"], only["remittances"]) == ("ADMINISTRATIVE_ZERO", [])
+
+
+def test_detail_says_when_closing_has_no_financial_movements(r: Roles, centro: int, ids: dict[str, int]) -> None:
+    sid = create(r.operator, centro, "0")
+    assert r.viewer.get(f"{OUT}/{sid}").json()["summary"]["without_movements"] is True
+    missing = create(r.operator, centro, None, confirm_additional=True)
+    assert r.viewer.get(f"{OUT}/{missing}").json()["summary"]["without_movements"] is False
+    remit(r.operator, sid, "100", ids["main_cash"], confirm_above_expected=True)
+    assert r.viewer.get(f"{OUT}/{sid}").json()["summary"]["without_movements"] is False
