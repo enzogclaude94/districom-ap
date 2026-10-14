@@ -34,9 +34,12 @@ def settlement(db: Session, settlement_id: int) -> s.OutletSettlementOut:
     outlet = outlets.get(db, row.outlet_id)
     board = delivery_views.board(db, row)
     board["summary"] = _summary(board["summary"], row)
+    items = remittance_items(db, row)
+    if row.current_close_operation_id is not None:
+        board["summary"].remitted_in_effect_close = sum((r.amount for r in items if r.consolidated), ZERO)
     return s.OutletSettlementOut(
         **board,
-        remittances=remittance_items(db, row),
+        remittances=items,
         outlet_id=outlet.id,
         outlet_code=outlet.code,
         outlet_name=outlet.name,
@@ -162,7 +165,13 @@ def _summary(board: ds.Summary, row: Settlement, *, closing: bool = False) -> s.
     if row.status == "OPEN" and not closing:
         values["difference"] = None
         values["difference_kind"] = None
-    return s.OutletSummary(**values, expected_missing=missing, remaining=remaining, justified_above_expected=above)
+    return s.OutletSummary(
+        **values,
+        expected_missing=missing,
+        remaining=remaining,
+        justified_above_expected=above,
+        justified_other=board.justified - (board.remitted or ZERO),
+    )
 
 
 def _suggestions(db: Session, row: Settlement) -> list[s.ResponsibleSuggestion]:

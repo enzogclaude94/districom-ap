@@ -228,6 +228,20 @@ def test_ficha_during_a_correction_counts_only_the_new_remittance(r: Roles, cent
     # The reversed one stays consolidated by the close in effect; the new one waits for the new close.
     assert summary["remitted_not_consolidated"] == "300000.00"
     assert summary["open_settlements"][0]["financial_state"] == "BEING_CORRECTED"
+    # The detail shows the close in effect next to the current proposal.
+    board = r.viewer.get(f"{OUT}/{sid}").json()["summary"]
+    assert (board["remitted_in_effect_close"], board["remitted"]) == ("350000.00", "300000.00")
+    assert board["justified_other"] == "650000.00"
+
+
+def test_detail_splits_delivered_and_other_justified(r: Roles, centro: int, ids: dict[str, int]) -> None:
+    sid = create(r.operator, centro, "1000000")
+    remit(r.operator, sid, "700000", ids["main_cash"])
+    transfer(r.operator, sid, "100000", "VERIFIED")
+    count(r.operator, sid, ("ARS_20000", 10, ids["main_cash"]))
+    board = r.viewer.get(f"{OUT}/{sid}").json()["summary"]
+    assert (board["remitted"], board["justified_other"], board["remaining"]) == ("700000.00", "300000.00", "0.00")
+    assert board["remitted_in_effect_close"] is None
 
 
 # --- history --------------------------------------------------------------------------------------

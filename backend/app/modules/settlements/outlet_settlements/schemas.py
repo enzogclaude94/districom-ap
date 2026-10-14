@@ -55,6 +55,11 @@ class OutletSummary(ds.Summary):
     remaining: Money | None = None
     # justified - expected when the justified total already goes above it; null otherwise.
     justified_above_expected: Money | None = None
+    # What justifies besides the remittances: final cash, verified transfers, cheques and expenses (R7-4).
+    justified_other: Money = Decimal("0.00")
+    # Remittances the close in effect consolidated; null without a financial close in effect. During a
+    # correction it is what stays in effect until the new close, next to `remitted` (the current proposal).
+    remitted_in_effect_close: Money | None = None
 
 
 class ResponsibleSuggestion(BaseModel):
