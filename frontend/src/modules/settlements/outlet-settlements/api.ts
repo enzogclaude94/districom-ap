@@ -23,7 +23,7 @@ export interface OutletSettlementItem {
   administrative_zero: boolean;
   created_at: string;
   justified: string;
-  /** Null while the expected amount is not loaded. */
+  /** Null while the settlement is open (R7-3: no difference until the close) or the expected amount is not loaded. */
   difference: string | null;
 }
 

@@ -19,6 +19,7 @@ export const OPERATION_LABELS: Record<OperationType, string> = {
   CHEQUE_RETURN: "Devolución de cheque",
   DIRECT_EXPENSE: "Gasto directo",
   PAYMENT: "Pago a tercero",
+  OUTLET_REMITTANCE: "Entrega parcial de boca",
   REVERSAL: "Reverso",
 };
 
@@ -35,6 +36,7 @@ export const DOCUMENT_OPERATION_TYPES: readonly OperationType[] = [
   "CHEQUE_RETURN",
   "DIRECT_EXPENSE",
   "PAYMENT",
+  "OUTLET_REMITTANCE",
 ];
 
 export const ACCOUNT_KIND_LABELS: Record<AccountKind, string> = {
@@ -55,6 +57,7 @@ export const ACCOUNT_KIND_LABELS: Record<AccountKind, string> = {
   THIRD_PARTY_REFUNDS: "Pagos realizados",
   OTHER_PAYMENTS: "Pagos realizados",
   OUTLET_COLLECTIONS: "Cuenta técnica",
+  OUTLET_ADVANCES: "Cuenta técnica: entregas a cuenta",
 };
 
 /** Accounts that hold money or partner contributions. Technical counterparts never show as available money. */
@@ -70,6 +73,7 @@ const SOURCE_LABELS: Record<string, string> = {
   cheque_return: "Devolución de cheque",
   expense: "Gasto directo",
   payment: "Pago",
+  outlet_remittance: "Entrega parcial de boca",
 };
 
 /** Where an operation came from: entered by hand on this screen, or a document such as a settlement. */

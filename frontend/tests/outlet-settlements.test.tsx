@@ -3,7 +3,14 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import type { Account } from "@/modules/settlements/cash/api";
-import type { ClosingPreview, History, Settlement, Summary } from "@/modules/settlements/delivery/api";
+import type {
+  ClosingPreview,
+  History,
+  Remittance,
+  RemittancePreview,
+  Settlement,
+  Summary,
+} from "@/modules/settlements/delivery/api";
 import { timeline } from "@/modules/settlements/delivery/history-tab";
 import { SettlementDetail, ZERO_CLOSE_TEXT } from "@/modules/settlements/delivery/settlement-detail";
 import { parseExpected } from "@/modules/settlements/outlet-settlements/amount";
@@ -401,5 +408,212 @@ describe("a boca's page", () => {
       "href",
       "/rendiciones/boca?boca=3",
     );
+  });
+});
+
+const REMITTANCE: Remittance = {
+  id: 11,
+  amount: "400000.00",
+  delivered_at: "2026-10-04T16:00:00Z",
+  destination_account_id: 1,
+  destination_account_name: "Caja principal",
+  delivered_by_employee_id: 5,
+  delivered_by_name: "Ana Cajera",
+  reference: "Sobre 1",
+  operation_id: 30,
+  status: "IN_EFFECT",
+  consolidated: false,
+  created_by: 9,
+  created_by_name: "Oscar Operador",
+  created_at: "2026-10-04T16:05:00Z",
+  reversal_operation_id: null,
+  reversed_by: null,
+  reversed_by_name: null,
+  reversed_at: null,
+  reversal_reason: null,
+};
+
+const REVERSED: Remittance = {
+  ...REMITTANCE,
+  id: 12,
+  amount: "350000.00",
+  status: "REVERSED",
+  reversal_operation_id: 31,
+  reversed_by: 1,
+  reversed_by_name: "Ada Admin",
+  reversed_at: "2026-10-04T17:00:00Z",
+  reversal_reason: "Era de $300.000",
+};
+
+function remittancePreview(changes: Partial<RemittancePreview> = {}): RemittancePreview {
+  return {
+    legs: [
+      { account_id: 1, account_name: "Caja principal", amount: "400000.00" },
+      { account_id: null, account_name: "Entregas a cuenta — Boca Centro", amount: "-400000.00" },
+    ],
+    remitted_before: "0.00",
+    remitted_after: "400000.00",
+    expected: "1000000.00",
+    excess: null,
+    warning: null,
+    ...changes,
+  };
+}
+
+const WITH_REMITTANCES = settlement({
+  expected_amount: "1000000.00",
+  remittances: [REMITTANCE, REVERSED],
+  summary: summary({
+    expected: "1000000.00",
+    remitted: "400000.00",
+    justified: "400000.00",
+    difference: null,
+    difference_kind: null,
+    remaining: "600000.00",
+    justified_above_expected: null,
+  }),
+});
+
+describe("partial remittances of a boca (R7-3)", () => {
+  it("shows what was handed over and what remains, never a difference while open", async () => {
+    mockApi(detailRoutes("operator", WITH_REMITTANCES));
+    renderWithQuery(<SettlementDetail settlementId={7} type="OUTLET" />);
+    expect(await screen.findByTestId("board-remitted")).toHaveTextContent("$ 400.000,00");
+    expect(screen.getByTestId("board-remaining")).toHaveTextContent("$ 600.000,00");
+    expect(screen.queryByTestId("board-difference")).not.toBeInTheDocument();
+    const rows = screen.getAllByTestId("remittance");
+    expect(rows).toHaveLength(2);
+    expect(within(rows[0]!).getByText("Vigente")).toBeInTheDocument();
+    expect(within(rows[0]!).getByText("Ana Cajera")).toBeInTheDocument();
+    expect(within(rows[1]!).getByText("Revertida")).toBeInTheDocument();
+    expect(within(rows[1]!).getByText(/Motivo: Era de \$300.000/)).toBeInTheDocument();
+    expect(within(rows[1]!).getByText("$ 350.000,00")).toHaveClass("line-through");
+    // Only an admin reverses.
+    expect(screen.queryByRole("button", { name: "Revertir" })).not.toBeInTheDocument();
+  });
+
+  it("shows a justified total above the expected amount without calling it a surplus", async () => {
+    const above = settlement({
+      summary: summary({
+        expected: "1000.00",
+        justified: "1200.00",
+        difference: null,
+        difference_kind: null,
+        remaining: null,
+        justified_above_expected: "200.00",
+      }),
+    });
+    mockApi(detailRoutes("operator", above));
+    renderWithQuery(<SettlementDetail settlementId={7} type="OUTLET" />);
+    expect(await screen.findByText("Justificado por encima del esperado")).toBeInTheDocument();
+    expect(screen.getByTestId("board-remaining")).toHaveTextContent("$ 200,00");
+    expect(screen.queryByText(/Sobrante/)).not.toBeInTheDocument();
+  });
+
+  it("reviews the movement in Cajas before recording a remittance", async () => {
+    const spy = mockApi(
+      detailRoutes("operator", WITH_REMITTANCES, {
+        "POST /settlements/outlet-settlements/7/remittances/preview": () => jsonResponse(200, remittancePreview()),
+        "POST /settlements/outlet-settlements/7/remittances": () => jsonResponse(201, WITH_REMITTANCES),
+      }),
+    );
+    renderWithQuery(<SettlementDetail settlementId={7} type="OUTLET" />);
+    await userEvent.click(await screen.findByRole("button", { name: "Entregar efectivo" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByLabelText("Caja que recibe")).toHaveValue("1");
+    await userEvent.type(within(dialog).getByLabelText("Importe"), "400000");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Revisar entrega" }));
+    expect(await within(dialog).findByText("Indicá la hora de la entrega.")).toBeInTheDocument();
+    await userEvent.type(within(dialog).getByLabelText("Hora de la entrega"), "13:00");
+    await userEvent.selectOptions(within(dialog).getByLabelText("Quién entregó (opcional)"), "5");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Revisar entrega" }));
+    const confirmation = await within(dialog).findByTestId("remittance-confirmation");
+    expect(confirmation).toHaveTextContent("Caja principal+$ 400.000,00");
+    expect(confirmation).toHaveTextContent("Entregas a cuenta — Boca Centro-$ 400.000,00");
+    // Nothing recorded yet: only the preview was asked for.
+    expect(
+      bodies(spy, "/settlements/outlet-settlements/7/remittances").filter((b) => "client_request_id" in b),
+    ).toEqual([]);
+    await userEvent.click(within(dialog).getByRole("button", { name: "Confirmar entrega" }));
+    await waitFor(() => expect(bodies(spy, "/settlements/outlet-settlements/7/remittances/preview")).toHaveLength(1));
+    await waitFor(() =>
+      expect(
+        spy.mock.calls.filter(([input]) => String(input).endsWith("/outlet-settlements/7/remittances")),
+      ).toHaveLength(1),
+    );
+    const sent = bodies(spy, "/settlements/outlet-settlements/7/remittances").find((b) => "client_request_id" in b)!;
+    expect(sent).toMatchObject({
+      amount: "400000.00",
+      destination_account_id: 1,
+      delivered_at: "2026-10-04T13:00:00-03:00",
+      delivered_by_employee_id: 5,
+      reference: null,
+      confirm_above_expected: false,
+    });
+  });
+
+  it("warns when the remittances would go above the expected amount and confirms it explicitly", async () => {
+    const spy = mockApi(
+      detailRoutes("operator", WITH_REMITTANCES, {
+        "POST /settlements/outlet-settlements/7/remittances/preview": () =>
+          jsonResponse(
+            200,
+            remittancePreview({ remitted_before: "900000.00", remitted_after: "1100000.00", excess: "100000.00" }),
+          ),
+        "POST /settlements/outlet-settlements/7/remittances": () => jsonResponse(201, WITH_REMITTANCES),
+      }),
+    );
+    renderWithQuery(<SettlementDetail settlementId={7} type="OUTLET" />);
+    await userEvent.click(await screen.findByRole("button", { name: "Entregar efectivo" }));
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.type(within(dialog).getByLabelText("Importe"), "200000");
+    await userEvent.type(within(dialog).getByLabelText("Hora de la entrega"), "13:00");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Revisar entrega" }));
+    expect(await within(dialog).findByTestId("remittance-excess")).toHaveTextContent(
+      "Con esta entrega lo entregado supera el importe esperado en $ 100.000,00.",
+    );
+    await userEvent.click(within(dialog).getByRole("button", { name: "Confirmar entrega" }));
+    await waitFor(() =>
+      expect(
+        bodies(spy, "/settlements/outlet-settlements/7/remittances").find((b) => "client_request_id" in b),
+      ).toMatchObject({ confirm_above_expected: true }),
+    );
+  });
+
+  it("lets only an admin hand over cash or reverse while correcting", async () => {
+    const correcting = { ...WITH_REMITTANCES, financial_state: "BEING_CORRECTED" as const };
+    mockApi(detailRoutes("operator", correcting));
+    const { unmount } = renderWithQuery(<SettlementDetail settlementId={7} type="OUTLET" />);
+    await screen.findAllByTestId("remittance");
+    expect(screen.queryByRole("button", { name: "Entregar efectivo" })).not.toBeInTheDocument();
+    unmount();
+    vi.restoreAllMocks();
+
+    const spy = mockApi(
+      detailRoutes("admin", correcting, {
+        "POST /settlements/outlet-settlements/7/remittances/11/reverse": () => jsonResponse(200, correcting),
+      }),
+    );
+    renderWithQuery(<SettlementDetail settlementId={7} type="OUTLET" />);
+    expect(await screen.findByRole("button", { name: "Entregar efectivo" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Revertir" }));
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Revertir" }));
+    expect(await within(dialog).findByText("Indicá el motivo.")).toBeInTheDocument();
+    await userEvent.type(within(dialog).getByLabelText("Motivo"), "Era de $300.000");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Revertir" }));
+    await waitFor(() =>
+      expect(bodies(spy, "/settlements/outlet-settlements/7/remittances/11/reverse")).toEqual([
+        { client_request_id: expect.any(String), reason: "Era de $300.000" },
+      ]),
+    );
+  });
+
+  it("a closed settlement takes no remittance and reverses none", async () => {
+    mockApi(detailRoutes("admin", { ...WITH_REMITTANCES, status: "CLOSED", financial_state: "CLOSED" }));
+    renderWithQuery(<SettlementDetail settlementId={7} type="OUTLET" />);
+    await screen.findAllByTestId("remittance");
+    expect(screen.queryByRole("button", { name: "Entregar efectivo" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Revertir" })).not.toBeInTheDocument();
   });
 });
