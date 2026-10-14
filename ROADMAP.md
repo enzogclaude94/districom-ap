@@ -44,7 +44,7 @@ DistriCom es una plataforma modular (ADR 006). Este roadmap tiene tres carriles:
 | R4 | Cartera de cheques | **DONE** (aprobada por Enzo el 2026-10-09; PRs #17, #18 y #19) | R2 · R3 |
 | R5 | Combustible y vehículos | **DONE** (R5‑1 a R5‑4; `0014`–`0017` congeladas) | R2 |
 | R6 | Pagos a proveedores y terceros | **DONE** (2026-10-11) | R1 · R4 |
-| R7 | Boca de expendio | IN_PROGRESS (arquitectura aprobada 2026-10-11, ADR 009; R7‑1 y R7‑2 DONE; R7‑3 en revisión) | R2–R5 |
+| R7 | Boca de expendio | IN_PROGRESS (arquitectura aprobada 2026-10-11, ADR 009; R7‑1 a R7‑3 DONE; R7‑4 en curso) | R2–R5 |
 | R8 | Cuenta interna de empleados y liquidación semanal | PLANNED | R1 · R2 |
 | R9 | Endurecimiento | PLANNED | todas |
 
@@ -240,8 +240,8 @@ Arquitectura aprobada por Enzo el 2026-10-11 (alternativa B, D1–D9, ajustes 1�
 |---|---|---|
 | R7‑1 | Maestro de bocas en plataforma (`0021`) y responsables por vigencia en Rendiciones (`0022`), pantalla `/bocas` | **DONE** (PR #34, aprobada por Enzo el 2026-10-11 con sus desvíos documentados; mergeado `2ce4ebd`, CI de main 4/4; `0021` y `0022` congeladas) |
 | R7‑2 | Rendición `OUTLET` sin entregas parciales (esperado nulo/≥ 0, sin pendientes ni combustible, «Cobranzas de boca», cierre, cierre administrativo cero); `0023` | **DONE** (PR #35, aprobada por Enzo el 2026-10-13 con sus desvíos; mergeado `352a512`; `0023` congelada) |
-| R7‑3 | Entregas parciales `OUTLET_REMITTANCE` a una caja, «Entregas a cuenta — {Boca}»; `0024` | IN_REVIEW (autorizada por Enzo el 2026-10-13, con las respuestas a R7‑3‑Q1 a Q3; implementada, esperando su aprobación) |
-| R7‑4 | Pantallas de boca, ayuda del conteo final, móvil y E2E de punta a punta | PLANNED |
+| R7‑3 | Entregas parciales `OUTLET_REMITTANCE` a una caja, «Entregas a cuenta — {Boca}»; `0024` | **DONE** (PR #36, aprobada por Enzo el 2026-10-14 con sus seis desvíos; mergeado `e8b83d4`, CI de main 4/4; `0024` congelada) |
+| R7‑4 | Consolidación, experiencia operativa y cierre de boca: tablero Rendiciones › Bocas, ficha, detalle, ayuda del conteo final, móvil y E2E de punta a punta; sin migración | IN_PROGRESS (autorizada por Enzo el 2026-10-14) |
 
 ### R8 — Empleados: cuenta interna y liquidación semanal
 **Alcance:** condiciones de pago, consumos, adelantos, préstamos y cuotas, liquidación semanal (sueldo, bonos, incentivos, faltantes, sobrantes) y su pago.
