@@ -114,4 +114,5 @@ def test_adjustments_and_partner_movements_need_admin() -> None:
         "CHEQUE_REJECTION",
         "DIRECT_EXPENSE",
         "PAYMENT",
+        "OUTLET_REMITTANCE",
     }

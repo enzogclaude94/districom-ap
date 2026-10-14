@@ -66,6 +66,7 @@ ZERO_SNAPSHOT_AMOUNTS = {
     "cheques": "0.00",
     "expenses": "0.00",
     "pending": "0.00",
+    "remittances": "0.00",
     "difference": "0.00",
 }
 

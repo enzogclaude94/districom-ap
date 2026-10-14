@@ -63,7 +63,12 @@ SETTLEMENTS_TABLES = {
     "payments",
     "payment_items",
     "outlet_responsibilities",
+    "outlet_remittances",
+    "settlement_closing_remittances",
 }
+
+# Added by 0024 (R7-3).
+REMITTANCE_TABLES = {"outlet_remittances", "settlement_closing_remittances"}
 
 
 def _settlements_tables(url: str) -> set[str]:
@@ -172,7 +177,10 @@ def test_module_roles_migration_keeps_viewers_in_commercial() -> None:
         assert [tuple(row) for row in rows] == [("v@districom.test", "commercial", "viewer")]
     finally:
         with engine.begin() as conn:
-            conn.execute(text("TRUNCATE users RESTART IDENTITY CASCADE"))
+            # Not TRUNCATE ... CASCADE: since 0024 it would reach the seeded accounts through the bocas.
+            conn.execute(text("DELETE FROM user_module_roles"))
+            conn.execute(text("DELETE FROM users"))
+            conn.execute(text("ALTER TABLE users ALTER COLUMN id RESTART"))
         engine.dispose()
 
 
@@ -243,7 +251,10 @@ def test_third_parties_and_payments_migrations_go_down_and_up() -> None:
 
     command.upgrade(cfg, "head")
     command.downgrade(cfg, "0018")
-    assert _settlements_tables(url) == SETTLEMENTS_TABLES - {"payments", "payment_items", "outlet_responsibilities"}
+    assert (
+        _settlements_tables(url)
+        == SETTLEMENTS_TABLES - {"payments", "payment_items", "outlet_responsibilities"} - REMITTANCE_TABLES
+    )
     assert "third_parties" in _tables(url)
     engine = create_engine(url)
     try:
@@ -271,14 +282,14 @@ def test_outlets_and_responsibilities_migrations_go_down_and_up() -> None:
 
     command.upgrade(cfg, "head")
     command.downgrade(cfg, "0021")
-    assert _settlements_tables(url) == SETTLEMENTS_TABLES - {"outlet_responsibilities"}
+    assert _settlements_tables(url) == SETTLEMENTS_TABLES - {"outlet_responsibilities"} - REMITTANCE_TABLES
     assert "outlets" in _tables(url)
     engine = create_engine(url)
     try:
         command.downgrade(cfg, "0020")
         assert "outlets" not in _tables(url)
         assert _tables(url) >= EXPECTED_TABLES - {"outlets"}
-        assert _settlements_tables(url) == SETTLEMENTS_TABLES - {"outlet_responsibilities"}
+        assert _settlements_tables(url) == SETTLEMENTS_TABLES - {"outlet_responsibilities"} - REMITTANCE_TABLES
         with engine.connect() as conn:
             leftovers = conn.execute(
                 text(
