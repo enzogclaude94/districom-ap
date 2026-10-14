@@ -43,6 +43,8 @@ import { CountDialog } from "./count-dialog";
 import { formatQuantity } from "./fuel";
 import { HistoryTab } from "./history-tab";
 import {
+  COUNT_EXAMPLE,
+  COUNT_HELP,
   FINANCIAL_STATE_LABELS,
   FINANCIAL_STATE_TONES,
   TRANSFER_STATUS_LABELS,
@@ -66,7 +68,11 @@ export const BEING_CORRECTED_BANNER =
 /** The same, when the close in effect is an administrative zero close (R7-2): nothing of it is in Cajas. */
 export const BEING_CORRECTED_ZERO_BANNER =
   "Esta rendición está siendo corregida. Su cierre en cero sigue vigente, sin movimientos en Cajas, hasta que confirmes el nuevo cierre.";
-export const ZERO_CLOSE_TEXT = "Cierre administrativo cero: rendición de $0 sin movimientos, sin operación en Cajas.";
+/** A boca being corrected (R7-4, Enzo's words). */
+export const OUTLET_BEING_CORRECTED_BANNER =
+  "Esta rendición está en corrección. El cierre anterior continúa siendo el vigente hasta que confirmes un nuevo cierre.";
+export { COUNT_EXAMPLE, COUNT_HELP } from "./labels";
+export const ZERO_CLOSE_TEXT = "Cerrada en $0, sin movimientos financieros.";
 
 const isOutlet = (settlement: Settlement) => settlement.type === "OUTLET";
 
@@ -143,6 +149,90 @@ function Board({ settlement }: { settlement: Settlement }) {
 }
 
 /**
+ * Resumen of a boca settlement (R7-4), for someone who is not an accountant: what Store Sys says it had to
+ * render, what it already handed over, what else justifies it and what is left. While it is open nothing is a
+ * shortage or a surplus; the difference shows only once it is closed. During a correction, the delivered total
+ * of the close in effect is shown next to the current proposal.
+ */
+function OutletSummary({ settlement }: { settlement: Settlement }) {
+  const s = settlement.summary;
+  const missing = Boolean(s.expected_missing);
+  const correcting = settlement.financial_state === "BEING_CORRECTED";
+  const inEffect = s.remitted_in_effect_close;
+  return (
+    <section aria-label="Resumen de la rendición" className="space-y-3">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Stat
+          label="Esperado (Store Sys)"
+          value={missing ? <span data-testid="expected-missing">Sin cargar</span> : formatMoney(s.expected)}
+          tone={missing ? "text-warning" : undefined}
+          note={missing && <span className="text-warning">Cargalo antes de cerrar</span>}
+        />
+        <Stat
+          label="Ya entregado"
+          value={<span data-testid="board-remitted">{formatMoney(s.remitted ?? "0.00")}</span>}
+          note={
+            correcting &&
+            inEffect != null && (
+              <span className="text-muted-foreground" data-testid="remitted-in-effect-close">
+                En el cierre vigente: {formatMoney(inEffect)}
+              </span>
+            )
+          }
+        />
+        <Stat
+          label="Otros justificados"
+          value={formatMoney(s.justified_other ?? "0.00")}
+          note={<span className="text-muted-foreground">Efectivo final, transferencias, cheques y gastos</span>}
+        />
+        {s.difference === null ? (
+          <Remaining summary={s} missing={missing} />
+        ) : (
+          <Stat
+            label="Diferencia"
+            value={<span data-testid="board-difference">{missing ? "—" : differenceText(s.difference)}</span>}
+            tone={
+              s.difference_kind === "SHORTAGE"
+                ? "text-danger"
+                : s.difference_kind === "SURPLUS"
+                  ? "text-warning"
+                  : "text-success"
+            }
+          />
+        )}
+      </div>
+      <dl
+        className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground"
+        aria-label="Detalle de lo justificado"
+      >
+        {(
+          [
+            ["Efectivo final", s.cash_total],
+            ["Transferencias verificadas", s.transfers_verified],
+            ["Cheques", s.cheques],
+            ["Gastos", s.expenses],
+            ["Total justificado", s.justified],
+          ] as const
+        ).map(([label, value]) => (
+          <div key={label} className="flex gap-1">
+            <dt>{label}:</dt>
+            <dd className="font-medium text-foreground tabular-nums">{formatMoney(value)}</dd>
+          </div>
+        ))}
+      </dl>
+      {s.declared_transfers_count > 0 && (
+        <p className="text-sm text-warning">
+          {s.declared_transfers_count === 1
+            ? "1 transferencia declarada"
+            : `${s.declared_transfers_count} transferencias declaradas`}{" "}
+          por {formatMoney(s.transfers_declared)}: hay que verificarlas o rechazarlas antes de cerrar.
+        </p>
+      )}
+    </section>
+  );
+}
+
+/**
  * A boca while OPEN (R7-3): how far the justified total is from the expected amount, never a shortage or a
  * surplus. The difference exists only once the settlement is closed.
  */
@@ -159,7 +249,7 @@ function Remaining({ summary, missing }: { summary: Settlement["summary"]; missi
   }
   return (
     <Stat
-      label="Resta justificar"
+      label="Resta rendir o justificar"
       value={
         <span data-testid="board-remaining">
           {missing || summary.remaining == null ? "—" : formatMoney(summary.remaining)}
@@ -219,6 +309,7 @@ function Load({
   employees,
   canOperate,
   boxes,
+  autoRemit,
 }: {
   settlement: Settlement;
   editable: boolean;
@@ -227,244 +318,255 @@ function Load({
   employees: Person[];
   canOperate: boolean;
   boxes: Account[];
+  autoRemit: boolean;
 }) {
   const s = settlement.summary;
   const outlet = isOutlet(settlement);
-  return (
-    <div className="space-y-4">
-      {outlet && (
-        <SettlementRemittances
-          settlement={settlement}
-          canOperate={canOperate}
-          isAdmin={isAdmin}
-          boxes={boxes}
-          employees={employees}
-        />
+
+  const count = (
+    <Section
+      key="count"
+      title={outlet ? "Conteo final de efectivo" : "Conteo de efectivo"}
+      description="Billetes por denominación y la caja donde quedan."
+      action={
+        editable && (
+          <Button variant="secondary" size="sm" onClick={() => open({ kind: "count" })}>
+            {settlement.count_lines.length ? "Editar conteo" : "Cargar conteo"}
+          </Button>
+        )
+      }
+    >
+      {outlet && <CountHelp settlement={settlement} />}
+      {settlement.count_lines.length === 0 ? (
+        <Empty>Todavía no se contó el efectivo.</Empty>
+      ) : (
+        <Table stacked aria-label="Conteo de efectivo">
+          <TableHeader>
+            <TableRow>
+              <TableHead>Billete</TableHead>
+              <TableHead className="text-right">Cantidad</TableHead>
+              <TableHead>Caja</TableHead>
+              <TableHead className="text-right">Importe</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {settlement.count_lines.map((line) => (
+              <TableRow key={line.denomination_code}>
+                <TableCell data-label="Billete" className="tabular-nums">
+                  {formatMoney(line.denomination_value)}
+                </TableCell>
+                <TableCell data-label="Cantidad" className="text-right tabular-nums">
+                  {line.quantity}
+                </TableCell>
+                <TableCell data-label="Caja">{line.destination_account_name}</TableCell>
+                <TableCell data-label="Importe" className="text-right tabular-nums">
+                  {formatMoney(line.amount)}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
-      <Section
-        title={outlet ? "Conteo final de efectivo" : "Conteo de efectivo"}
-        description={
-          outlet
-            ? "Lo que queda físicamente en la boca después de las entregas parciales: billetes por denominación y la caja donde quedan."
-            : "Billetes por denominación y la caja donde quedan."
-        }
-        action={
-          editable && (
-            <Button variant="secondary" size="sm" onClick={() => open({ kind: "count" })}>
-              {settlement.count_lines.length ? "Editar conteo" : "Cargar conteo"}
-            </Button>
-          )
-        }
-      >
-        {settlement.count_lines.length === 0 ? (
-          <Empty>Todavía no se contó el efectivo.</Empty>
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Billete</TableHead>
-                <TableHead className="text-right">Cantidad</TableHead>
-                <TableHead>Caja</TableHead>
-                <TableHead className="text-right">Importe</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {settlement.count_lines.map((line) => (
-                <TableRow key={line.denomination_code}>
-                  <TableCell className="tabular-nums">{formatMoney(line.denomination_value)}</TableCell>
-                  <TableCell className="text-right tabular-nums">{line.quantity}</TableCell>
-                  <TableCell>{line.destination_account_name}</TableCell>
-                  <TableCell className="text-right tabular-nums">{formatMoney(line.amount)}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
-        {s.cash_by_box.length > 0 && (
-          <p className="mt-3 text-sm text-muted-foreground">
-            Efectivo por caja (conteo + agregados):{" "}
-            {s.cash_by_box.map((box) => `${box.account_name} ${formatMoney(box.total)}`).join(" · ")}
-          </p>
-        )}
-      </Section>
+      {s.cash_by_box.length > 0 && (
+        <p className="mt-3 text-sm text-muted-foreground">
+          Efectivo por caja (conteo + agregados):{" "}
+          {s.cash_by_box.map((box) => `${box.account_name} ${formatMoney(box.total)}`).join(" · ")}
+        </p>
+      )}
+    </Section>
+  );
 
-      <Section
-        title="Agregados de efectivo"
-        description="Efectivo que se suma al conteo. Un agregado no se edita: se anula con motivo."
-        action={
-          editable && (
-            <Button variant="secondary" size="sm" onClick={() => open({ kind: "addition" })}>
-              Agregar efectivo
-            </Button>
-          )
-        }
-      >
-        {settlement.additions.length === 0 ? (
-          <Empty>Sin agregados.</Empty>
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="text-right">Importe</TableHead>
-                <TableHead>Caja</TableHead>
-                <TableHead>Descripción</TableHead>
-                <TableHead>Cargado</TableHead>
-                <TableHead>Estado</TableHead>
-                <TableHead>
-                  <span className="sr-only">Acciones</span>
-                </TableHead>
+  const additions = (
+    <Section
+      key="additions"
+      title="Agregados de efectivo"
+      description="Efectivo que se suma al conteo. Un agregado no se edita: se anula con motivo."
+      action={
+        editable && (
+          <Button variant="secondary" size="sm" onClick={() => open({ kind: "addition" })}>
+            Agregar efectivo
+          </Button>
+        )
+      }
+    >
+      {settlement.additions.length === 0 ? (
+        <Empty>Sin agregados.</Empty>
+      ) : (
+        <Table stacked aria-label="Agregados de efectivo">
+          <TableHeader>
+            <TableRow>
+              <TableHead className="text-right">Importe</TableHead>
+              <TableHead>Caja</TableHead>
+              <TableHead>Descripción</TableHead>
+              <TableHead>Cargado</TableHead>
+              <TableHead>Estado</TableHead>
+              <TableHead>
+                <span className="sr-only">Acciones</span>
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {settlement.additions.map((addition) => (
+              <TableRow key={addition.id} className={cn(addition.voided && "text-muted-foreground")}>
+                <TableCell
+                  data-label="Importe"
+                  className={cn("text-right tabular-nums", addition.voided && "line-through")}
+                >
+                  {formatMoney(addition.amount)}
+                </TableCell>
+                <TableCell data-label="Caja">{addition.destination_account_name}</TableCell>
+                <TableCell data-label="Descripción">{addition.description ?? "—"}</TableCell>
+                <TableCell data-label="Cargado" className="text-xs md:whitespace-nowrap">
+                  {addition.created_by_name}
+                  <span className="block text-muted-foreground">{formatDateTime(addition.created_at)}</span>
+                </TableCell>
+                <TableCell data-label="Estado">
+                  {addition.voided ? (
+                    <Voided by={addition.voided_by_name} at={addition.voided_at} reason={addition.void_reason} />
+                  ) : (
+                    <Badge tone="success">Vigente</Badge>
+                  )}
+                </TableCell>
+                <TableCell>
+                  {editable && !addition.voided && (
+                    <Button variant="ghost" size="sm" onClick={() => open({ kind: "void-addition", addition })}>
+                      Anular
+                    </Button>
+                  )}
+                </TableCell>
               </TableRow>
-            </TableHeader>
-            <TableBody>
-              {settlement.additions.map((addition) => (
-                <TableRow key={addition.id} className={cn(addition.voided && "text-muted-foreground")}>
-                  <TableCell className={cn("text-right tabular-nums", addition.voided && "line-through")}>
-                    {formatMoney(addition.amount)}
-                  </TableCell>
-                  <TableCell>{addition.destination_account_name}</TableCell>
-                  <TableCell>{addition.description ?? "—"}</TableCell>
-                  <TableCell className="text-xs whitespace-nowrap">
-                    {addition.created_by_name}
-                    <span className="block text-muted-foreground">{formatDateTime(addition.created_at)}</span>
-                  </TableCell>
-                  <TableCell>
-                    {addition.voided ? (
-                      <Voided by={addition.voided_by_name} at={addition.voided_at} reason={addition.void_reason} />
-                    ) : (
-                      <Badge tone="success">Vigente</Badge>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    {editable && !addition.voided && (
-                      <Button variant="ghost" size="sm" onClick={() => open({ kind: "void-addition", addition })}>
-                        Anular
-                      </Button>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
-      </Section>
+            ))}
+          </TableBody>
+        </Table>
+      )}
+    </Section>
+  );
 
-      <Section
-        title="Transferencias"
-        description="Solo las verificadas justifican la rendición. Una transferencia declarada impide cerrar."
-        action={
-          editable && (
-            <Button variant="secondary" size="sm" onClick={() => open({ kind: "transfer" })}>
-              Declarar transferencia
-            </Button>
-          )
-        }
-      >
-        {settlement.transfers.length === 0 ? (
-          <Empty>Sin transferencias.</Empty>
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Pagó</TableHead>
-                <TableHead className="text-right">Importe</TableHead>
-                <TableHead>Referencia</TableHead>
-                <TableHead>Cuenta</TableHead>
-                <TableHead>Estado</TableHead>
-                <TableHead>Decisión</TableHead>
-                <TableHead>
-                  <span className="sr-only">Acciones</span>
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {settlement.transfers.map((transfer) => (
-                <TableRow key={transfer.id}>
-                  <TableCell>{transfer.payer_name ?? "—"}</TableCell>
-                  <TableCell className="text-right tabular-nums">{formatMoney(transfer.amount)}</TableCell>
-                  <TableCell>{transfer.reference ?? "—"}</TableCell>
-                  <TableCell>{transfer.bank_account_name}</TableCell>
-                  <TableCell>
+  const transfers = (
+    <Section
+      key="transfers"
+      title="Transferencias"
+      description="Solo las verificadas justifican la rendición. Una transferencia declarada impide cerrar."
+      action={
+        editable && (
+          <Button variant="secondary" size="sm" onClick={() => open({ kind: "transfer" })}>
+            Declarar transferencia
+          </Button>
+        )
+      }
+    >
+      {settlement.transfers.length === 0 ? (
+        <Empty>Sin transferencias.</Empty>
+      ) : (
+        <Table stacked aria-label="Transferencias">
+          <TableHeader>
+            <TableRow>
+              <TableHead>Pagó</TableHead>
+              <TableHead className="text-right">Importe</TableHead>
+              <TableHead>Referencia</TableHead>
+              <TableHead>Cuenta</TableHead>
+              <TableHead>Estado</TableHead>
+              <TableHead>Decisión</TableHead>
+              <TableHead>
+                <span className="sr-only">Acciones</span>
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {settlement.transfers.map((transfer) => (
+              <TableRow key={transfer.id}>
+                <TableCell data-label="Pagó">{transfer.payer_name ?? "—"}</TableCell>
+                <TableCell data-label="Importe" className="text-right tabular-nums">
+                  {formatMoney(transfer.amount)}
+                </TableCell>
+                <TableCell data-label="Referencia">{transfer.reference ?? "—"}</TableCell>
+                <TableCell data-label="Cuenta">{transfer.bank_account_name}</TableCell>
+                <TableCell data-label="Estado">
+                  <span>
                     <Badge tone={TRANSFER_STATUS_TONES[transfer.status]}>
                       {TRANSFER_STATUS_LABELS[transfer.status]}
                     </Badge>
                     {transfer.status === "DECLARED" && (
                       <span className="block text-xs text-warning">Bloquea el cierre</span>
                     )}
-                  </TableCell>
-                  <TableCell className="text-xs whitespace-nowrap">
+                  </span>
+                </TableCell>
+                <TableCell data-label="Decisión" className="text-xs md:whitespace-nowrap">
+                  <span>
                     {transfer.status_changed_by_name}
                     <span className="block text-muted-foreground">{formatDateTime(transfer.status_changed_at)}</span>
                     {transfer.status_reason && (
                       <span className="block text-muted-foreground">Motivo: {transfer.status_reason}</span>
                     )}
-                  </TableCell>
-                  <TableCell className="whitespace-nowrap">
-                    {editable && transfer.status === "DECLARED" && (
-                      <>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => open({ kind: "decide", transfer, to: "VERIFIED" })}
-                        >
-                          Verificar
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => open({ kind: "decide", transfer, to: "REJECTED" })}
-                        >
-                          Rechazar
-                        </Button>
-                      </>
-                    )}
-                    {editable && isAdmin && transfer.status !== "DECLARED" && (
+                  </span>
+                </TableCell>
+                <TableCell className="md:whitespace-nowrap">
+                  {editable && transfer.status === "DECLARED" && (
+                    <>
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => open({ kind: "decide", transfer, to: "CORRECT" })}
+                        onClick={() => open({ kind: "decide", transfer, to: "VERIFIED" })}
                       >
-                        Corregir decisión
+                        Verificar
                       </Button>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
-      </Section>
-
-      <Section
-        title="Gastos"
-        description="Pagados con dinero de la rendición. Un gasto anulado queda en el historial."
-        action={
-          editable && (
-            <Button variant="secondary" size="sm" onClick={() => open({ kind: "expense" })}>
-              Registrar gasto
-            </Button>
-          )
-        }
-      >
-        {settlement.expenses.length === 0 ? (
-          <Empty>Sin gastos.</Empty>
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Categoría</TableHead>
-                <TableHead className="text-right">Importe</TableHead>
-                <TableHead>Descripción</TableHead>
-                <TableHead>Cargado</TableHead>
-                <TableHead>Estado</TableHead>
-                <TableHead>
-                  <span className="sr-only">Acciones</span>
-                </TableHead>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => open({ kind: "decide", transfer, to: "REJECTED" })}
+                      >
+                        Rechazar
+                      </Button>
+                    </>
+                  )}
+                  {editable && isAdmin && transfer.status !== "DECLARED" && (
+                    <Button variant="ghost" size="sm" onClick={() => open({ kind: "decide", transfer, to: "CORRECT" })}>
+                      Corregir decisión
+                    </Button>
+                  )}
+                </TableCell>
               </TableRow>
-            </TableHeader>
-            <TableBody>
-              {settlement.expenses.map((expense) => (
-                <TableRow key={expense.id} className={cn(expense.voided && "text-muted-foreground")}>
-                  <TableCell>
+            ))}
+          </TableBody>
+        </Table>
+      )}
+    </Section>
+  );
+
+  const expenses = (
+    <Section
+      key="expenses"
+      title="Gastos"
+      description="Pagados con dinero de la rendición. Un gasto anulado queda en el historial."
+      action={
+        editable && (
+          <Button variant="secondary" size="sm" onClick={() => open({ kind: "expense" })}>
+            Registrar gasto
+          </Button>
+        )
+      }
+    >
+      {settlement.expenses.length === 0 ? (
+        <Empty>Sin gastos.</Empty>
+      ) : (
+        <Table stacked aria-label="Gastos">
+          <TableHeader>
+            <TableRow>
+              <TableHead>Categoría</TableHead>
+              <TableHead className="text-right">Importe</TableHead>
+              <TableHead>Descripción</TableHead>
+              <TableHead>Cargado</TableHead>
+              <TableHead>Estado</TableHead>
+              <TableHead>
+                <span className="sr-only">Acciones</span>
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {settlement.expenses.map((expense) => (
+              <TableRow key={expense.id} className={cn(expense.voided && "text-muted-foreground")}>
+                <TableCell data-label="Categoría">
+                  <span>
                     {expense.category_name}
                     {expense.fuel && (
                       <span className="block text-xs text-muted-foreground tabular-nums">
@@ -480,47 +582,97 @@ function Load({
                         Sin detalle (histórico)
                       </Badge>
                     )}
-                  </TableCell>
-                  <TableCell className={cn("text-right tabular-nums", expense.voided && "line-through")}>
-                    {formatMoney(expense.amount)}
-                  </TableCell>
-                  <TableCell>{expense.description ?? "—"}</TableCell>
-                  <TableCell className="text-xs whitespace-nowrap">
+                  </span>
+                </TableCell>
+                <TableCell
+                  data-label="Importe"
+                  className={cn("text-right tabular-nums", expense.voided && "line-through")}
+                >
+                  {formatMoney(expense.amount)}
+                </TableCell>
+                <TableCell data-label="Descripción">{expense.description ?? "—"}</TableCell>
+                <TableCell data-label="Cargado" className="text-xs md:whitespace-nowrap">
+                  <span>
                     {expense.created_by_name}
                     <span className="block text-muted-foreground">{formatDateTime(expense.created_at)}</span>
-                  </TableCell>
-                  <TableCell>
-                    {expense.voided ? (
-                      <Voided by={expense.voided_by_name} at={expense.voided_at} reason={expense.void_reason} />
-                    ) : (
-                      <Badge tone="success">Vigente</Badge>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    {editable && !expense.voided && expense.category_code === FUEL_CODE && (
-                      <Button variant="ghost" size="sm" onClick={() => open({ kind: "fuel", expense })}>
-                        {expense.fuel ? "Corregir carga" : "Cargar detalle"}
-                      </Button>
-                    )}
-                    {editable && !expense.voided && (
-                      <Button variant="ghost" size="sm" onClick={() => open({ kind: "void-expense", expense })}>
-                        Anular
-                      </Button>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
-      </Section>
-
-      <SettlementCheques settlement={settlement} editable={editable} isAdmin={isAdmin} />
-
-      {/* A boca has no pending collections (R7-2). */}
-      {!isOutlet(settlement) && (
-        <SettlementPendings settlement={settlement} editable={editable} employees={employees} />
+                  </span>
+                </TableCell>
+                <TableCell data-label="Estado">
+                  {expense.voided ? (
+                    <Voided by={expense.voided_by_name} at={expense.voided_at} reason={expense.void_reason} />
+                  ) : (
+                    <Badge tone="success">Vigente</Badge>
+                  )}
+                </TableCell>
+                <TableCell>
+                  {editable && !expense.voided && expense.category_code === FUEL_CODE && (
+                    <Button variant="ghost" size="sm" onClick={() => open({ kind: "fuel", expense })}>
+                      {expense.fuel ? "Corregir carga" : "Cargar detalle"}
+                    </Button>
+                  )}
+                  {editable && !expense.voided && (
+                    <Button variant="ghost" size="sm" onClick={() => open({ kind: "void-expense", expense })}>
+                      Anular
+                    </Button>
+                  )}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
+    </Section>
+  );
+
+  const cheques = <SettlementCheques key="cheques" settlement={settlement} editable={editable} isAdmin={isAdmin} />;
+
+  if (outlet) {
+    // Enzo's order for a boca (R7-4): remittances, final count, transfers, cheques, expenses.
+    return (
+      <div className="space-y-4">
+        <SettlementRemittances
+          settlement={settlement}
+          canOperate={canOperate}
+          isAdmin={isAdmin}
+          boxes={boxes}
+          employees={employees}
+          autoOpen={autoRemit}
+        />
+        {count}
+        {additions}
+        {transfers}
+        {cheques}
+        {expenses}
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-4">
+      {count}
+      {additions}
+      {transfers}
+      {expenses}
+      {cheques}
+      <SettlementPendings settlement={settlement} editable={editable} employees={employees} />
+    </div>
+  );
+}
+
+/**
+ * The help of a boca's final count (R7-4): only what stayed in the boca after the partial deliveries, next to
+ * what was already delivered. The final cash is counted, never derived from the expected amount.
+ */
+function CountHelp({ settlement }: { settlement: Settlement }) {
+  return (
+    <div className="mb-3 space-y-1 rounded-md border border-border bg-muted px-3 py-2 text-sm" data-testid="count-help">
+      <p className="font-medium">{COUNT_HELP}</p>
+      <p className="text-muted-foreground">{COUNT_EXAMPLE}</p>
+      <p>
+        Ya entregado en esta rendición:{" "}
+        <span className="font-medium tabular-nums" data-testid="count-remitted">
+          {formatMoney(settlement.summary.remitted ?? "0.00")}
+        </span>
+      </p>
     </div>
   );
 }
@@ -553,6 +705,54 @@ function Responsables({ settlement }: { settlement: Settlement }) {
   );
 }
 
+/**
+ * «Cierre» of a boca (R7-4): how to close it now and, once closed, its difference. A $0 boca without movements
+ * says so in plain words and closes in $0 (administratively, with no financial operation).
+ */
+function CloseSection({ settlement }: { settlement: Settlement }) {
+  const s = settlement.summary;
+  const zero = Boolean(s.without_movements);
+  const closed = settlement.status === "CLOSED";
+  return (
+    <Section
+      title="Cierre"
+      description={
+        closed
+          ? "La rendición está cerrada. Un administrador puede reabrirla para corregirla desde arriba."
+          : "Al cerrar se compara lo justificado con el esperado: recién ahí aparece la diferencia, si la hay."
+      }
+    >
+      {closed ? (
+        settlement.close_in_effect?.kind === "ADMINISTRATIVE_ZERO" ? (
+          <p className="text-sm" data-testid="closed-zero">
+            Rendición cerrada en $0: no hubo dinero que mover.
+          </p>
+        ) : (
+          <div className="space-y-1 text-sm">
+            <p>
+              Diferencia:{" "}
+              <span className="font-medium" data-testid="close-section-difference">
+                {s.difference === null ? "—" : differenceText(s.difference)}
+              </span>
+            </p>
+            <CurrentDifference settlement={settlement} />
+          </div>
+        )
+      ) : zero ? (
+        <p className="text-sm font-medium" data-testid="without-movements">
+          Sin movimientos financieros: esperado $ 0 y nada cargado. Con «Cerrar rendición en $0» se cierra sin mover
+          dinero.
+        </p>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          Con «Cerrar rendición» vas a ver el detalle antes de confirmar: esperado, entregas parciales, efectivo final,
+          transferencias, cheques, gastos y la diferencia.
+        </p>
+      )}
+    </Section>
+  );
+}
+
 /** A settlement link from elsewhere (a cheque, an expense, Cajas) only knows the id: a boca's opens here. */
 function useOutletRedirect(settlementId: number, error: unknown, type: SettlementType) {
   const router = useRouter();
@@ -575,7 +775,16 @@ function useOutletRedirect(settlementId: number, error: unknown, type: Settlemen
  * the history of one settlement. A boca has no driver, no pendings and no fuel; its responsables of the day
  * are shown as suggestions, and a $0 boca without movements closes administratively.
  */
-export function SettlementDetail({ settlementId, type = "DELIVERY" }: { settlementId: number; type?: SettlementType }) {
+export function SettlementDetail({
+  settlementId,
+  type = "DELIVERY",
+  initialAction,
+}: {
+  settlementId: number;
+  type?: SettlementType;
+  /** «Entregar efectivo» from the board of bocas: the form opens as soon as the page can show it. */
+  initialAction?: "remit";
+}) {
   const me = useQuery({ queryKey: currentUserQueryKey, queryFn: authApi.me });
   const query = useQuery({
     queryKey: settlementQueryKey(settlementId, type),
@@ -632,7 +841,7 @@ export function SettlementDetail({ settlementId, type = "DELIVERY" }: { settleme
         className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
       >
         <ArrowLeft className="size-4" aria-hidden />
-        {outlet ? "Rendiciones de boca" : "Rendiciones de reparto"}
+        {outlet ? "Bocas" : "Rendiciones de reparto"}
       </Link>
       <PageHeader
         title={`${settlementTitle(settlement.sequence_number)} · ${who}`}
@@ -650,7 +859,7 @@ export function SettlementDetail({ settlementId, type = "DELIVERY" }: { settleme
             {editable && (
               <Button onClick={() => setDialog({ kind: "close" })}>
                 <Lock aria-hidden />
-                Cerrar rendición
+                {outlet && settlement.summary.without_movements ? "Cerrar rendición en $0" : "Cerrar rendición"}
               </Button>
             )}
             {isAdmin && settlement.status === "CLOSED" && (
@@ -667,7 +876,13 @@ export function SettlementDetail({ settlementId, type = "DELIVERY" }: { settleme
         <div role="status" className="flex gap-2 rounded-md border border-warning/40 bg-warning-soft px-4 py-3 text-sm">
           <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden />
           <div className="space-y-1">
-            <p className="font-medium">{zeroInEffect ? BEING_CORRECTED_ZERO_BANNER : BEING_CORRECTED_BANNER}</p>
+            <p className="font-medium" data-testid="being-corrected-banner">
+              {outlet
+                ? OUTLET_BEING_CORRECTED_BANNER
+                : zeroInEffect
+                  ? BEING_CORRECTED_ZERO_BANNER
+                  : BEING_CORRECTED_BANNER}
+            </p>
             {settlement.reopened_by_name && settlement.reopened_at && (
               <p>
                 Reabierta por {settlement.reopened_by_name} el {formatDateTime(settlement.reopened_at)}. Motivo:{" "}
@@ -747,35 +962,13 @@ export function SettlementDetail({ settlementId, type = "DELIVERY" }: { settleme
 
       {outlet && <Responsables settlement={settlement} />}
 
-      <Board settlement={settlement} />
+      {outlet ? <OutletSummary settlement={settlement} /> : <Board settlement={settlement} />}
 
       {settlement.notes && <p className="text-sm text-muted-foreground">Notas: {settlement.notes}</p>}
 
-      <div role="tablist" aria-label="Secciones de la rendición" className="flex gap-1 border-b border-border">
-        {(
-          [
-            ["load", "Carga"],
-            ["history", "Historial"],
-          ] as const
-        ).map(([value, label]) => (
-          <button
-            key={value}
-            type="button"
-            role="tab"
-            aria-selected={tab === value}
-            className={cn(
-              "-mb-px border-b-2 px-3 py-2 text-sm font-medium",
-              tab === value ? "border-primary text-foreground" : "border-transparent text-muted-foreground",
-            )}
-            onClick={() => setTab(value)}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-
-      <div role="tabpanel">
-        {tab === "load" ? (
+      {outlet ? (
+        // A boca reads top to bottom (R7-4): loads, then the close, then the history.
+        <>
           <Load
             settlement={settlement}
             editable={editable}
@@ -784,11 +977,56 @@ export function SettlementDetail({ settlementId, type = "DELIVERY" }: { settleme
             employees={employees.data ?? []}
             canOperate={canOperate}
             boxes={boxes}
+            autoRemit={initialAction === "remit"}
           />
-        ) : (
-          <HistoryTab settlement={settlement} />
-        )}
-      </div>
+          <CloseSection settlement={settlement} />
+          <Section title="Historia" description="Todo lo que pasó con esta rendición, del más antiguo al más reciente.">
+            <HistoryTab settlement={settlement} />
+          </Section>
+        </>
+      ) : (
+        <>
+          <div role="tablist" aria-label="Secciones de la rendición" className="flex gap-1 border-b border-border">
+            {(
+              [
+                ["load", "Carga"],
+                ["history", "Historial"],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                role="tab"
+                aria-selected={tab === value}
+                className={cn(
+                  "-mb-px border-b-2 px-3 py-2 text-sm font-medium",
+                  tab === value ? "border-primary text-foreground" : "border-transparent text-muted-foreground",
+                )}
+                onClick={() => setTab(value)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          <div role="tabpanel">
+            {tab === "load" ? (
+              <Load
+                settlement={settlement}
+                editable={editable}
+                isAdmin={isAdmin}
+                open={setDialog}
+                employees={employees.data ?? []}
+                canOperate={canOperate}
+                boxes={boxes}
+                autoRemit={false}
+              />
+            ) : (
+              <HistoryTab settlement={settlement} />
+            )}
+          </div>
+        </>
+      )}
 
       {dialog?.kind === "count" && denominations.data && (
         <CountDialog settlement={settlement} denominations={denominations.data} boxes={boxes} onClose={close} />

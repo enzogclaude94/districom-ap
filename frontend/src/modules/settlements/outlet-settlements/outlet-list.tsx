@@ -1,14 +1,12 @@
 "use client";
 
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { Plus, Store } from "lucide-react";
+import { Store } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useId, useState } from "react";
 
 import { EmptyState } from "@/components/common/empty-state";
 import { ErrorState } from "@/components/common/error-state";
-import { PageHeader } from "@/components/common/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -31,13 +29,14 @@ import {
 } from "@/modules/settlements/delivery/labels";
 
 import { outletSettlementApi, outletSettlementQueryKey, type OutletSettlementFilters } from "./api";
-import { NewOutletSettlementDialog } from "./new-outlet-settlement-dialog";
 
 const PAGE_SIZE = 20;
 
-/** `/rendiciones/boca`: boca settlements by date, boca and state, with their difference (R7-2). */
+/**
+ * «Todas las rendiciones» of Rendiciones › Bocas: boca settlements by date, boca and state (R7-2). An open one
+ * shows no difference: it exists only once the settlement is closed (R7-3).
+ */
 export function OutletSettlementList({ initialOutletId }: { initialOutletId?: number }) {
-  const router = useRouter();
   const ids = { from: useId(), to: useId(), outlet: useId(), state: useId() };
   const me = useQuery({ queryKey: currentUserQueryKey, queryFn: authApi.me });
   const canOperate = roleAtLeast(moduleRole(me.data, "settlements"), "operator");
@@ -46,7 +45,6 @@ export function OutletSettlementList({ initialOutletId }: { initialOutletId?: nu
   const [outletId, setOutletId] = useState<number | undefined>(initialOutletId);
   const [state, setState] = useState<FinancialState | undefined>();
   const [page, setPage] = useState(0);
-  const [creating, setCreating] = useState(false);
 
   const filters: OutletSettlementFilters = {
     date_from: dateFrom || undefined,
@@ -73,19 +71,6 @@ export function OutletSettlementList({ initialOutletId }: { initialOutletId?: nu
 
   return (
     <>
-      <PageHeader
-        title="Rendiciones de boca"
-        description="Qué debía rendir cada boca según Store Sys, qué rindió y la diferencia de cada rendición."
-        actions={
-          canOperate && (
-            <Button onClick={() => setCreating(true)}>
-              <Plus aria-hidden />
-              Nueva rendición
-            </Button>
-          )
-        }
-      />
-
       <Card>
         <CardContent className="grid gap-3 pt-5 sm:grid-cols-2 lg:grid-cols-4">
           <div className="space-y-1.5">
@@ -249,14 +234,6 @@ export function OutletSettlementList({ initialOutletId }: { initialOutletId?: nu
             </div>
           </CardContent>
         </Card>
-      )}
-
-      {creating && (
-        <NewOutletSettlementDialog
-          initialOutletId={outletId}
-          onClose={() => setCreating(false)}
-          onCreated={(settlement) => router.push(`/rendiciones/boca/${settlement.id}`)}
-        />
       )}
     </>
   );

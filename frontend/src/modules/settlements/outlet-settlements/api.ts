@@ -41,6 +41,59 @@ export interface OutletSettlementFilters {
   offset: number;
 }
 
+/** A settlement as the board and the ficha of a boca name it. */
+export interface OutletSettlementRef {
+  id: number;
+  business_date: string;
+  sequence_number: number;
+  status: string;
+  financial_state: FinancialState;
+  administrative_zero: boolean;
+}
+
+/** One settlement of the daily board, with its own figures (never added to another one's). */
+export interface OutletBoardSettlement extends OutletSettlementRef {
+  expected_amount: string | null;
+  remitted: string;
+  cash_total: string;
+  transfers_verified: string;
+  cheques: string;
+  expenses: string;
+  justified: string;
+  /** While open: what is left to hand over or justify; null without an expected amount. */
+  remaining: string | null;
+  /** While open: how much the justified total already goes above the expected amount. */
+  justified_above_expected: string | null;
+  /** Only once closed. */
+  difference: string | null;
+  difference_kind: "SHORTAGE" | "SURPLUS" | "BALANCED" | null;
+}
+
+export interface OutletBoardRow {
+  outlet_id: number;
+  outlet_code: string;
+  outlet_name: string;
+  outlet_active: boolean;
+  settlements: OutletBoardSettlement[];
+  /** The settlement the board shows: the first open one, else the last one; null without settlements. */
+  current_id: number | null;
+}
+
+export interface OutletBoard {
+  business_date: string;
+  rows: OutletBoardRow[];
+  counts: { without_settlement: number; open: number; being_corrected: number; closed: number };
+}
+
+/** What the ficha of a boca shows Rendiciones users (R7-4). */
+export interface OutletSettlementsSummary {
+  outlet_id: number;
+  open_count: number;
+  open_settlements: OutletSettlementRef[];
+  last_settlement: OutletSettlementRef | null;
+  remitted_not_consolidated: string;
+}
+
 const BASE = "/settlements";
 
 function query(filters: OutletSettlementFilters) {
@@ -55,9 +108,11 @@ export const outletSettlementApi = {
   list: (filters: OutletSettlementFilters) =>
     apiFetch<OutletSettlementPage>(`${BASE}/outlet-settlements?${query(filters)}`),
   get: (id: number) => apiFetch<Settlement>(`${BASE}/outlet-settlements/${id}`),
-  /** «N rendiciones abiertas» of a boca's page. */
-  openCount: (outletId: number) =>
-    apiFetch<{ outlet_id: number; open_count: number }>(`${BASE}/outlets/${outletId}/settlements-summary`),
+  /** Rendiciones › Bocas: every boca on a business day. */
+  board: (businessDate: string) =>
+    apiFetch<OutletBoard>(`${BASE}/outlet-settlements/board?business_date=${encodeURIComponent(businessDate)}`),
+  /** «Operación de Rendiciones» of a boca's ficha. */
+  summary: (outletId: number) => apiFetch<OutletSettlementsSummary>(`${BASE}/outlets/${outletId}/settlements-summary`),
 };
 
 export { outletSettlementQueryKey };

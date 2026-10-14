@@ -49,7 +49,7 @@ test("boca settlement: open without expected, zero close, reopen, cash and finan
 
   // 2. Operator: a new boca settlement without the Store Sys amount.
   await switchUser(page, operatorEmail, operatorPassword, "/rendiciones/boca");
-  await expect(page.getByRole("heading", { name: "Rendiciones de boca" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Bocas", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Nueva rendición" }).click();
   const create = page.getByRole("dialog");
   await create.getByLabel("Fecha").fill(businessDay(-1));
@@ -59,7 +59,7 @@ test("boca settlement: open without expected, zero close, reopen, cash and finan
   const settlementId = Number(page.url().split("/").pop());
   await expect(page.getByRole("heading", { name: `Rendición n.º 1 · ${name}` })).toBeVisible();
   await expect(page.getByTestId("expected-missing")).toHaveText("Sin cargar");
-  await expect(page.getByRole("tabpanel").getByText("Pendientes", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Pendientes" })).toHaveCount(0);
 
   // 3. Without the expected amount it does not close.
   await page.getByRole("button", { name: "Cerrar rendición" }).click();
@@ -75,10 +75,11 @@ test("boca settlement: open without expected, zero close, reopen, cash and finan
     (dialog) => dialog.getByLabel(/Importe esperado de Store Sys/).fill("0"),
     "Guardar",
   );
-  await page.getByRole("button", { name: "Cerrar rendición" }).click();
+  await expect(page.getByTestId("without-movements")).toBeVisible();
+  await page.getByRole("button", { name: "Cerrar rendición en $0" }).click();
   const zero = page.getByRole("dialog");
-  await expect(zero.getByTestId("administrative-zero")).toBeVisible();
-  await zero.getByRole("button", { name: "Confirmar cierre" }).click();
+  await expect(zero.getByTestId("administrative-zero")).toHaveText("Sin movimientos financieros. La rendición se cierra en $0.");
+  await zero.getByRole("button", { name: "Cerrar rendición en $0" }).click();
   await expect(zero).toBeHidden();
   await expect(page.getByTestId("financial-state")).toHaveText("Cerrada");
   await expect(page.getByRole("link", { name: "Ver el cierre en Cajas" })).toHaveCount(0);
@@ -97,7 +98,9 @@ test("boca settlement: open without expected, zero close, reopen, cash and finan
     "Reabrir",
   );
   await expect(page.getByTestId("financial-state")).toHaveText("En corrección");
-  await expect(page.getByText(/Su cierre en cero sigue vigente/)).toBeVisible();
+  await expect(page.getByTestId("being-corrected-banner")).toHaveText(
+    "Esta rendición está en corrección. El cierre anterior continúa siendo el vigente hasta que confirmes un nuevo cierre.",
+  );
 
   // 7. Operator loads the real amount and the cash: a normal financial close.
   await switchUser(page, operatorEmail, operatorPassword, `/rendiciones/boca/${settlementId}`);
@@ -127,9 +130,8 @@ test("boca settlement: open without expected, zero close, reopen, cash and finan
   expect(after.outlet_collections - before.outlet_collections).toBe(-2_000_000);
 
   // 8. History: the zero close, the reopening and the financial close, in order.
-  await page.getByRole("tab", { name: "Historial" }).click();
   const history = page.getByRole("list", { name: "Historial de la rendición" });
-  await expect(history).toContainText("Cierre administrativo cero");
+  await expect(history).toContainText("Cierre en $0");
   await expect(history).toContainText("Reapertura (versión 1 → 2)");
   await expect(history).toContainText("Nuevo cierre (versión 2)");
 });

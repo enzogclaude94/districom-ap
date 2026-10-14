@@ -50,6 +50,25 @@ function Line({ label, value, strong = false }: { label: string; value: string; 
 
 function Amounts({ preview, outlet }: { preview: ClosingPreview; outlet: boolean }) {
   const s = preview.summary;
+  if (outlet) {
+    // A boca (R7-4): expected, what justifies it line by line, and the difference.
+    return (
+      <dl className="rounded-md border border-border px-3 py-2 text-sm" aria-label="Importes del cierre">
+        <Line label="Esperado (Store Sys)" value={s.expected} strong />
+        <p className="pt-2 text-xs font-medium text-muted-foreground">Justificado</p>
+        <Line label="Entregas parciales" value={s.remitted ?? "0.00"} />
+        <Line label="Efectivo final" value={s.cash_total} />
+        <Line label="Transferencias verificadas" value={s.transfers_verified} />
+        <Line label="Cheques" value={s.cheques} />
+        <Line label="Gastos" value={s.expenses} />
+        <Line label="Total justificado" value={s.justified} strong />
+        <div className="flex justify-between gap-4 border-t border-border pt-2 font-semibold">
+          <dt>Diferencia</dt>
+          <dd data-testid="preview-difference">{differenceText(preview.difference)}</dd>
+        </div>
+      </dl>
+    );
+  }
   return (
     <dl className="rounded-md border border-border px-3 py-2 text-sm" aria-label="Importes del cierre">
       <Line label="Esperado" value={s.expected} />
@@ -215,7 +234,9 @@ export function CloseDialog({
               data-testid="administrative-zero"
             >
               <CheckCircle2 className="size-4" aria-hidden />
-              Rendición de $0 sin movimientos: se cierra sin operación en Cajas (cierre administrativo cero).
+              {outlet
+                ? "Sin movimientos financieros. La rendición se cierra en $0."
+                : "Rendición de $0 sin movimientos: se cierra sin operación en Cajas (cierre administrativo cero)."}
             </p>
           ) : balanced ? (
             <p
@@ -252,7 +273,7 @@ export function CloseDialog({
               Cancelar
             </Button>
             <Button disabled={blocked || pending || preview.isFetching} onClick={confirm}>
-              {pending ? "Cerrando…" : "Confirmar cierre"}
+              {pending ? "Cerrando…" : zero && outlet ? "Cerrar rendición en $0" : "Confirmar cierre"}
             </Button>
           </div>
         </div>
@@ -301,8 +322,8 @@ function Allocations({
         {outlet && (
           <p className="text-sm text-muted-foreground" data-testid="close-responsible-suggestions">
             {preview.responsible_suggestions?.length
-              ? `Responsables de la boca ese día (sugerencia): ${preview.responsible_suggestions.map((p) => p.full_name).join(", ")}. Podés elegir a cualquier empleado.`
-              : "La boca no tenía responsables asignados ese día. Podés elegir a cualquier empleado."}
+              ? `Responsables de la Boca en esta fecha (sugerencia): ${preview.responsible_suggestions.map((p) => p.full_name).join(", ")}. Nada se asigna solo: podés elegir a cualquier empleado.`
+              : "La Boca no tenía responsables asignados en esta fecha. Podés elegir a cualquier empleado."}
           </p>
         )}
       </div>
