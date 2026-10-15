@@ -190,12 +190,15 @@ test("delivery settlement end to end: load, shortage between two employees, clos
   expect(cents(afterFirst.main_cash.balance) - cents(before.main_cash.balance)).toBe(6_050_000);
   expect(cents(afterFirst.change_cash.balance) - cents(before.change_cash.balance)).toBe(1_000_000);
   expect(cents(afterFirst.bank.balance) - cents(before.bank.balance)).toBe(2_000_000);
-  const internal = (id: number, name: string) => afterFirst[`Cuenta interna de ${name} (#${id})`];
-  expect(internal(driverId, driverName).balance).toBe("3000.00");
-  expect(internal(helperId, helperName).balance).toBe("1500.00");
+  // The operator has no Empleados area (ADR 010): Cajas does not list internal accounts to them.
+  expect(Object.keys(afterFirst).some((name) => name.startsWith("Cuenta interna"))).toBe(false);
 
   // 12. Admin reopens with a reason: Cajas keep the close until the new one.
   await switchUser(page, adminEmail, adminPassword, `/rendiciones/repartos/${settlementId}`);
+  const withArea = Object.fromEntries((await balances(page.request)).map((a) => [a.code ?? a.name, a]));
+  const internal = (id: number, name: string) => withArea[`Cuenta interna de ${name} (#${id})`];
+  expect(internal(driverId, driverName).balance).toBe("3000.00");
+  expect(internal(helperId, helperName).balance).toBe("1500.00");
   await dialogAction(
     page,
     page.getByRole("button", { name: "Reabrir para corregir" }),

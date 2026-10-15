@@ -85,6 +85,13 @@ uv run python -m app.cli revoke-module-role --email ... --module settlements
 ```
 Módulos: `commercial` (Inteligencia Comercial) y `settlements` (Rendiciones). Detalle en `ARCHITECTURE.md §8`.
 
+**Áreas protegidas.** Rendiciones > Empleados (`settlements.employee_finance`: cuenta interna y condición salarial) no se hereda de ningún rol, tampoco del administrador de plataforma: requiere un permiso explícito (`viewer | operator | admin`) además de un rol en Rendiciones. Sin él, el menú no aparece y la API responde 404. El administrador de plataforma otorga y revoca el área (a sí mismo o a otros) sin poder leerla antes:
+```bash
+uv run python -m app.cli grant-module-role --email ... --module settlements.employee_finance --role admin
+uv run python -m app.cli revoke-module-role --email ... --module settlements.employee_finance
+```
+o por API (`PUT /api/v1/auth/access-grants`, `POST /api/v1/auth/access-grants/revoke`). Detalle en ADR 010.
+
 ## Tests y calidad
 
 ```bash
@@ -99,11 +106,12 @@ pnpm lint && pnpm format:check && pnpm typecheck && pnpm test && pnpm build
 
 ### Tests E2E
 
-Levantan backend y frontend solos; necesitan la base migrada, un admin y un usuario con acceso solo a Comercial:
+Levantan backend y frontend solos; necesitan la base migrada, un admin (con el área Empleados) y usuarios con acceso por módulo:
 
 ```bash
 cd backend
 echo "e2e-password-123" | uv run python -m app.cli create-admin --email e2e-admin@districom.local --name "Admin E2E"
+uv run python -m app.cli grant-module-role --email e2e-admin@districom.local --module settlements.employee_finance --role admin
 echo "viewer-password-123" | uv run python -m app.cli create-viewer --email e2e-viewer@districom.local --name "Viewer E2E"
 uv run python -m app.cli grant-module-role --email e2e-viewer@districom.local --module commercial --role viewer
 echo "operator-password-123" | uv run python -m app.cli create-viewer --email e2e-operator@districom.local --name "Operador E2E"
