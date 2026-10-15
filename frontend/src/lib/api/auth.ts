@@ -18,6 +18,8 @@ export interface CurrentUser {
   /** Platform role. Per-module access is in `modules`. */
   role: Role;
   modules: ModuleAccess[];
+  /** Protected areas the user was granted (ADR 010), e.g. `settlements.employee_finance`. */
+  areas: ModuleAccess[];
 }
 
 export const authApi = {
@@ -36,6 +38,14 @@ export function moduleRole(user: CurrentUser | undefined, moduleKey: string): Mo
   if (!user) return null;
   if (user.role === "admin") return "admin";
   return user.modules.find((module) => module.key === moduleKey)?.role ?? null;
+}
+
+/**
+ * The user's role in a protected area (ADR 010): only an explicit grant counts, the platform admin included.
+ * Only hides UI: without the area the API answers 404.
+ */
+export function areaRole(user: CurrentUser | undefined, areaKey: string): ModuleRole | null {
+  return user?.areas?.find((area) => area.key === areaKey)?.role ?? null;
 }
 
 /** Whether `role` reaches `required` (`viewer < operator < admin`). Only hides UI: the API decides. */

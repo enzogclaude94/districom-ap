@@ -21,6 +21,7 @@ export const OPERATION_LABELS: Record<OperationType, string> = {
   PAYMENT: "Pago a tercero",
   OUTLET_REMITTANCE: "Entrega parcial de boca",
   REVERSAL: "Reverso",
+  EMPLOYEE_RESERVED: "Movimiento de empleado (reservado)",
 };
 
 /** Operations that belong to a document (a settlement, a pending, a cheque, an expense, a payment): corrected from it, never here. */
@@ -37,6 +38,8 @@ export const DOCUMENT_OPERATION_TYPES: readonly OperationType[] = [
   "DIRECT_EXPENSE",
   "PAYMENT",
   "OUTLET_REMITTANCE",
+  // Reserved (ADR 010): whoever sees it this way has no area to correct it from.
+  "EMPLOYEE_RESERVED",
 ];
 
 export const ACCOUNT_KIND_LABELS: Record<AccountKind, string> = {

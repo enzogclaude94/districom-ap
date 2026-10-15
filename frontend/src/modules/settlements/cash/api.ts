@@ -42,7 +42,9 @@ export type OperationType =
   | "DIRECT_EXPENSE"
   | "PAYMENT"
   | "OUTLET_REMITTANCE"
-  | "REVERSAL";
+  | "REVERSAL"
+  /** An employee finance operation (R8) shown to someone without the area: only date, amount and box (ADR 010). */
+  | "EMPLOYEE_RESERVED";
 
 export interface Account {
   id: number;

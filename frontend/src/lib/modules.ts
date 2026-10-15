@@ -11,6 +11,8 @@ export interface NavItem {
   exact?: boolean;
   /** Small live indicator next to the label, provided by the module (e.g. a count in alert). */
   indicator?: ComponentType;
+  /** Protected area the item belongs to (ADR 010): shown only to users granted that area. */
+  area?: string;
 }
 
 export interface NavSection {
@@ -19,6 +21,8 @@ export interface NavSection {
   href?: string;
   phase?: number;
   exact?: boolean;
+  /** Protected area the section belongs to (ADR 010): shown only to users granted that area. */
+  area?: string;
   items?: NavItem[];
 }
 
