@@ -3,11 +3,11 @@
 **DistriCom** — **plataforma modular** para una distribuidora de bebidas: un núcleo compartido (plataforma) + módulos de negocio, en una sola aplicación. Módulos aprobados:
 
 - **Inteligencia Comercial** (`commercial`, `/comercial`): capa de análisis sobre AXUM (preventa) y STORE SYS (facturación). No es ERP ni facturador; nunca escribe en los sistemas fuente.
-- **Rendiciones** (`settlements`, `/rendiciones`): rendiciones de reparto y boca de expendio, cajas, cheques, pendientes, gastos, combustible, pagos y liquidación semanal de empleados, con un ledger propio como fuente de verdad (ADR 007). Avanza por fases R0–R9.
+- **Rendiciones** (`settlements`, `/rendiciones`): rendiciones de reparto y boca de expendio, cajas, cheques, pendientes, gastos, combustible, pagos y cuenta interna y liquidación interna de empleados (por período, ADR 010), con un ledger propio como fuente de verdad (ADR 007). Avanza por fases R0–R9.
 
 No se desarrollan otros módulos ni se anticipan sus modelos sin aprobación explícita de Enzo (ADR 006). Dentro de Rendiciones, cada fase crea solo lo suyo (ADR 007).
 
-Leer antes de cualquier tarea: este archivo → `PLAN.md` → `ROADMAP.md` → documentos del módulo afectado (Rendiciones: ADR 007, ADR 008 y `DATA_MODEL.md §13`).
+Leer antes de cualquier tarea: este archivo → `PLAN.md` → `ROADMAP.md` → documentos del módulo afectado (Rendiciones: ADR 007, ADR 008 y `DATA_MODEL.md §13`; Empleados: ADR 010).
 
 ## 1. Arquitectura (resumen)
 
@@ -26,6 +26,7 @@ Principios no negociables:
 - **Regla de dependencias** (verificada en CI): módulo → plataforma → core/db. La plataforma nunca importa de un módulo; un módulo nunca importa internals de otro (`ARCHITECTURE.md §4.2`).
 - **Única fuente de verdad:** personas (`employees` + `employee_functions`), clientes, localidades e identidades externas viven una sola vez en plataforma. Preventista, repartidor, etc. son **funciones** del empleado, no personas nuevas; cada módulo registra sus códigos de función en código.
 - **Dinero en Rendiciones:** todo movimiento de valores pasa por `app/modules/settlements/ledger/service.py`, la **única puerta** de escritura de `financial_operations` y `ledger_entries` (un test lo verifica): entradas inmutables, operaciones balanceadas e idempotentes, correcciones por reverso, ningún saldo editable, cajas nunca negativas (ADR 007, ADR 008).
+- **Áreas protegidas** (ADR 010): Rendiciones › Empleados (`settlements.employee_finance`: sueldos, cuenta interna) exige un permiso explícito que el admin de plataforma **no hereda**. Se declara en `ModuleSpec.protected_areas` y se verifica en la capa central (`require_area_access`); sin el área, 404. Nunca chequear claves de área a mano en un endpoint; nunca exponer cuentas `EMPLOYEE` ni datos de R8 fuera del área.
 - **Toda métrica se define primero en `METRICS.md`** y se implementa una sola vez en `backend/app/modules/commercial/analytics/metrics/` con el mismo `id`.
 - **La analítica opera sobre el modelo canónico**, nunca sobre columnas de archivos. `analytics/` de un módulo puede cruzar directamente sus tablas y las de plataforma con SQL de **solo lectura**, nunca las de otro módulo; los paquetes operacionales mantienen su encapsulación (`ARCHITECTURE.md §4.3`).
 - **Nunca fusionar entidades por nombre** sin confirmación; usar `external_entity_mappings`.
@@ -50,6 +51,7 @@ uv run lint-imports                           # límites plataforma/módulos (AR
 uv run alembic check                          # modelos == migraciones
 uv run python -m app.cli create-admin --email ... --name ...
 uv run python -m app.cli grant-module-role --email ... --module settlements --role operator
+uv run python -m app.cli grant-module-role --email ... --module settlements.employee_finance --role admin   # área protegida (ADR 010)
 # Frontend
 cd frontend
 pnpm install
