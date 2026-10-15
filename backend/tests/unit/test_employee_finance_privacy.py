@@ -148,23 +148,26 @@ def _movement(operation_id: int, type_: str) -> Movement:
 
 
 class _Rows:
-    def __init__(self, rows: list[tuple[int, Any]]) -> None:
+    def __init__(self, rows: list[tuple[int, str]]) -> None:
         self._rows = rows
 
-    def all(self) -> list[tuple[int, Any]]:
+    def tuples(self) -> "_Rows":
+        return self
+
+    def all(self) -> list[tuple[int, str]]:
         return self._rows
 
 
 class _FakeSession:
-    """Answers the two lookups of a reversal: which operation it reverses, then that operation's type."""
+    """Answers the one lookup of a reversal: the type of the operation each reversal reverses."""
 
     def __init__(self, reverses: dict[int, int], types: dict[int, str]) -> None:
-        self._answers = [list(reverses.items()), list(types.items())]
+        self._rows = [(reversal, types[reversed_id]) for reversal, reversed_id in reverses.items()]
         self.queries = 0
 
     def execute(self, _statement: object) -> _Rows:
         self.queries += 1
-        return _Rows(self._answers.pop(0))
+        return _Rows(self._rows)
 
 
 def test_an_r8_operation_is_redacted_to_what_reconciling_needs() -> None:

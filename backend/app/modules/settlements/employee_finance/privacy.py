@@ -13,10 +13,9 @@ to an employee stays visible where it is decided (the settlement), which never s
 
 from dataclasses import replace
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.modules.settlements.ledger.models import FinancialOperation
+from app.modules.settlements.ledger import service as ledger
 from app.modules.settlements.ledger.service import AccountBalance, EntryDetail, Movement, OperationDetail
 
 # Accounts only the area reads. R8-2 to R8-5 add their technical accounts here as they ship (ADR 010 §20).
@@ -50,24 +49,10 @@ def is_private_account(balance: AccountBalance) -> bool:
 def private_operation_ids(db: Session, operation_ids: set[int], types: dict[int, str]) -> set[int]:
     """Which of these operations are R8 or reverse one. `types` maps each id to its own type."""
     private = {op_id for op_id in operation_ids if types[op_id] in PRIVATE_OPERATION_TYPES}
-    reversals = {op_id for op_id in operation_ids if types[op_id] == "REVERSAL"}
+    reversals = sorted(op_id for op_id in operation_ids if types[op_id] == "REVERSAL")
     if reversals:
-        rows = db.execute(
-            select(FinancialOperation.id, FinancialOperation.reverses_operation_id).where(
-                FinancialOperation.id.in_(reversals)
-            )
-        ).all()
-        reversed_ids = {reverses for _, reverses in rows if reverses is not None}
-        reversed_types: dict[int, str] = dict(
-            db.execute(
-                select(FinancialOperation.id, FinancialOperation.type).where(FinancialOperation.id.in_(reversed_ids))
-            ).all()
-        )
-        private |= {
-            op_id
-            for op_id, reverses in rows
-            if reverses is not None and reversed_types.get(reverses, "") in PRIVATE_OPERATION_TYPES
-        }
+        reversed_types = ledger.reversed_operation_types(db, reversals)
+        private |= {op_id for op_id in reversals if reversed_types.get(op_id, "") in PRIVATE_OPERATION_TYPES}
     return private
 
 

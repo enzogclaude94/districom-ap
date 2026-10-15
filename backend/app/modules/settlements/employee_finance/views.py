@@ -11,7 +11,7 @@ from datetime import date
 from decimal import Decimal
 
 from sqlalchemy import exists, func, or_, select
-from sqlalchemy.orm import Session, aliased
+from sqlalchemy.orm import Session
 
 from app.core.clock import business_today
 from app.core.errors import AppError
@@ -19,7 +19,7 @@ from app.modules.settlements.delivery.models import Settlement
 from app.modules.settlements.employee_finance import compensation
 from app.modules.settlements.employee_finance import schemas as s
 from app.modules.settlements.employee_finance.models import EmployeeCompensationTerm
-from app.modules.settlements.ledger.models import Account, FinancialOperation, LedgerEntry
+from app.modules.settlements.ledger import service as ledger
 from app.platform.auth.models import User
 from app.platform.parties.models import Employee
 
@@ -37,9 +37,10 @@ def reading(balance: Decimal) -> s.BalanceReading:
 
 def employees(db: Session, q: str | None, limit: int, offset: int) -> s.EmployeeFinancePage:
     """Active employees, and inactive ones with an internal account or salary terms (their history stays)."""
-    has_account = exists().where(Account.employee_id == Employee.id, Account.kind == "EMPLOYEE")
     has_terms = exists().where(EmployeeCompensationTerm.employee_id == Employee.id)
-    query = select(Employee).where(or_(Employee.active.is_(True), has_account, has_terms))
+    query = select(Employee).where(
+        or_(Employee.active.is_(True), Employee.id.in_(ledger.employee_account_owners()), has_terms)
+    )
     if q and q.strip():
         query = query.where(Employee.full_name.ilike(f"%{_escape(q.strip())}%", escape="\\"))
     total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
@@ -52,9 +53,7 @@ def detail(db: Session, employee_id: int) -> s.EmployeeFinanceDetail:
     if employee is None:
         raise AppError(404, "employee_not_found", "El empleado no existe.")
     row = _rows(db, [employee])[0]
-    has_account = (
-        db.scalar(select(Account.id).where(Account.employee_id == employee_id, Account.kind == "EMPLOYEE")) is not None
-    )
+    has_account = ledger.employee_account_id(db, employee_id) is not None
     return s.EmployeeFinanceDetail(**row.model_dump(), hire_date=employee.hire_date, has_account=has_account)
 
 
@@ -90,34 +89,17 @@ def movements(db: Session, employee_id: int, limit: int, offset: int) -> s.Accou
     """Entries of the employee's internal account, newest first, each with its source document."""
     if db.get(Employee, employee_id) is None:
         raise AppError(404, "employee_not_found", "El empleado no existe.")
-    account_id = db.scalar(select(Account.id).where(Account.employee_id == employee_id, Account.kind == "EMPLOYEE"))
-    if account_id is None:
-        return s.AccountMovementPage(items=[], total=0)
-    reversed_op = aliased(FinancialOperation)
-    query = (
-        select(LedgerEntry, FinancialOperation, reversed_op)
-        .join(FinancialOperation, LedgerEntry.operation_id == FinancialOperation.id)
-        .outerjoin(reversed_op, reversed_op.id == FinancialOperation.reverses_operation_id)
-        .where(LedgerEntry.account_id == account_id)
-    )
-    total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
-    rows = db.execute(
-        query.order_by(FinancialOperation.business_date.desc(), FinancialOperation.id.desc(), LedgerEntry.id.desc())
-        .limit(limit)
-        .offset(offset)
-    ).all()
-    # A reversal points at the document of the operation it reverses.
-    sources = {op.id: _source(reversed_ or op) for _, op, reversed_ in rows}
-    settlement_ids = {source_id for source_type, source_id in sources.values() if source_type == SETTLEMENT_SOURCE}
+    entries, total = ledger.employee_account_entries(db, employee_id, limit=limit, offset=offset)
+    settlement_ids = {e.source_id for e in entries if e.source_type == SETTLEMENT_SOURCE and e.source_id is not None}
     settlements = (
         {row.id: row for row in db.scalars(select(Settlement).where(Settlement.id.in_(settlement_ids)))}
         if settlement_ids
         else {}
     )
     items = []
-    for entry, op, reversed_ in rows:
-        origin = _origin(op.type, reversed_.type if reversed_ is not None else None, entry.amount)
-        source_type, source_id = sources[op.id]
+    for entry in entries:
+        origin = _origin(entry.operation_type, entry.reversed_type, entry.amount)
+        source_type, source_id = entry.source_type, entry.source_id
         kind: s.DocumentKind | None = None
         number: int | None = None
         document_date: date | None = None
@@ -129,9 +111,9 @@ def movements(db: Session, employee_id: int, limit: int, offset: int) -> s.Accou
             kind = "PENDING_COLLECTION"
         items.append(
             s.AccountMovementOut(
-                entry_id=entry.id,
-                operation_id=op.id,
-                business_date=op.business_date,
+                entry_id=entry.entry_id,
+                operation_id=entry.operation_id,
+                business_date=entry.business_date,
                 amount=entry.amount,
                 reading="CHARGE" if entry.amount > 0 else "CREDIT",
                 origin=origin,
@@ -139,14 +121,10 @@ def movements(db: Session, employee_id: int, limit: int, offset: int) -> s.Accou
                 document_id=source_id if kind is not None else None,
                 document_date=document_date,
                 document_number=number,
-                created_at=op.created_at,
+                created_at=entry.created_at,
             )
         )
     return s.AccountMovementPage(items=items, total=total)
-
-
-def _source(op: FinancialOperation) -> tuple[str | None, int | None]:
-    return op.source_type, op.source_id
 
 
 def _origin(op_type: str, reversed_type: str | None, amount: Decimal) -> s.Origin:
@@ -163,15 +141,7 @@ def _origin(op_type: str, reversed_type: str | None, amount: Decimal) -> s.Origi
 
 def _rows(db: Session, employees: list[Employee]) -> list[s.EmployeeFinanceRow]:
     ids = [e.id for e in employees]
-    balances: dict[int, Decimal] = {}
-    if ids:
-        sums = db.execute(
-            select(Account.employee_id, func.coalesce(func.sum(LedgerEntry.amount), 0))
-            .join(LedgerEntry, LedgerEntry.account_id == Account.id, isouter=True)
-            .where(Account.kind == "EMPLOYEE", Account.employee_id.in_(ids))
-            .group_by(Account.employee_id)
-        )
-        balances = {employee_id: Decimal(balance) for employee_id, balance in sums if employee_id is not None}
+    balances = ledger.employee_balances(db, ids)
     today = business_today()
     current, upcoming = compensation.current_and_next(db, ids, today)
     users = _user_names(db, [*current.values(), *upcoming.values()])

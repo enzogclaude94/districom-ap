@@ -28,7 +28,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import Select, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, aliased
 
@@ -929,3 +929,96 @@ def cheques_held(db: Session, kind: str) -> dict[int, Decimal]:
         .having(func.sum(LedgerEntry.amount) > 0)
     )
     return {cid: amount for cid, amount in rows if cid is not None}
+
+
+# --- internal accounts of employees (R8-1, ADR 010) ------------------------------------------------
+
+
+@dataclass(frozen=True)
+class EmployeeAccountEntry:
+    """A leg of an employee's internal account. A reversal carries the type and the source document of the
+    operation it reverses, so it reads as a correction of that document."""
+
+    entry_id: int
+    operation_id: int
+    operation_type: str
+    reversed_type: str | None
+    business_date: date
+    amount: Decimal
+    source_type: str | None
+    source_id: int | None
+    created_at: datetime
+
+
+def employee_account_owners() -> Select[int | None]:
+    """Ids of the employees that have an internal account, as a subquery for listings."""
+    return select(Account.employee_id).where(Account.kind == "EMPLOYEE", Account.employee_id.is_not(None))
+
+
+def employee_account_id(db: Session, employee_id: int) -> int | None:
+    return db.scalar(select(Account.id).where(Account.employee_id == employee_id, Account.kind == "EMPLOYEE"))
+
+
+def employee_balances(db: Session, employee_ids: Sequence[int]) -> dict[int, Decimal]:
+    """Balance of each employee's internal account (missing: no account yet). Always summed from entries."""
+    if not employee_ids:
+        return {}
+    rows = db.execute(
+        select(Account.employee_id, func.coalesce(func.sum(LedgerEntry.amount), 0))
+        .join(LedgerEntry, LedgerEntry.account_id == Account.id, isouter=True)
+        .where(Account.kind == "EMPLOYEE", Account.employee_id.in_(employee_ids))
+        .group_by(Account.employee_id)
+    )
+    return {employee_id: Decimal(balance) for employee_id, balance in rows if employee_id is not None}
+
+
+def employee_account_entries(
+    db: Session, employee_id: int, *, limit: int = 50, offset: int = 0
+) -> tuple[list[EmployeeAccountEntry], int]:
+    """Legs of the employee's internal account, newest first, and the total count."""
+    account_id = employee_account_id(db, employee_id)
+    if account_id is None:
+        return [], 0
+    reversed_op = aliased(FinancialOperation)
+    query = (
+        select(LedgerEntry, FinancialOperation, reversed_op)
+        .join(FinancialOperation, LedgerEntry.operation_id == FinancialOperation.id)
+        .outerjoin(reversed_op, reversed_op.id == FinancialOperation.reverses_operation_id)
+        .where(LedgerEntry.account_id == account_id)
+    )
+    total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
+    rows = db.execute(
+        query.order_by(FinancialOperation.business_date.desc(), FinancialOperation.id.desc(), LedgerEntry.id.desc())
+        .limit(limit)
+        .offset(offset)
+    ).all()
+    entries = []
+    for entry, op, reversed_ in rows:
+        document = reversed_ or op
+        entries.append(
+            EmployeeAccountEntry(
+                entry_id=entry.id,
+                operation_id=op.id,
+                operation_type=op.type,
+                reversed_type=reversed_.type if reversed_ is not None else None,
+                business_date=op.business_date,
+                amount=entry.amount,
+                source_type=document.source_type,
+                source_id=document.source_id,
+                created_at=op.created_at,
+            )
+        )
+    return entries, total
+
+
+def reversed_operation_types(db: Session, reversal_ids: Sequence[int]) -> dict[int, str]:
+    """For each reversal, the type of the operation it reverses."""
+    if not reversal_ids:
+        return {}
+    reversed_op = aliased(FinancialOperation)
+    rows = db.execute(
+        select(FinancialOperation.id, reversed_op.type)
+        .join(reversed_op, reversed_op.id == FinancialOperation.reverses_operation_id)
+        .where(FinancialOperation.id.in_(reversal_ids))
+    )
+    return dict(rows.tuples().all())
