@@ -70,6 +70,8 @@ SETTLEMENTS_TABLES = {
 
 # Added by 0024 (R7-3).
 REMITTANCE_TABLES = {"outlet_remittances", "settlement_closing_remittances"}
+# Added by 0025 (R8-1).
+EMPLOYEE_FINANCE_TABLES = {"employee_compensation_terms"}
 
 
 def _settlements_tables(url: str) -> set[str]:
@@ -254,7 +256,10 @@ def test_third_parties_and_payments_migrations_go_down_and_up() -> None:
     command.downgrade(cfg, "0018")
     assert (
         _settlements_tables(url)
-        == SETTLEMENTS_TABLES - {"payments", "payment_items", "outlet_responsibilities"} - REMITTANCE_TABLES
+        == SETTLEMENTS_TABLES
+        - {"payments", "payment_items", "outlet_responsibilities"}
+        - REMITTANCE_TABLES
+        - EMPLOYEE_FINANCE_TABLES
     )
     assert "third_parties" in _tables(url)
     engine = create_engine(url)
@@ -283,14 +288,20 @@ def test_outlets_and_responsibilities_migrations_go_down_and_up() -> None:
 
     command.upgrade(cfg, "head")
     command.downgrade(cfg, "0021")
-    assert _settlements_tables(url) == SETTLEMENTS_TABLES - {"outlet_responsibilities"} - REMITTANCE_TABLES
+    assert (
+        _settlements_tables(url)
+        == SETTLEMENTS_TABLES - {"outlet_responsibilities"} - REMITTANCE_TABLES - EMPLOYEE_FINANCE_TABLES
+    )
     assert "outlets" in _tables(url)
     engine = create_engine(url)
     try:
         command.downgrade(cfg, "0020")
         assert "outlets" not in _tables(url)
         assert _tables(url) >= EXPECTED_TABLES - {"outlets"}
-        assert _settlements_tables(url) == SETTLEMENTS_TABLES - {"outlet_responsibilities"} - REMITTANCE_TABLES
+        assert (
+            _settlements_tables(url)
+            == SETTLEMENTS_TABLES - {"outlet_responsibilities"} - REMITTANCE_TABLES - EMPLOYEE_FINANCE_TABLES
+        )
         with engine.connect() as conn:
             leftovers = conn.execute(
                 text(
