@@ -65,6 +65,7 @@ SETTLEMENTS_TABLES = {
     "outlet_responsibilities",
     "outlet_remittances",
     "settlement_closing_remittances",
+    "employee_compensation_terms",
 }
 
 # Added by 0024 (R7-3).
