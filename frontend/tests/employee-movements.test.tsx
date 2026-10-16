@@ -20,12 +20,13 @@ const AREA = "settlements.employee_finance";
 type Role = "viewer" | "operator" | "admin";
 const EF = "/settlements/employee-finance";
 
-const me = (area: Role): CurrentUser => ({
+/** The area role, and the Rendiciones role (an advance also needs operator there, ADR 010 D9). */
+const me = (area: Role, settlements: Role = "operator"): CurrentUser => ({
   id: 9,
   email: "u@d.c",
   full_name: "Usuario",
   role: "viewer",
-  modules: [{ key: "settlements", name: "Rendiciones", role: "viewer" }],
+  modules: [{ key: "settlements", name: "Rendiciones", role: settlements }],
   areas: [{ key: AREA, name: "Empleados", role: area }],
 });
 
@@ -62,9 +63,9 @@ const MOVEMENT_ROW = {
   created_at: "2026-10-12T12:00:00Z",
 };
 
-function routes(area: Role, extra: Record<string, Handler> = {}) {
+function routes(area: Role, extra: Record<string, Handler> = {}, settlements: Role = "operator") {
   return {
-    "GET /auth/me": () => jsonResponse(200, me(area)),
+    "GET /auth/me": () => jsonResponse(200, me(area, settlements)),
     [`GET ${EF}/employees/7`]: () =>
       jsonResponse(200, {
         employee_id: 7,
@@ -184,6 +185,13 @@ describe("actions on the internal account", () => {
     expect(await screen.findByRole("button", { name: "Registrar consumo" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Entregar adelanto" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Registrar ajuste" })).not.toBeInTheDocument();
+  });
+
+  it("an area admin who is only a viewer of Rendiciones gets no advance", async () => {
+    mockApi(routes("admin", {}, "viewer"));
+    renderWithQuery(<EmployeeFinanceDetailView employeeId={7} />);
+    expect(await screen.findByRole("button", { name: "Registrar ajuste" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Entregar adelanto" })).not.toBeInTheDocument();
   });
 
   it("lists the movement with its description, document link and reversed mark", async () => {
@@ -366,6 +374,16 @@ describe("EmployeeMovementView", () => {
     await userEvent.click(within(dialog).getByRole("button", { name: "Confirmar reverso" }));
     await waitFor(() => expect(posted(spy, "/employee-movements/3/reverse")).toHaveLength(1));
     expect(posted(spy, "/employee-movements/3/reverse")[0]).toMatchObject({ reason: "Error de carga" });
+  });
+
+  it("an advance is not reversed by an area admin without the cash role", async () => {
+    mockApi({
+      "GET /auth/me": () => jsonResponse(200, me("admin", "viewer")),
+      [`GET ${EF}/employee-movements/3`]: () => jsonResponse(200, MOVEMENT),
+    });
+    renderWithQuery(<EmployeeMovementView movementId={3} />);
+    await screen.findByRole("heading", { name: "Adelanto n.º 3" });
+    expect(screen.queryByRole("button", { name: "Revertir" })).not.toBeInTheDocument();
   });
 
   it("a viewer of the area cannot reverse", async () => {

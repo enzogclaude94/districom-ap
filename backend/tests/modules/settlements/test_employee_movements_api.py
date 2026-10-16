@@ -19,6 +19,7 @@ from tests.modules.settlements.days import days_ago, today, yesterday
 from tests.modules.settlements.employee_finance_support import BASE, EF, error
 from tests.modules.settlements.employee_movement_support import (
     area_admin,
+    area_admin_without_cash,
     area_operator,
     area_viewer,
     balance,
@@ -124,6 +125,13 @@ def test_who_registers_what(user_as: Callable[..., TestClient], ana: int, funded
     admin = area_admin(user_as)
     for kind, extra in (("CONSUMPTION", {}), ("ADVANCE", advance), ("ADJUSTMENT", {})):
         assert register(admin, kind, ana, **extra).status_code == 201, kind
+    # An advance moves a cash box: the area is not enough without operator in Rendiciones (ADR 010 D9).
+    accountant = area_admin_without_cash(user_as)
+    assert error(register(accountant, "ADVANCE", ana, **advance)) == (403, "forbidden")
+    preview = {"kind": "ADVANCE", "business_date": str(today()), "amount": "10", **advance}
+    assert error(accountant.post(f"{EF}/employees/{ana}/movements/preview", json=preview)) == (403, "forbidden")
+    assert register(accountant, "CONSUMPTION", ana).status_code == 201
+    assert register(accountant, "ADJUSTMENT", ana).status_code == 201
 
 
 def test_validations(user_as: Callable[..., TestClient], ana: int) -> None:
@@ -264,6 +272,19 @@ def test_reversing_an_advance_returns_the_money_even_if_the_box_is_empty_now(
     assert _audit(db, "settlements.employee_finance.employee_movement.reversed")[0]["reason"] == (
         "Se cargó a otro empleado"
     )
+
+
+def test_reversing_an_advance_needs_the_cash_role_and_a_box_that_can_receive(
+    user_as: Callable[..., TestClient], ana: int, funded: dict[str, int], db: Session
+) -> None:
+    advance = registered(area_admin(user_as), "ADVANCE", ana, "1000", funding_account_id=funded["main_cash"])
+    assert error(reverse(area_admin_without_cash(user_as), advance["id"])) == (403, "forbidden")
+    db.execute(text("UPDATE settlements.accounts SET active = false WHERE id = :a"), {"a": funded["main_cash"]})
+    db.commit()
+    assert error(reverse(area_admin(user_as), advance["id"])) == (409, "account_inactive")
+    db.execute(text("UPDATE settlements.accounts SET active = true WHERE id = :a"), {"a": funded["main_cash"]})
+    db.commit()
+    assert reverse(area_admin(user_as), advance["id"]).json()["status"] == "REVERSED"
 
 
 # --- adjustment -------------------------------------------------------------------------------------

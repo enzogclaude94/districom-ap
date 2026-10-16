@@ -53,12 +53,13 @@ from app.modules.settlements.employee_finance.models import EmployeeMovement
 from app.modules.settlements.ledger import service as ledger
 from app.modules.settlements.ledger.accounts import employee_account_id, lock_account
 from app.platform.audit.service import record_change
-from app.platform.auth.access import has_area_access
+from app.platform.auth.access import has_area_access, has_module_access
 from app.platform.auth.models import User
 from app.platform.parties.models import Employee
 
 logger = logging.getLogger(__name__)
 
+MODULE_KEY = "settlements"
 SOURCE = "employee_movement"
 ENTITY = "employee_movement"
 EVENT = "settlements.employee_finance.employee_movement"
@@ -274,6 +275,8 @@ def reverse(db: Session, actor: User, movement_id: int, reason: str, client_requ
     ).one_or_none()
     if movement is None:
         raise AppError(404, "employee_movement_not_found", "El movimiento no existe.")
+    if movement.kind == "ADVANCE":
+        _require_cash_role(actor)
     request_id = uuid5(NAMESPACE, f"employee-movement-reversal:{client_request_id}")
     if movement.reversal_operation_id is not None:
         reversal = ledger.get_operation(db, movement.reversal_operation_id)
@@ -383,6 +386,17 @@ def _require_role(actor: User, kind: str) -> None:
             "ADJUSTMENT": "Solo un administrador de Empleados registra ajustes.",
         }[kind]
         raise AppError(403, "forbidden", message)
+    if kind == "ADVANCE":
+        _require_cash_role(actor)
+
+
+def _require_cash_role(actor: User) -> None:
+    """What moves a cash box or the bank also needs operator in Rendiciones: the discipline of Cajas does not change
+    for employees (ADR 010 D9)."""
+    if not has_module_access(actor, MODULE_KEY, "operator"):
+        raise AppError(
+            403, "forbidden", "Un adelanto mueve una caja o el banco: necesitás además el rol operador en Rendiciones."
+        )
 
 
 def _check_inactive(actor: User, cmd: Command, today: date) -> None:

@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { areaRole, authApi, currentUserQueryKey, roleAtLeast } from "@/lib/api/auth";
+import { areaRole, authApi, currentUserQueryKey, moduleRole, roleAtLeast } from "@/lib/api/auth";
 import { cn } from "@/lib/cn";
 import { formatDate, formatDateTime, formatMoney } from "@/lib/format";
 
@@ -233,6 +233,8 @@ export function EmployeeFinanceDetailView({ employeeId }: { employeeId: number }
   const role = areaRole(me.data, EMPLOYEE_FINANCE_AREA);
   const canEdit = roleAtLeast(role, "admin");
   const canOperate = roleAtLeast(role, "operator");
+  // An advance moves a cash box or the bank: it also needs operator in Rendiciones (ADR 010 D9).
+  const canAdvance = canEdit && roleAtLeast(moduleRole(me.data, "settlements"), "operator");
   const [registering, setRegistering] = useState<MovementKind | null>(null);
   const detail = useQuery({
     queryKey: [...employeeFinanceQueryKey, "detail", employeeId],
@@ -290,15 +292,15 @@ export function EmployeeFinanceDetailView({ employeeId }: { employeeId: number }
               <Button size="sm" onClick={() => setRegistering("CONSUMPTION")}>
                 Registrar consumo
               </Button>
+              {canAdvance && (
+                <Button size="sm" variant="secondary" onClick={() => setRegistering("ADVANCE")}>
+                  Entregar adelanto
+                </Button>
+              )}
               {canEdit && (
-                <>
-                  <Button size="sm" variant="secondary" onClick={() => setRegistering("ADVANCE")}>
-                    Entregar adelanto
-                  </Button>
-                  <Button size="sm" variant="secondary" onClick={() => setRegistering("ADJUSTMENT")}>
-                    Registrar ajuste
-                  </Button>
-                </>
+                <Button size="sm" variant="secondary" onClick={() => setRegistering("ADJUSTMENT")}>
+                  Registrar ajuste
+                </Button>
               )}
             </div>
           )}

@@ -16,8 +16,13 @@ PATHS = {"CONSUMPTION": "consumptions", "ADVANCE": "advances", "ADJUSTMENT": "ad
 
 
 def area_admin(user_as: Callable[..., TestClient]) -> TestClient:
-    """An admin of the area who is only a viewer of Rendiciones: the area authorizes the movements."""
-    return user_as("rrhh", settlements="viewer", area="admin")
+    """An admin of the area and operator of Rendiciones: an advance moves a cash box, which needs both (D9)."""
+    return user_as("rrhh", settlements="operator", area="admin")
+
+
+def area_admin_without_cash(user_as: Callable[..., TestClient]) -> TestClient:
+    """An admin of the area who is only a viewer of Rendiciones: the area authorizes everything but the cash box."""
+    return user_as("contador", settlements="viewer", area="admin")
 
 
 def area_operator(user_as: Callable[..., TestClient]) -> TestClient:

@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { areaRole, authApi, currentUserQueryKey, roleAtLeast } from "@/lib/api/auth";
+import { areaRole, authApi, currentUserQueryKey, moduleRole, roleAtLeast } from "@/lib/api/auth";
 import { formatDate, formatDateTime, formatMoney } from "@/lib/format";
 
 import { EMPLOYEE_FINANCE_AREA, employeeFinanceApi, employeeFinanceQueryKey } from "./api";
@@ -21,7 +21,8 @@ import { MovementLegs, ReverseMovementDialog } from "./movement-dialogs";
 /** `/rendiciones/empleados/movimientos/[id]`: one consumption, advance or adjustment, with its legs and reversal. */
 export function EmployeeMovementView({ movementId }: { movementId: number }) {
   const me = useQuery({ queryKey: currentUserQueryKey, queryFn: authApi.me });
-  const canReverse = roleAtLeast(areaRole(me.data, EMPLOYEE_FINANCE_AREA), "admin");
+  const areaAdmin = roleAtLeast(areaRole(me.data, EMPLOYEE_FINANCE_AREA), "admin");
+  const cashOperator = roleAtLeast(moduleRole(me.data, "settlements"), "operator");
   const [reversing, setReversing] = useState(false);
   const movement = useQuery({
     queryKey: [...employeeFinanceQueryKey, "movement", movementId],
@@ -31,6 +32,8 @@ export function EmployeeMovementView({ movementId }: { movementId: number }) {
   if (movement.isError) return <ErrorState error={movement.error} onRetry={() => void movement.refetch()} />;
   const row = movement.data;
   const reversed = row.status === "REVERSED";
+  // Reversing an advance puts money back into its cash box or bank: that also needs operator in Rendiciones.
+  const canReverse = areaAdmin && (row.kind !== "ADVANCE" || cashOperator);
   const facts: [string, string][] = [
     ["Fecha", formatDate(row.business_date)],
     ["Importe", formatMoney(row.amount)],
