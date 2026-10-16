@@ -1,10 +1,11 @@
-"""Read side of Rendiciones > Empleados (R8-1): internal accounts and salary terms, nothing written.
+"""Read side of Rendiciones > Empleados: internal accounts, salary terms and movements.
 
-The internal account (`EMPLOYEE`, one per employee, created on first use by R2) is net: positive means the
-employee owes the company, negative that the company owes the employee. R8-1 only reads the movements R2-R7
-already write (differences of settlements, pending write-offs and their reversals) from the ledger and their
-source documents; nothing is copied. Each movement says where it comes from; the balance is never split up
-by arithmetic (Enzo's precision D).
+The internal account (`EMPLOYEE`, one per employee, created on first use) is net: positive means the employee owes
+the company, negative that the company owes the employee. Its movements are read from the ledger and their source
+documents, nothing is copied: what R2-R7 write (differences of settlements, pending write-offs) and the employee
+movements of R8-2 (consumptions, advances, adjustments), each with its reversals. Each movement says where it comes
+from; the balance is never split up by arithmetic (Enzo's precision D). There is no payroll yet, so nothing reads
+as deducted or applied.
 """
 
 from datetime import date
@@ -17,14 +18,16 @@ from app.core.clock import business_today
 from app.core.errors import AppError
 from app.modules.settlements.delivery.models import Settlement
 from app.modules.settlements.employee_finance import compensation
+from app.modules.settlements.employee_finance import movements as movement_service
 from app.modules.settlements.employee_finance import schemas as s
-from app.modules.settlements.employee_finance.models import EmployeeCompensationTerm
+from app.modules.settlements.employee_finance.models import EmployeeCompensationTerm, EmployeeMovement
 from app.modules.settlements.ledger import service as ledger
 from app.platform.auth.models import User
 from app.platform.parties.models import Employee
 
 SETTLEMENT_SOURCE = "settlement"
 PENDING_SOURCE = "pending_collection"
+MOVEMENT_SOURCE = movement_service.SOURCE
 
 
 def reading(balance: Decimal) -> s.BalanceReading:
@@ -96,9 +99,17 @@ def movements(db: Session, employee_id: int, limit: int, offset: int) -> s.Accou
         if settlement_ids
         else {}
     )
+    movement_ids = {e.source_id for e in entries if e.source_type == MOVEMENT_SOURCE and e.source_id is not None}
+    documents = (
+        {row.id: row for row in db.scalars(select(EmployeeMovement).where(EmployeeMovement.id.in_(movement_ids)))}
+        if movement_ids
+        else {}
+    )
     items = []
     for entry in entries:
         origin = _origin(entry.operation_type, entry.reversed_type, entry.amount)
+        description: str | None = None
+        reversed_: bool | None = None
         source_type, source_id = entry.source_type, entry.source_id
         kind: s.DocumentKind | None = None
         number: int | None = None
@@ -109,6 +120,10 @@ def movements(db: Session, employee_id: int, limit: int, offset: int) -> s.Accou
             number, document_date = settlement.sequence_number, settlement.business_date
         elif source_type == PENDING_SOURCE:
             kind = "PENDING_COLLECTION"
+        elif source_type == MOVEMENT_SOURCE and source_id in documents:
+            movement = documents[source_id]
+            kind, document_date = "EMPLOYEE_MOVEMENT", movement.business_date
+            description, reversed_ = movement.description, movement.reversal_operation_id is not None
         items.append(
             s.AccountMovementOut(
                 entry_id=entry.entry_id,
@@ -121,6 +136,8 @@ def movements(db: Session, employee_id: int, limit: int, offset: int) -> s.Accou
                 document_id=source_id if kind is not None else None,
                 document_date=document_date,
                 document_number=number,
+                description=description,
+                document_reversed=reversed_,
                 created_at=entry.created_at,
             )
         )
@@ -136,7 +153,87 @@ def _origin(op_type: str, reversed_type: str | None, amount: Decimal) -> s.Origi
         return "SETTLEMENT_CORRECTION"
     if op_type == "REVERSAL" and reversed_type == "PENDING_WRITE_OFF":
         return "PENDING_WRITE_OFF_REVERSAL"
+    if op_type == "EMPLOYEE_CONSUMPTION":
+        return "CONSUMPTION"
+    if op_type == "EMPLOYEE_ADVANCE":
+        return "ADVANCE"
+    if op_type == "EMPLOYEE_ADJUSTMENT":
+        return "ADJUSTMENT_CHARGE" if amount > 0 else "ADJUSTMENT_CREDIT"
+    if op_type == "REVERSAL" and reversed_type == "EMPLOYEE_CONSUMPTION":
+        return "CONSUMPTION_REVERSAL"
+    if op_type == "REVERSAL" and reversed_type == "EMPLOYEE_ADVANCE":
+        return "ADVANCE_REVERSAL"
+    if op_type == "REVERSAL" and reversed_type == "EMPLOYEE_ADJUSTMENT":
+        return "ADJUSTMENT_REVERSAL"
     return "OTHER"
+
+
+def preview(db: Session, actor: User, employee_id: int, body: s.MovementPreviewIn) -> s.MovementPreviewOut:
+    """What registering a movement would publish, validated (roles, employee, funds), without writing anything."""
+    cmd = movement_service.command(
+        body.kind, employee_id, body.business_date, body.amount, "-", None, body.direction, body.funding_account_id
+    )
+    planned = movement_service.plan(db, actor, cmd)
+    before = ledger.employee_balances(db, [employee_id]).get(employee_id, Decimal("0"))
+    return s.MovementPreviewOut(
+        kind=cmd.kind,
+        direction=cmd.direction,
+        amount=cmd.amount,
+        employee_amount=cmd.employee_amount,
+        balance_before=before,
+        balance_after=before + cmd.employee_amount,
+        legs=[s.MovementLegOut(**leg.__dict__) for leg in planned.legs],
+    )
+
+
+def movement(db: Session, movement_id: int) -> s.EmployeeMovementOut:
+    row = db.get(EmployeeMovement, movement_id)
+    if row is None:
+        raise AppError(404, "employee_movement_not_found", "El movimiento no existe.")
+    assert row.operation_id is not None  # published with its operation (0026)
+    employee = db.get(Employee, row.employee_id)
+    assert employee is not None
+    users = dict(
+        db.execute(
+            select(User.id, User.full_name).where(
+                User.id.in_([row.created_by] + ([row.reversed_by] if row.reversed_by is not None else []))
+            )
+        ).all()
+    )
+    detail = ledger.operation_detail(db, row.operation_id)
+    funding = next((e.account_name for e in detail.entries if e.account_id == row.funding_account_id), None)
+    legs = [
+        s.MovementLegOut(
+            account_id=e.account_id,
+            account_name=f"Cuenta interna · {employee.full_name}" if e.account_kind == "EMPLOYEE" else e.account_name,
+            account_kind=e.account_kind,
+            amount=e.amount,
+        )
+        for e in detail.entries
+    ]
+    return s.EmployeeMovementOut(
+        id=row.id,
+        kind=row.kind,
+        direction=row.direction,
+        employee_id=row.employee_id,
+        employee_name=employee.full_name,
+        business_date=row.business_date,
+        amount=row.amount,
+        employee_amount=row.employee_amount,
+        funding_account_id=row.funding_account_id,
+        funding_account_name=funding,
+        description=row.description,
+        reference=row.reference,
+        status="REVERSED" if row.reversal_operation_id is not None else "IN_EFFECT",
+        operation_id=row.operation_id,
+        reversal_operation_id=row.reversal_operation_id,
+        reversed_at=row.reversed_at,
+        reversed_by_name=users.get(row.reversed_by) if row.reversed_by is not None else None,
+        reversal_reason=row.reversal_reason,
+        created_at=row.created_at,
+        created_by_name=users.get(row.created_by, ""),
+        legs=legs,
+    )
 
 
 def _rows(db: Session, employees: list[Employee]) -> list[s.EmployeeFinanceRow]:
