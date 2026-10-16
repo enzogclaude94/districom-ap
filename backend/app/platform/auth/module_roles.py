@@ -1,11 +1,16 @@
-"""Granting and revoking per-module roles (stage 1). Used by the CLI until there is a users screen."""
+"""Granting and revoking per-module roles (stage 1): CLI and `PUT/DELETE /auth/access-grants` (platform admin).
+
+The same rows hold the grants on protected areas (ADR 010), under the area key (`settlements.employee_finance`).
+Granting an area never reads its data: it is how a platform admin, who does not inherit such an area,
+gives it to themselves or to someone else.
+"""
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.platform.audit.service import record_change
 from app.platform.auth.models import MODULE_ROLES, User, UserModuleRole
-from app.platform.modules import installed_modules
+from app.platform.modules import installed_area, installed_modules
 
 
 class ModuleRoleError(ValueError):
@@ -20,7 +25,8 @@ def _user(db: Session, email: str) -> User:
 
 
 def _check_module(module_key: str) -> None:
-    if module_key not in {module.key for module in installed_modules()}:
+    """A module or a protected area that is installed."""
+    if module_key not in {module.key for module in installed_modules()} and installed_area(module_key) is None:
         raise ModuleRoleError(f"unknown module {module_key}")
 
 

@@ -98,19 +98,32 @@ function Sections({ sections, pathname, phasePrefix }: SectionsProps) {
   });
 }
 
+/** Drops what belongs to a protected area the user was not granted: it is not even listed (ADR 010). */
+export function visibleSections(sections: NavSection[], areas: readonly string[]): NavSection[] {
+  const granted = (area?: string) => area === undefined || areas.includes(area);
+  return sections
+    .filter((section) => granted(section.area))
+    .map((section) =>
+      section.items ? { ...section, items: section.items.filter((item) => granted(item.area)) } : section,
+    )
+    .filter((section) => section.href !== undefined || (section.items?.length ?? 0) > 0);
+}
+
 interface SidebarProps {
   sections: NavSection[];
   /** Roadmap phase prefix of the active module ("F", "R"). */
   phasePrefix?: string;
   platformAdmin?: boolean;
+  /** Keys of the protected areas the user was granted. */
+  areas?: readonly string[];
 }
 
 /** Navigation of the active module followed by the platform pages. */
-export function Sidebar({ sections, phasePrefix = "F", platformAdmin = false }: SidebarProps) {
+export function Sidebar({ sections, phasePrefix = "F", platformAdmin = false, areas = [] }: SidebarProps) {
   const pathname = usePathname();
   return (
     <nav aria-label="Navegación principal" className="flex flex-col gap-4 p-3">
-      <Sections sections={sections} pathname={pathname} phasePrefix={phasePrefix} />
+      <Sections sections={visibleSections(sections, areas)} pathname={pathname} phasePrefix={phasePrefix} />
       <div className="border-t border-border pt-3">
         <Sections
           sections={platformAdmin ? [...PLATFORM_ADMIN_NAV, ...PLATFORM_NAV] : PLATFORM_NAV}

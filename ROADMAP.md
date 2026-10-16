@@ -45,7 +45,7 @@ DistriCom es una plataforma modular (ADR 006). Este roadmap tiene tres carriles:
 | R5 | Combustible y vehículos | **DONE** (R5‑1 a R5‑4; `0014`–`0017` congeladas) | R2 |
 | R6 | Pagos a proveedores y terceros | **DONE** (2026-10-11) | R1 · R4 |
 | R7 | Boca de expendio | **DONE** (2026-10-14; R7‑1 a R7‑4, ADR 009) | R2–R5 |
-| R8 | Cuenta interna y liquidación de empleados | PLANNED (propuesta arquitectónica pendiente de aprobación) | R1 · R2 |
+| R8 | Cuenta interna y liquidación de empleados | IN_PROGRESS (arquitectura aprobada 2026-10-15, ADR 010; R8‑1 en revisión) | R1 · R2 |
 | R9 | Endurecimiento | PLANNED | todas |
 
 Cada fase empieza solo con aprobación explícita de Enzo y termina con un informe y una pausa para revisión.
@@ -246,7 +246,17 @@ Arquitectura aprobada por Enzo el 2026-10-11 (alternativa B, D1–D9, ajustes 1�
 R7 **DONE** el 2026-10-14: aprobada por Enzo (R7‑1 a R7‑4: maestro de bocas, responsables, rendición `OUTLET`, cierre administrativo cero, «Cobranzas de boca», entregas parciales, «Entregas a cuenta — {Boca}», múltiples rendiciones, tablero, ficha, detalle, móvil, historia, snapshots y E2E); PR #37 mergeado (`cab4909`); `0021`–`0024` congeladas. Deudas conocidas fuera de R7: fondo fijo, caja propia de boca, remesas de cheques, pendientes/fiado en boca, exportaciones.
 
 ### R8 — Empleados: cuenta interna y liquidación
-**Alcance:** cuenta interna y liquidación económica del empleado (no RRHH completo): sueldo, bonos, incentivos, faltantes y sobrantes ya asignados, consumos, adelantos, préstamos y cuotas (con postergación), otros ajustes y el pago de la liquidación. Sin asumir periodicidad semanal ni reutilizar `PAYMENT` sin análisis: Enzo pidió primero una propuesta arquitectónica completa (2026-10-14); sin código hasta su aprobación.
+**Alcance:** cuenta interna y liquidación económica del empleado (no RRHH completo): sueldo, bonos, incentivos, faltantes y sobrantes ya asignados, consumos, adelantos, préstamos y cuotas (con postergación), otros ajustes y el pago de la liquidación. Arquitectura aprobada por Enzo el 2026-10-15 con precisiones (D1–D14, A–D; ADR 010): área protegida `settlements.employee_finance` con permiso explícito que el admin de plataforma no hereda; una cuenta `EMPLOYEE` neta por empleado; modelo por período con sueldo base interno mensual (sin liquidación semanal); cuenta, liquidación y pago separados; pago propio `EMPLOYEE_PAYOUT` (no `PAYMENT`).
+
+| Fase | Contenido | Estado |
+|---|---|---|
+| R8‑1 | Área protegida, privacidad de Cajas, condición salarial (`0025`), cuenta interna en solo lectura | IN_REVIEW (PR abierto; espera aprobación de Enzo) |
+| R8‑2 | Consumos, adelantos y ajustes (`0026`) | PLANNED |
+| R8‑3 | Préstamos, cuotas y postergación (`0027`) | PLANNED |
+| R8‑4 | Liquidación interna: períodos, líneas, aplicaciones, vista previa, cierre, snapshot, reapertura (`0028`) | PLANNED |
+| R8‑5 | Pago `EMPLOYEE_PAYOUT`, consolidación y E2E de punta a punta (`0029`) | PLANNED |
+
+Cada fase frena con su informe y la aprobación de Enzo.
 
 ### R9 — Endurecimiento
 **Alcance:** reportes de cierre diario, contrato para recibir el importe esperado desde Store Sys (sin implementar la integración), performance, E2E del flujo de punta a punta.

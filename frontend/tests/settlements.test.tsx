@@ -33,7 +33,9 @@ describe("AppShell with Rendiciones", () => {
     renderShell([commercial, settlements]);
     expect(await screen.findByRole("link", { name: "Inicio" })).toHaveAttribute("href", "/rendiciones");
     expect(screen.getByText("Tesorería")).toBeInTheDocument();
-    expect(screen.getByTitle("Disponible en la fase R8")).toHaveTextContent("R8");
+    // R8 ships as the protected area Empleados: no phase badge, and hidden without an explicit grant.
+    expect(screen.queryByTitle("Disponible en la fase R8")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Empleados" })).not.toBeInTheDocument();
     expect(screen.queryByTitle("Disponible en la fase R7")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Bocas" })).toHaveAttribute("href", "/rendiciones/boca");
     expect(screen.queryByTitle("Disponible en la fase R5")).not.toBeInTheDocument();

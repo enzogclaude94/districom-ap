@@ -1,7 +1,8 @@
 """Administrative commands: `uv run python -m app.cli create-admin --email ... --name ...`.
 
 Module access (ARCHITECTURE.md §8): `grant-module-role --email ... --module settlements --role operator`,
-`revoke-module-role --email ... --module settlements`.
+`revoke-module-role --email ... --module settlements`. The same commands grant a protected area (ADR 010):
+`--module settlements.employee_finance`; a platform admin needs that grant too to read the area.
 """
 
 import argparse
@@ -49,9 +50,9 @@ def _create_user(args: argparse.Namespace) -> int:
 
 def _installed_module_keys() -> list[str]:
     import app.api.v1.router  # noqa: F401  (composition root: installs the modules)
-    from app.platform.modules import installed_modules
+    from app.platform.modules import installed_areas, installed_modules
 
-    return [module.key for module in installed_modules()]
+    return [module.key for module in installed_modules()] + [area.key for _, area in installed_areas()]
 
 
 def _grant(args: argparse.Namespace) -> int:
@@ -88,12 +89,14 @@ def main(argv: list[str] | None = None) -> int:
         cmd.add_argument("--name", required=True)
         cmd.set_defaults(func=_create_user, role=role)
     modules = _installed_module_keys()
-    grant = sub.add_parser("grant-module-role", help="Dar o cambiar el rol de un usuario en un módulo")
+    grant = sub.add_parser(
+        "grant-module-role", help="Dar o cambiar el rol de un usuario en un módulo o un área protegida"
+    )
     grant.add_argument("--email", required=True)
     grant.add_argument("--module", required=True, choices=modules)
     grant.add_argument("--role", required=True, choices=MODULE_ROLES)
     grant.set_defaults(func=_grant)
-    revoke = sub.add_parser("revoke-module-role", help="Quitar el acceso de un usuario a un módulo")
+    revoke = sub.add_parser("revoke-module-role", help="Quitar el acceso de un usuario a un módulo o un área protegida")
     revoke.add_argument("--email", required=True)
     revoke.add_argument("--module", required=True, choices=modules)
     revoke.set_defaults(func=_revoke)

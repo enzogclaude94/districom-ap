@@ -3,7 +3,7 @@ import { ClipboardList, Fuel, Home, Landmark, SlidersHorizontal, Users } from "l
 import type { NavSection } from "@/lib/modules";
 import { PendingAlertBadge } from "@/modules/settlements/pending/alerts";
 
-/** Rendiciones navigation. Items stay disabled until their roadmap phase (R1–R8) ships. */
+/** Rendiciones navigation. Items stay disabled until their roadmap phase (R1–R9) ships. */
 export const SETTLEMENTS_NAV: NavSection[] = [
   { label: "Inicio", icon: Home, href: "/rendiciones", exact: true },
   {
@@ -25,6 +25,7 @@ export const SETTLEMENTS_NAV: NavSection[] = [
     ],
   },
   { label: "Combustible", icon: Fuel, href: "/rendiciones/combustible" },
-  { label: "Liquidación semanal", icon: Users, href: "/rendiciones/liquidaciones", phase: 8 },
+  // Protected area (ADR 010): listed only with an explicit grant, not even for the platform admin.
+  { label: "Empleados", icon: Users, href: "/rendiciones/empleados", area: "settlements.employee_finance" },
   { label: "Configuración del módulo", icon: SlidersHorizontal, href: "/rendiciones/configuracion" },
 ];

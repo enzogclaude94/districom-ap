@@ -114,6 +114,8 @@ jobs:
           uv sync --frozen
           uv run alembic upgrade head
           echo "$E2E_ADMIN_PASSWORD" | uv run python -m app.cli create-admin --email "$E2E_ADMIN_EMAIL" --name "Admin E2E"
+          # Rendiciones > Empleados is a protected area: not even the platform admin has it without a grant (ADR 010).
+          uv run python -m app.cli grant-module-role --email "$E2E_ADMIN_EMAIL" --module settlements.employee_finance --role admin
           echo "$E2E_VIEWER_PASSWORD" | uv run python -m app.cli create-viewer --email "$E2E_VIEWER_EMAIL" --name "Viewer E2E"
           uv run python -m app.cli grant-module-role --email "$E2E_VIEWER_EMAIL" --module commercial --role viewer
           echo "$E2E_OPERATOR_PASSWORD" | uv run python -m app.cli create-viewer --email "$E2E_OPERATOR_EMAIL" --name "Operador E2E"

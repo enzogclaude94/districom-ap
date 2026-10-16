@@ -174,6 +174,7 @@ export function AppShell({ modules, children }: AppShellProps) {
           sections={activeModule.nav}
           phasePrefix={activeModule.phasePrefix}
           platformAdmin={user.role === "admin"}
+          areas={(user.areas ?? []).map((area) => area.key)}
         />
       </aside>
       {menuOpen && (

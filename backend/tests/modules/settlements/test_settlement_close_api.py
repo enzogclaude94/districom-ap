@@ -255,7 +255,8 @@ def test_shortage_to_one_employee(as_role, short, pedro, db: Session) -> None:  
         "delivery_collections": "-100000.00",
         f"employee:{pedro}": "1000.00",
     }
-    accounts = as_role("viewer").get(f"{BASE}/accounts").json()
+    # The internal account is read in the protected area (R8-1): the test admin holds it.
+    accounts = as_role("admin").get(f"{BASE}/accounts").json()
     (internal,) = [a for a in accounts if a["kind"] == "EMPLOYEE"]
     assert (internal["name"], internal["balance"]) == (f"Cuenta interna de Pedro Gómez (#{pedro})", "1000.00")
 
@@ -421,7 +422,7 @@ def test_only_one_internal_account_per_employee(as_role, ids, pedro, db: Session
         count(operator, sid, ("ARS_500", 1, ids["main_cash"]))
         assert close(operator, sid, employee(pedro, "500")).status_code == 201
     assert count_rows(db, "accounts WHERE kind = 'EMPLOYEE'") == 1
-    assert balances(operator)[f"Cuenta interna de Pedro Gómez (#{pedro})"] == "1000.00"
+    assert balances(as_role("admin"))[f"Cuenta interna de Pedro Gómez (#{pedro})"] == "1000.00"
 
 
 # --- closed and reopened --------------------------------------------------------------------------
@@ -453,7 +454,7 @@ def test_reopen_needs_admin_and_reason_and_a_closed_settlement(as_role, balanced
 def test_reopen_keeps_the_ledger_and_is_being_corrected(as_role, short, pedro, db: Session) -> None:  # type: ignore[no-untyped-def]
     """[19] [20] [21]"""
     closed = close(as_role("operator"), short, employee(pedro, "1000")).json()
-    before = balances(as_role("viewer"))
+    before = balances(as_role("admin"))
     operations = count_rows(db, "financial_operations")
 
     admin = as_role("admin")
@@ -540,7 +541,7 @@ def test_new_close_publishes_reversal_and_new_close(as_role, ids, million, pedro
         "delivery_collections": "1000500.00",
         f"employee:{pedro}": "-500.00",
     }
-    balance = balances(as_role("viewer"))
+    balance = balances(as_role("admin"))
     assert (balance["main_cash"], balance[f"Cuenta interna de Pedro Gómez (#{pedro})"]) == ("1000500.00", "0.00")
 
     history = as_role("viewer").get(f"{BASE}/deliveries/{million}/history").json()

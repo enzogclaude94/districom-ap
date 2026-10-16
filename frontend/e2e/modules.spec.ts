@@ -17,7 +17,10 @@ test("platform admin picks Rendiciones and switches back to Comercial", async ({
   await expect(page.getByText("El módulo está habilitado")).toBeVisible();
 
   if (isMobile) await page.getByRole("button", { name: "Abrir menú" }).click();
-  await expect(page.getByTitle("Disponible en la fase R8")).toBeVisible();
+  // The E2E admin holds the protected employee area (README, CI): R8 is no longer a placeholder.
+  await expect(
+    page.getByRole("link", { name: "Empleados" }).and(page.locator('[href="/rendiciones/empleados"]')),
+  ).toBeVisible();
   await expect(page.getByRole("link", { name: "Bocas", exact: true })).toHaveAttribute("href", "/rendiciones/boca");
   await expect(page.getByRole("link", { name: "Combustible" })).toHaveAttribute("href", "/rendiciones/combustible");
   await page.getByRole("button", { name: /Cambiar de módulo/ }).click();

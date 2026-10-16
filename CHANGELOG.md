@@ -4,6 +4,14 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Added — Empleados: privacidad, cuenta interna y condición salarial (R8‑1)
+- **Arquitectura de R8 aprobada** por Enzo el 2026-10-15 con precisiones (D1–D14, A–D): ADR 010. La mención «liquidación semanal» de ADR 007 queda reemplazada por el modelo por período (sueldo base interno mensual).
+- **Áreas protegidas en la plataforma:** un módulo declara áreas con autorización propia (`ModuleSpec.protected_areas`); la capa central (`require_area_access`) exige un rol en el módulo y un permiso propio del área. Rendiciones › Empleados (`settlements.employee_finance`, viewer/operator/admin) requiere permiso explícito **también para el admin de plataforma**. Sin el área: 404 sin detalles y el menú no aparece. El admin de plataforma otorga y revoca (CLI `grant-module-role --module settlements.employee_finance`, `PUT /auth/access-grants`, `POST /auth/access-grants/revoke`) sin poder leer el área antes; `/auth/me` devuelve `areas`.
+- **Cajas sin el área:** no lista cuentas internas de empleados; su detalle y movimientos responden 404 como una cuenta inexistente; las operaciones de R8 (todavía no existen) se verán como «Movimiento de empleado (reservado)» con fecha, importe y caja. La rendición sigue mostrando la asignación de su diferencia.
+- **Condición salarial** (migración `0025`, `employee_compensation_terms`): sueldo base interno mensual con vigencia inclusiva, sin superposición, nace abierta para un empleado activo, se termina una vez con motivo, nunca se edita ni se borra (la base lo garantiza). «Sueldo base interno (mensual). No es el recibo de sueldo legal.»
+- **Cuenta interna en solo lectura:** Rendiciones › Empleados lista cada empleado con su saldo («Debe a la empresa», «La empresa le debe», «Sin saldo») y su condición; el detalle muestra los movimientos de la cuenta interna (faltantes, sobrantes, correcciones de rendición, incobrables asignados y sus reversos) con su documento, leídos del ledger. Sin aplicaciones todavía.
+- **Cambio de comportamiento:** quien no tiene el área (incluido un admin de plataforma o de Rendiciones) deja de ver los saldos de las cuentas internas en Cajas. El admin E2E recibe el área en CI.
+
 ### Changed — R7 DONE
 - **R7 DONE** (aprobada por Enzo el 2026-10-14: R7‑1 a R7‑4; PR #37 mergeado `cab4909`; `0021`–`0024` congeladas). Las deudas conocidas (fondo fijo, caja propia de boca, remesas de cheques, pendientes/fiado en boca, exportaciones) quedan fuera de R7.
 - **R8 renombrada** «Cuenta interna y liquidación de empleados»: no se asume liquidación semanal; espera una propuesta arquitectónica aprobada antes de cualquier código.

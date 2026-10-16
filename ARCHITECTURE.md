@@ -10,7 +10,7 @@
 |---|---|---|
 | **Plataforma (DistriCom Core)** | En construcción | Usuarios, sesiones, roles por módulo, configuración, auditoría, sistemas fuente, identidades compartidas (empleados y funciones; clientes y localidades en Fase 1), framework de importación. |
 | **Inteligencia Comercial** (`commercial`, `/comercial`) | En desarrollo | Capa de **inteligencia comercial** sobre AXUM y STORE SYS. Alcance en `ROADMAP.md`. |
-| **Rendiciones** (`settlements`, `/rendiciones`) | En desarrollo (R2) | Rendiciones de reparto y boca de expendio, cajas, cheques, pendientes, gastos, combustible, pagos y liquidación semanal, con ledger propio (ADR 007, §4.6). |
+| **Rendiciones** (`settlements`, `/rendiciones`) | En desarrollo (R2) | Rendiciones de reparto y boca de expendio, cajas, cheques, pendientes, gastos, combustible, pagos y cuenta interna y liquidación interna de empleados por período (área protegida, ADR 010), con ledger propio (ADR 007, §4.6). |
 | Otros módulos | Sin desarrollar | Se agregan con el patrón de §4.5. Nada de su modelo se anticipa. |
 
 Sistemas fuente:
@@ -99,7 +99,7 @@ backend/app/
 │       ├── ledger/        [R1] accounts, financial_operations, ledger_entries y el servicio de operaciones
 │       ├── cash/          [R1] API de cajas: schemas, casos de uso y endpoints sobre el servicio del ledger
 │       ├── delivery/      [R2] rendiciones de reparto: alta, conteo, agregados, transferencias, gastos, tablero, denominaciones, cierre y reapertura
-│       └── pending/ cheques/ payments/ payroll/   [R3–R8]
+│       └── pending/ cheques/ payments/ outlets/ employee_finance/   [R3–R8]
 └── api/v1/router.py       raíz de composición: monta routers de plataforma y de cada módulo
 ```
 
@@ -277,6 +277,7 @@ Son procesos del módulo comercial. Se ejecutan como comandos CLI (`python -m ap
 - **Acceso por módulo, en etapas** (ADR 006):
   - **Etapa 0 (hasta R0):** `users.role` (`admin`, `viewer`) era el único rol; `require_module_access` derivaba de él el rol en cada módulo.
   - **Etapa 1 (R0, ADR 007):** tabla `user_module_roles(user_id, module_key, role)` con roles `viewer < operator < admin`. `users.role = admin` es el **administrador de plataforma** (usuarios, empleados, configuración general) y tiene `admin` en todos los módulos; los demás usuarios acceden solo a los módulos asignados. Todo endpoint de módulo usa `require_module_access("<módulo>", min_role)`; `GET /auth/me` devuelve `modules: [{key, name, role}]`. Asignación por CLI (`grant-module-role`, `revoke-module-role`).
+  - **Áreas protegidas (R8‑1, ADR 010):** un módulo declara áreas con autorización propia en `ModuleSpec.protected_areas` (`ProtectedAreaSpec(key="<módulo>.<área>", name, explicit_grant_required)`). La capa central resuelve `area_role` / `require_area_access`: el área exige un rol en su módulo **y** un permiso propio (fila de `user_module_roles` con la clave del área); con `explicit_grant_required` el admin de plataforma no la hereda. Sin el área, 404 sin detalles; por debajo del rol, 403. `GET /auth/me` devuelve además `areas: [{key, name, role}]`. El admin de plataforma otorga y revoca (CLI o `PUT /auth/access-grants`, `POST /auth/access-grants/revoke`) sin poder leer el área antes. Primera área: `settlements.employee_finance` (Rendiciones › Empleados).
   - **Etapa 2 (solo si hace falta):** permisos por acción como mapa en código rol → permisos.
   - `admin` de plataforma: usuarios, empleados y configuración general. `admin` de módulo: imports, configuración, correcciones y aprobaciones del módulo. `operator`: operación diaria (en Rendiciones: cargar y cerrar rendiciones, acreditar pendientes, registrar pagos). `viewer`: lectura.
 - CSRF: `SameSite=Lax` + header custom obligatorio en métodos mutantes.

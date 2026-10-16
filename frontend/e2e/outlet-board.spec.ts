@@ -262,12 +262,14 @@ test("a difference allocated to two responsables, then corrected after the close
   await closing.getByRole("button", { name: "Confirmar cierre" }).click();
   await expect(closing).toBeHidden();
   await expect(page.getByTestId("close-section-difference")).toHaveText("Faltante $ 30.000,00");
-  const closed = await balances(page);
-  expect(closed[internal(boca.a)]).toBe(2_000_000);
-  expect(closed[internal(boca.b)]).toBe(1_000_000);
+  // The operator has no Empleados area (ADR 010): Cajas does not list internal accounts to them.
+  expect(Object.keys(await balances(page)).some((name) => name.startsWith("Cuenta interna"))).toBe(false);
 
   // 1-2. Admin reopens: the previous close stays in effect until a new one.
   await switchUser(page, adminEmail, adminPassword, `/rendiciones/boca/${id}`);
+  const closed = await balances(page);
+  expect(closed[internal(boca.a)]).toBe(2_000_000);
+  expect(closed[internal(boca.b)]).toBe(1_000_000);
   await dialogAction(
     page,
     page.getByRole("button", { name: "Reabrir para corregir" }),

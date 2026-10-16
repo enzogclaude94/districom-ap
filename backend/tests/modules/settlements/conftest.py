@@ -14,6 +14,7 @@ import app.api.v1.router  # noqa: F401  (installs the modules, as the app does)
 from app.modules.settlements.ledger.models import Account
 from app.modules.settlements.ledger.service import Leg, Posted, post_operation
 from app.platform.auth.models import User
+from app.platform.auth.module_roles import grant_module_role
 from app.platform.parties.models import Employee, EmployeeFunction
 from tests.conftest import PASSWORD
 
@@ -78,7 +79,12 @@ def post(db: Session, actor) -> Callable[..., Posted]:  # type: ignore[no-untype
 
 @pytest.fixture
 def as_role(client: TestClient, make_user, grant) -> Callable[[str], TestClient]:  # type: ignore[no-untyped-def]
-    """Log in as the platform admin ("admin") or as a user with that role in Rendiciones only."""
+    """Log in as the platform admin ("admin") or as a user with that role in Rendiciones only.
+
+    The platform admin of these tests also holds `settlements.employee_finance` (as the E2E admin does), so the
+    tests of R2-R7 keep reading internal accounts; it is never inherited (ADR 010), and the privacy tests of
+    R8-1 use users without the grant (`test_employee_finance_access.py`).
+    """
     created: set[str] = set()
 
     def _as(role: str) -> TestClient:
@@ -87,6 +93,8 @@ def as_role(client: TestClient, make_user, grant) -> Callable[[str], TestClient]
             make_user(email=email, role="admin" if role == "admin" else "viewer")
             if role in ("viewer", "operator"):
                 grant(role, "settlements", role)
+            if role == "admin":
+                grant(role, "settlements.employee_finance", "admin")
             created.add(role)
         response = client.post("/api/v1/auth/login", json={"email": email, "password": PASSWORD})
         assert response.status_code == 200, response.text
@@ -171,3 +179,30 @@ def employee(db: Session) -> Callable[[str], int]:
 def ids(r: Roles) -> dict[str, int]:
     """Ids of the system accounts by code (and of the bank accounts by name)."""
     return {a["code"] or a["name"]: a["id"] for a in r.admin.get("/api/v1/settlements/accounts").json()}
+
+
+# --- R8-1: Rendiciones > Empleados -------------------------------------------------------------------
+
+
+@pytest.fixture
+def user_as(client: TestClient, db: Session, make_user) -> Callable[..., TestClient]:  # type: ignore[no-untyped-def]
+    """`user_as("ana", platform="viewer", settlements="viewer", area="admin")` logs the test client in as that
+    user, created on first use with exactly those grants (None: no grant)."""
+    created: set[str] = set()
+
+    def _as(
+        name: str, *, platform: str = "viewer", settlements: str | None = None, area: str | None = None
+    ) -> TestClient:
+        email = f"{name}@districom.test"
+        if name not in created:
+            make_user(email=email, role=platform)
+            if settlements is not None:
+                grant_module_role(db, email, "settlements", settlements)
+            if area is not None:
+                grant_module_role(db, email, "settlements.employee_finance", area)
+            created.add(name)
+        response = client.post("/api/v1/auth/login", json={"email": email, "password": PASSWORD})
+        assert response.status_code == 200, response.text
+        return client
+
+    return _as

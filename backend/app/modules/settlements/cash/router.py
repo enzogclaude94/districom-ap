@@ -13,8 +13,11 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Response
 
+from app.core.errors import AppError
 from app.modules.settlements.cash import schemas, use_cases
 from app.modules.settlements.cheques import views as cheque_views
+from app.modules.settlements.employee_finance import privacy
+from app.modules.settlements.employee_finance.access import can_read as can_read_employee_finance
 from app.modules.settlements.ledger.service import AccountBalance, Movement, OperationDetail
 from app.platform.auth.access import require_module_access
 from app.platform.auth.deps import DbSession
@@ -80,35 +83,49 @@ def _respond(result: use_cases.Result, response: Response) -> schemas.OperationO
 @router.get("/accounts", response_model=list[schemas.AccountOut])
 def list_accounts(
     db: DbSession,
-    _: Viewer,
+    user: Viewer,
     on: Annotated[date | None, Query(description="Saldo al cierre de esta fecha de negocio")] = None,
     include_inactive: bool = False,
 ) -> list[schemas.AccountOut]:
-    return [_with_causes(db, b, on) for b in use_cases.balances(db, on, include_inactive)]
+    balances = use_cases.balances(db, on, include_inactive)
+    if not can_read_employee_finance(user):
+        balances = privacy.visible_balances(balances)
+    return [_with_causes(db, b, on) for b in balances]
+
+
+def _visible_account(db: DbSession, user: User, account_id: int, on: date | None = None) -> AccountBalance:
+    """The account, or 404 like a missing one when it belongs to employee finance and the user lacks the area."""
+    balance = use_cases.account(db, account_id, on)
+    if privacy.is_private_account(balance) and not can_read_employee_finance(user):
+        raise AppError(404, "account_not_found", "La cuenta no existe.")
+    return balance
 
 
 @router.get("/accounts/{account_id}", response_model=schemas.AccountOut)
-def get_account(account_id: int, db: DbSession, _: Viewer, on: date | None = None) -> schemas.AccountOut:
-    return _with_causes(db, use_cases.account(db, account_id, on), on)
+def get_account(account_id: int, db: DbSession, user: Viewer, on: date | None = None) -> schemas.AccountOut:
+    return _with_causes(db, _visible_account(db, user, account_id, on), on)
 
 
 @router.get("/accounts/{account_id}/movements", response_model=schemas.MovementPage)
 def list_movements(
     account_id: int,
     db: DbSession,
-    _: Viewer,
+    user: Viewer,
     date_from: date | None = None,
     date_to: date | None = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> schemas.MovementPage:
+    _visible_account(db, user, account_id)
     items, total = use_cases.movements(db, account_id, date_from, date_to, limit, offset)
+    items = privacy.movements_for(db, items, can_read_employee_finance(user))
     return schemas.MovementPage(items=[_movement_out(m) for m in items], total=total)
 
 
 @router.get("/operations/{operation_id}", response_model=schemas.OperationOut)
-def get_operation(operation_id: int, db: DbSession, _: Viewer) -> schemas.OperationOut:
-    return _operation_out(use_cases.operation(db, operation_id))
+def get_operation(operation_id: int, db: DbSession, user: Viewer) -> schemas.OperationOut:
+    detail = use_cases.operation(db, operation_id)
+    return _operation_out(privacy.operation_for(db, detail, can_read_employee_finance(user)))
 
 
 # --- partner accounts (admin) ----------------------------------------------------------------------
