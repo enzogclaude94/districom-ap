@@ -76,7 +76,7 @@ Antes de R8 la cuenta interna `EMPLOYEE` (una por empleado, R2) ya existía y la
 ### 9. Fases — DECIDIDO
 | Fase | Contenido | Migración | Estado |
 |---|---|---|---|
-| R8‑1 | Área protegida con permiso explícito, privacidad de Cajas, condición salarial, cuenta interna en solo lectura | `0025` | IMPLEMENTADO (pendiente de aprobación de Enzo) |
+| R8‑1 | Área protegida con permiso explícito, privacidad de Cajas, condición salarial, cuenta interna en solo lectura | `0025` | IMPLEMENTADO (aprobado por Enzo el 2026-10-16; `0025` congelada) |
 | R8‑2 | Consumos, adelantos y ajustes | `0026` | DECIDIDO |
 | R8‑3 | Préstamos, cuotas y postergación | `0027` | DECIDIDO |
 | R8‑4 | Liquidación: períodos, líneas, aplicaciones, vista previa, cierre, snapshot, reapertura | `0028` | DECIDIDO |

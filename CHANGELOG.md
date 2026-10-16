@@ -4,6 +4,9 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Changed — R8‑1 DONE
+- **R8‑1 DONE** (aprobada por Enzo el 2026-10-16 con sus desvíos; PR #39 mergeado `c88377e`; `0025` congelada). **R8‑2 autorizada** (consumos, adelantos y ajustes, `0026`): los ajustes llevan dirección, importe, motivo obligatorio y referencia opcional, sin categorías.
+
 ### Added — Empleados: privacidad, cuenta interna y condición salarial (R8‑1)
 - **Arquitectura de R8 aprobada** por Enzo el 2026-10-15 con precisiones (D1–D14, A–D): ADR 010. La mención «liquidación semanal» de ADR 007 queda reemplazada por el modelo por período (sueldo base interno mensual).
 - **Áreas protegidas en la plataforma:** un módulo declara áreas con autorización propia (`ModuleSpec.protected_areas`); la capa central (`require_area_access`) exige un rol en el módulo y un permiso propio del área. Rendiciones › Empleados (`settlements.employee_finance`, viewer/operator/admin) requiere permiso explícito **también para el admin de plataforma**. Sin el área: 404 sin detalles y el menú no aparece. El admin de plataforma otorga y revoca (CLI `grant-module-role --module settlements.employee_finance`, `PUT /auth/access-grants`, `POST /auth/access-grants/revoke`) sin poder leer el área antes; `/auth/me` devuelve `areas`.
