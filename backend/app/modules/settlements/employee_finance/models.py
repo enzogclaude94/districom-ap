@@ -112,10 +112,10 @@ class EmployeeMovement(IdMixin, Base):
     description: Mapped[str] = mapped_column(Text)
     reference: Mapped[str | None] = mapped_column(String(100))
     operation_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey(f"{SCHEMA}.financial_operations.id", ondelete="RESTRICT"), unique=True
+        BigInteger, ForeignKey("settlements.financial_operations.id", ondelete="RESTRICT"), unique=True
     )
     reversal_operation_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey(f"{SCHEMA}.financial_operations.id", ondelete="RESTRICT"), unique=True
+        BigInteger, ForeignKey("settlements.financial_operations.id", ondelete="RESTRICT"), unique=True
     )
     reversed_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"))
     reversed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

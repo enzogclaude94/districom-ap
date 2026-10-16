@@ -226,6 +226,8 @@ def test_account_name_key_backfill() -> None:
             "devoluciones a terceros",
             "otros pagos",
             "cobranzas de boca",
+            "consumos de empleados",
+            "ajustes a empleados",
         ]
     finally:
         with engine.begin() as conn:
