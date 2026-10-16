@@ -51,7 +51,7 @@ from app.modules.settlements.ledger.rules import (
     leg_shape_error,
 )
 from app.platform.audit.service import record_change
-from app.platform.auth.access import has_module_access
+from app.platform.auth.access import has_area_access, has_module_access
 from app.platform.auth.models import User
 
 MODULE_KEY = "settlements"
@@ -144,7 +144,7 @@ def post_operation(
     rule = RULES.get(type)
     if rule is None:
         raise AppError(422, "unknown_operation_type", "El tipo de operación no existe.")
-    _require_role(actor, rule.min_role)
+    _require_role(actor, rule.min_role, rule.area)
     if type in DOCUMENT_TYPES and source is None:
         raise AppError(422, "source_required", "Esta operación se registra desde su documento.")
     return _post(
@@ -217,11 +217,14 @@ def reverse_document_operation(
     and every later end of day, so reversing a receipt whose cash already left the box is
     `insufficient_funds`. The caller must mark its domain row reversed in the same transaction; the
     database refuses the commit otherwise (migration 0010). A retry with the same request returns it.
+    An operation of a protected area (R8) is reversed by an admin of that area.
     """
-    _require_role(actor, REVERSAL_MIN_ROLE)
     original = db.get(FinancialOperation, operation_id)
     if original is None:
+        _require_role(actor, REVERSAL_MIN_ROLE)
         raise AppError(404, "operation_not_found", "La operación no existe.")
+    rule = RULES.get(original.type)
+    _require_role(actor, REVERSAL_MIN_ROLE, rule.area if rule is not None else None)
     if original.type not in REVERSIBLE_DOCUMENT_TYPES or (original.source_type, original.source_id) != (
         source.type,
         source.id,
@@ -271,7 +274,7 @@ def replace_operation(
     rule = RULES.get(type)
     if rule is None or type not in DOCUMENT_TYPES:
         raise AppError(422, "unknown_operation_type", "El tipo de operación no se puede reemplazar.")
-    _require_role(actor, rule.min_role)
+    _require_role(actor, rule.min_role, rule.area)
     description = (description or "").strip() or None
     new_legs = [Leg(leg.account_id, _money(leg.amount), leg.cheque_id) for leg in legs]
     fingerprint = command_fingerprint(
@@ -364,7 +367,7 @@ def withdraw_document_operation(
     rule = RULES.get(type)
     if rule is None or type not in WITHDRAWABLE_DOCUMENT_TYPES:
         raise AppError(422, "unknown_operation_type", "El tipo de operación no se puede retirar.")
-    _require_role(actor, rule.min_role)
+    _require_role(actor, rule.min_role, rule.area)
     original = db.get(FinancialOperation, original_id)
     if original is None:
         raise AppError(404, "operation_not_found", "La operación no existe.")
@@ -502,8 +505,13 @@ def _replay(existing: FinancialOperation, fingerprint: str) -> Posted:
     return Posted(existing, created=False)
 
 
-def _require_role(actor: User, min_role: str) -> None:
-    if not has_module_access(actor, MODULE_KEY, min_role):
+def _require_role(actor: User, min_role: str, area: str | None = None) -> None:
+    """A role in Rendiciones, or in the protected area that authorizes the operation (which already requires access
+    to Rendiciones and is never inherited by a platform admin when the area demands an explicit grant)."""
+    allowed = (
+        has_area_access(actor, area, min_role) if area is not None else has_module_access(actor, MODULE_KEY, min_role)
+    )
+    if not allowed:
         raise AppError(403, "forbidden", "No tenés permiso para registrar esta operación.")
 
 
@@ -614,6 +622,12 @@ def _lowest_balance_since(db: Session, account_id: int, since: date) -> tuple[De
     if later is not None and later.balance < lowest:
         lowest, on = Decimal(later.balance), later.day
     return lowest, on
+
+
+def lowest_balance_since(db: Session, account_id: int, since: date) -> tuple[Decimal, date]:
+    """Lowest end-of-day balance of the account on `since` or any later day, and that day: how much a debit dated
+    `since` may take. A read for previews; publishing checks it again under the account's lock."""
+    return _lowest_balance_since(db, account_id, since)
 
 
 def _find_by_request_id(db: Session, client_request_id: UUID) -> FinancialOperation | None:

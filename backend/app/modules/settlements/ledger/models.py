@@ -62,6 +62,11 @@ ACCOUNT_KINDS = (
     # to a cash box, not yet consolidated by the close of its settlement. Technical, never available money; only
     # the boca's remittances, the closes of its settlements and their reversals touch it.
     "OUTLET_ADVANCES",
+    # R8-2: counterparts of an employee's consumption («Consumos de empleados») and of an adjustment of the
+    # internal account («Ajustes a empleados»). Technical, never available money, outside the cash board; only their
+    # own movement and its reversal touch them.
+    "EMPLOYEE_CONSUMPTIONS",
+    "EMPLOYEE_ADJUSTMENTS",
 )
 # Accounts whose every leg is one cheque (`ledger_entries.cheque_id`), and only those.
 CHEQUE_KINDS = ("CHEQUE_PORTFOLIO", "CHEQUES_IN_TRANSIT")
@@ -80,6 +85,8 @@ TECHNICAL_KINDS = (
     "THIRD_PARTY_REFUNDS",
     "OTHER_PAYMENTS",
     "OUTLET_COLLECTIONS",
+    "EMPLOYEE_CONSUMPTIONS",
+    "EMPLOYEE_ADJUSTMENTS",
 )
 
 OPERATION_TYPES = (
@@ -110,7 +117,13 @@ OPERATION_TYPES = (
     "PAYMENT",
     # R7-3: cash a boca hands over to a cash box before its settlement closes; its document is the remittance.
     "OUTLET_REMITTANCE",
+    # R8-2: movements of an employee's internal account; the document of each is its employee movement.
+    "EMPLOYEE_CONSUMPTION",
+    "EMPLOYEE_ADVANCE",
+    "EMPLOYEE_ADJUSTMENT",
 )
+# Operations whose document is an employee movement (R8-2): exactly one each.
+EMPLOYEE_MOVEMENT_TYPES = ("EMPLOYEE_CONSUMPTION", "EMPLOYEE_ADVANCE", "EMPLOYEE_ADJUSTMENT")
 CHEQUE_DOCUMENT_TYPES = ("CHEQUE_DEPOSIT", "CHEQUE_CREDIT", "CHEQUE_REJECTION", "CHEQUE_RETURN")
 # Operations whose description is the mandatory reason.
 REASON_REQUIRED_TYPES = ("ADJUSTMENT", "REVERSAL", "PENDING_WRITE_OFF", "CHEQUE_REJECTION", "CHEQUE_RETURN")
@@ -230,6 +243,14 @@ class FinancialOperation(IdMixin, Base):
             "source_id",
             unique=True,
             postgresql_where=text("type = 'OUTLET_REMITTANCE'"),
+        ),
+        # An employee movement has exactly one operation (R8-2).
+        Index(
+            "uq_financial_operations_employee_movement",
+            "source_type",
+            "source_id",
+            unique=True,
+            postgresql_where=text(f"type IN ({_in(EMPLOYEE_MOVEMENT_TYPES)})"),
         ),
         {"schema": SCHEMA},
     )

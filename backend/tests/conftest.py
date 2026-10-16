@@ -27,6 +27,7 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 
 # Tables emptied after each test that uses the database.
 TRUNCATED_TABLES = (
+    "settlements.employee_movements",
     "settlements.employee_compensation_terms",
     "vehicles",
     "third_parties",
@@ -69,7 +70,7 @@ TRUNCATED_TABLES = (
     "settlements.expense_categories",
     "settlements.settlements",
 )
-# Rendiciones accounts seeded by migrations 0005, 0008-0010, 0012, 0019 and 0023; tests may add others,
+# Rendiciones accounts seeded by migrations 0005, 0008-0010, 0012, 0019, 0023 and 0026; tests may add others,
 # removed afterwards.
 # The official bank catalog as migration 0011 seeds it (JSON), restored after each test.
 SEEDED_BANKS = "[]"
@@ -92,6 +93,8 @@ SEEDED_ACCOUNTS = (
     "third_party_refunds",
     "other_payments",
     "outlet_collections",
+    "employee_consumptions",
+    "employee_adjustments",
 )
 
 

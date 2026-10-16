@@ -5,6 +5,7 @@ from decimal import Decimal
 
 import pytest
 
+from app.modules.settlements.employee_finance.access import AREA
 from app.modules.settlements.ledger.rules import RULES, leg_shape_error
 from app.modules.settlements.ledger.service import Leg, SourceRef, command_fingerprint
 
@@ -86,14 +87,44 @@ def test_fingerprint_changes_with_the_command(change: dict[str, object]) -> None
         ("PAYMENT", ["CHEQUE_PORTFOLIO", "MERCHANDISE_PAYMENTS"], [1, -1], False),
         ("PAYMENT", ["CHEQUES_IN_TRANSIT", "MERCHANDISE_PAYMENTS"], [-1, 1], False),
         ("PAYMENT", ["CASH_BOX", "UNCOLLECTIBLE"], [-1, 1], False),
+        # R8-2: movements of an employee's internal account, one internal account and one counterpart each.
+        ("EMPLOYEE_CONSUMPTION", ["EMPLOYEE", "EMPLOYEE_CONSUMPTIONS"], [1, -1], True),
+        ("EMPLOYEE_CONSUMPTION", ["EMPLOYEE", "EMPLOYEE_CONSUMPTIONS"], [-1, 1], False),
+        ("EMPLOYEE_CONSUMPTION", ["EMPLOYEE", "EMPLOYEE", "EMPLOYEE_CONSUMPTIONS"], [1, 1, -1], False),
+        ("EMPLOYEE_CONSUMPTION", ["EMPLOYEE", "EXPENSE"], [1, -1], False),
+        ("EMPLOYEE_ADVANCE", ["CASH_BOX", "EMPLOYEE"], [-1, 1], True),
+        ("EMPLOYEE_ADVANCE", ["BANK", "EMPLOYEE"], [-1, 1], True),
+        ("EMPLOYEE_ADVANCE", ["CASH_BOX", "EMPLOYEE"], [1, -1], False),
+        ("EMPLOYEE_ADVANCE", ["CASH_BOX", "BANK", "EMPLOYEE"], [-1, -1, 1], False),
+        ("EMPLOYEE_ADVANCE", ["CHEQUE_PORTFOLIO", "EMPLOYEE"], [-1, 1], False),
+        ("EMPLOYEE_ADVANCE", ["EMPLOYEE_CONSUMPTIONS", "EMPLOYEE"], [-1, 1], False),
+        ("EMPLOYEE_ADJUSTMENT", ["EMPLOYEE", "EMPLOYEE_ADJUSTMENTS"], [1, -1], True),
+        ("EMPLOYEE_ADJUSTMENT", ["EMPLOYEE", "EMPLOYEE_ADJUSTMENTS"], [-1, 1], True),
+        ("EMPLOYEE_ADJUSTMENT", ["EMPLOYEE", "ADJUSTMENT"], [1, -1], False),
+        ("EMPLOYEE_ADJUSTMENT", ["CASH_BOX", "EMPLOYEE_ADJUSTMENTS"], [1, -1], False),
     ],
 )
 def test_leg_shapes(type: str, kinds: list[str], signs: list[int], ok: bool) -> None:
     assert (leg_shape_error(RULES[type], kinds, signs) is None) is ok
 
 
+def test_employee_movements_are_authorized_by_the_area() -> None:
+    """R8-2: a role in Rendiciones never authorizes them; the protected area does (ADR 010)."""
+    assert {t for t, rule in RULES.items() if rule.area is not None} == {
+        "EMPLOYEE_CONSUMPTION",
+        "EMPLOYEE_ADVANCE",
+        "EMPLOYEE_ADJUSTMENT",
+    }
+    assert {t: RULES[t].min_role for t in RULES if RULES[t].area is not None} == {
+        "EMPLOYEE_CONSUMPTION": "operator",
+        "EMPLOYEE_ADVANCE": "admin",
+        "EMPLOYEE_ADJUSTMENT": "admin",
+    }
+    assert {rule.area for rule in RULES.values() if rule.area is not None} == {AREA}
+
+
 def test_adjustments_and_partner_movements_need_admin() -> None:
-    assert {t for t, rule in RULES.items() if rule.min_role == "admin"} == {
+    assert {t for t, rule in RULES.items() if rule.min_role == "admin" and rule.area is None} == {
         "OPENING_BALANCE",
         "OWNER_CONTRIBUTION",
         "OWNER_WITHDRAWAL",
@@ -103,7 +134,7 @@ def test_adjustments_and_partner_movements_need_admin() -> None:
         "CHEQUE_OWNER_CONTRIBUTION",
         "CHEQUE_RETURN",
     }
-    assert {t for t, rule in RULES.items() if rule.min_role == "operator"} == {
+    assert {t for t, rule in RULES.items() if rule.min_role == "operator" and rule.area is None} == {
         "CASH_TRANSFER",
         "BANK_DEPOSIT",
         "BANK_WITHDRAWAL",
