@@ -20,7 +20,9 @@ export type AccountKind =
   | "THIRD_PARTY_REFUNDS"
   | "OTHER_PAYMENTS"
   | "OUTLET_COLLECTIONS"
-  | "OUTLET_ADVANCES";
+  | "OUTLET_ADVANCES"
+  | "EMPLOYEE_CONSUMPTIONS"
+  | "EMPLOYEE_ADJUSTMENTS";
 
 export type OperationType =
   | "OPENING_BALANCE"
@@ -43,6 +45,9 @@ export type OperationType =
   | "PAYMENT"
   | "OUTLET_REMITTANCE"
   | "REVERSAL"
+  | "EMPLOYEE_CONSUMPTION"
+  | "EMPLOYEE_ADVANCE"
+  | "EMPLOYEE_ADJUSTMENT"
   /** An employee finance operation (R8) shown to someone without the area: only date, amount and box (ADR 010). */
   | "EMPLOYEE_RESERVED";
 
