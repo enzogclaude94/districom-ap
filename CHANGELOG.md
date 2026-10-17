@@ -4,6 +4,9 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Changed — R8‑2 DONE
+- **R8‑2 DONE** (aprobada por Enzo el 2026-10-17 con sus desvíos; PR #40 mergeado `a6be05c`; `0026` congelada). **R8‑3 autorizada** (préstamos, cuotas y postergación, `0027`): sin interés; la primera cuota puede vencer el mismo mes del préstamo, nunca antes de su fecha.
+
 ### Added — Empleados: consumos, adelantos y ajustes (R8‑2)
 - **Movimientos de la cuenta interna** (`0026`, documento `employee_movements`), registrados desde la ficha del empleado con una confirmación calculada por el backend (efecto en palabras, saldo antes y después, patas del ledger):
   - **Consumo** (operator o admin del área): `EMPLOYEE` +X · «Consumos de empleados» −X; solo importe, sin stock.

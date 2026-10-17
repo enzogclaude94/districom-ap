@@ -5,7 +5,7 @@
 - **Supersede parcialmente ADR 007** en una sola mención: donde ADR 007 dice «liquidación semanal de empleados», vale el modelo **por período** de este ADR (§4). ADR 007 no se edita.
 - Propuesta de origen: `PROPUESTA_R8_CUENTA_INTERNA_Y_LIQUIDACION_DE_EMPLEADOS.md` (2026-10-14).
 
-Este ADR separa lo **DECIDIDO** (vale para todo R8) de lo **IMPLEMENTADO** (lo que ya existe en el código). Al cierre de R8‑1 está implementado: el área protegida con permiso explícito, la privacidad de Cajas, la condición salarial (`0025`) y la cuenta interna en solo lectura. R8‑2 (en revisión) agrega consumos, adelantos y ajustes (`0026`, §3.1). Nada de R8‑3 a R8‑5 existe todavía.
+Este ADR separa lo **DECIDIDO** (vale para todo R8) de lo **IMPLEMENTADO** (lo que ya existe en el código). Al cierre de R8‑1 está implementado: el área protegida con permiso explícito, la privacidad de Cajas, la condición salarial (`0025`) y la cuenta interna en solo lectura. R8‑2 (aprobada) agrega consumos, adelantos y ajustes (`0026`, §3.1). Nada de R8‑3 a R8‑5 existe todavía.
 
 ## Contexto
 R8 cubre la **relación económica interna** entre DistriCom y cada empleado: sueldo, bonos, incentivos, faltantes y sobrantes ya asignados, consumos, adelantos, préstamos y cuotas, ajustes y el pago de la liquidación. **No es RRHH:** quedan afuera asistencia, vacaciones, licencias, ART, cargas sociales, recibos legales, AFIP/ARCA, convenio y contabilidad de nómina.
@@ -43,7 +43,7 @@ Antes de R8 la cuenta interna `EMPLOYEE` (una por empleado, R2) ya existía y la
 - **La cuenta es neta.** Cualquier desglose (qué es préstamo, qué está a pagar) sale de **documentos + aplicaciones**, nunca de descomponer el saldo con aritmética.
 - **R8‑1:** `GET /settlements/employee-finance/employees` (saldo, lectura, condición vigente y próxima), `GET /employees/{id}` y `GET /employees/{id}/movements` («Movimientos de la cuenta interna»): cada pata `EMPLOYEE` con fecha, importe con signo, su origen (faltante, sobrante, corrección de rendición, incobrable asignado y su reverso) y su documento (rendición de reparto o de boca, pendiente de cobro). Un reverso apunta al documento de la operación que revierte. Se lee del ledger y de los documentos; no se copia nada. Todavía no hay aplicaciones: la pantalla no habla de «aplicado/pendiente».
 
-#### 3.1 Consumos, adelantos y ajustes — IMPLEMENTADO (R8‑2, `0026`, en revisión)
+#### 3.1 Consumos, adelantos y ajustes — IMPLEMENTADO (R8‑2, `0026`)
 - **Documento `employee_movements`**, uno por movimiento: `kind` (`CONSUMPTION`/`ADVANCE`/`ADJUSTMENT`), `direction` (`CHARGE`/`CREDIT`, solo ajustes), empleado y su cuenta `EMPLOYEE`, `business_date`, `amount > 0`, `employee_amount` (la pata `EMPLOYEE` con signo, para que R8‑4 la identifique sin recalcular), `funding_account_id` (solo adelantos), descripción (o motivo) obligatoria, referencia opcional, operación, reverso (operación, quién, cuándo, motivo), idempotencia (`client_request_id`, `request_fingerprint`), `created_by`, `created_at`. Sin `DELETE`; nada financiero cambia nunca; una corrección es reverso + documento nuevo.
 - **Operaciones** (todas por `ledger/service.py`, regla con `area = settlements.employee_finance`):
 
@@ -99,7 +99,7 @@ Antes de R8 la cuenta interna `EMPLOYEE` (una por empleado, R2) ya existía y la
 | Fase | Contenido | Migración | Estado |
 |---|---|---|---|
 | R8‑1 | Área protegida con permiso explícito, privacidad de Cajas, condición salarial, cuenta interna en solo lectura | `0025` | IMPLEMENTADO (aprobado por Enzo el 2026-10-16; `0025` congelada) |
-| R8‑2 | Consumos, adelantos y ajustes | `0026` | IMPLEMENTADO (en revisión de Enzo) |
+| R8‑2 | Consumos, adelantos y ajustes | `0026` | IMPLEMENTADO (aprobado por Enzo el 2026-10-17; `0026` congelada) |
 | R8‑3 | Préstamos, cuotas y postergación | `0027` | DECIDIDO |
 | R8‑4 | Liquidación: períodos, líneas, aplicaciones, vista previa, cierre, snapshot, reapertura | `0028` | DECIDIDO |
 | R8‑5 | Pago `EMPLOYEE_PAYOUT`, consolidación y E2E de punta a punta | `0029` | DECIDIDO |

@@ -45,7 +45,7 @@ DistriCom es una plataforma modular (ADR 006). Este roadmap tiene tres carriles:
 | R5 | Combustible y vehículos | **DONE** (R5‑1 a R5‑4; `0014`–`0017` congeladas) | R2 |
 | R6 | Pagos a proveedores y terceros | **DONE** (2026-10-11) | R1 · R4 |
 | R7 | Boca de expendio | **DONE** (2026-10-14; R7‑1 a R7‑4, ADR 009) | R2–R5 |
-| R8 | Cuenta interna y liquidación de empleados | IN_PROGRESS (arquitectura aprobada 2026-10-15, ADR 010; R8‑1 DONE, R8‑2 en revisión) | R1 · R2 |
+| R8 | Cuenta interna y liquidación de empleados | IN_PROGRESS (arquitectura aprobada 2026-10-15, ADR 010; R8‑1 y R8‑2 DONE, R8‑3 en curso) | R1 · R2 |
 | R9 | Endurecimiento | PLANNED | todas |
 
 Cada fase empieza solo con aprobación explícita de Enzo y termina con un informe y una pausa para revisión.
@@ -251,8 +251,8 @@ R7 **DONE** el 2026-10-14: aprobada por Enzo (R7‑1 a R7‑4: maestro de bocas,
 | Fase | Contenido | Estado |
 |---|---|---|
 | R8‑1 | Área protegida, privacidad de Cajas, condición salarial (`0025`), cuenta interna en solo lectura | DONE (aprobada por Enzo el 2026-10-16 con sus desvíos; PR #39 mergeado `c88377e`; `0025` congelada) |
-| R8‑2 | Consumos, adelantos y ajustes (`0026`) | IN_REVIEW (autorizada 2026-10-16; ajustes sin categorías, motivo libre; implementada, espera la aprobación de Enzo) |
-| R8‑3 | Préstamos, cuotas y postergación (`0027`) | PLANNED |
+| R8‑2 | Consumos, adelantos y ajustes (`0026`) | DONE (aprobada por Enzo el 2026-10-17 con sus desvíos; PR #40 mergeado `a6be05c`; `0026` congelada) |
+| R8‑3 | Préstamos, cuotas y postergación (`0027`) | IN_PROGRESS (autorizada 2026-10-17; sin interés; primera cuota desde la fecha del préstamo, también el mismo mes) |
 | R8‑4 | Liquidación interna: períodos, líneas, aplicaciones, vista previa, cierre, snapshot, reapertura (`0028`) | PLANNED |
 | R8‑5 | Pago `EMPLOYEE_PAYOUT`, consolidación y E2E de punta a punta (`0029`) | PLANNED |
 
