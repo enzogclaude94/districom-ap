@@ -80,9 +80,13 @@ Origin = Literal[
     "CONSUMPTION_REVERSAL",
     "ADVANCE_REVERSAL",
     "ADJUSTMENT_REVERSAL",
+    "LOAN",  # préstamo (R8-3)
+    "LOAN_REVERSAL",
     "OTHER",
 ]
-DocumentKind = Literal["DELIVERY_SETTLEMENT", "OUTLET_SETTLEMENT", "PENDING_COLLECTION", "EMPLOYEE_MOVEMENT"]
+DocumentKind = Literal[
+    "DELIVERY_SETTLEMENT", "OUTLET_SETTLEMENT", "PENDING_COLLECTION", "EMPLOYEE_MOVEMENT", "EMPLOYEE_LOAN"
+]
 
 
 class AccountMovementOut(BaseModel):
@@ -96,7 +100,7 @@ class AccountMovementOut(BaseModel):
     document_id: int | None
     document_date: date | None
     document_number: int | None  # settlement sequence of its day
-    # Employee movements (R8-2): what it was and whether the whole document was reversed since.
+    # Employee movements (R8-2) and loans (R8-3): what it was and whether the whole document was reversed since.
     description: str | None = None
     document_reversed: bool | None = None
     created_at: datetime
@@ -195,3 +199,112 @@ class EmployeeMovementOut(BaseModel):
     created_at: datetime
     created_by_name: str
     legs: list[MovementLegOut]
+
+
+# --- loans, installments and deferrals (R8-3) --------------------------------------------------------
+
+InstallmentStatus = Literal["SCHEDULED", "DEFERRED", "CANCELLED"]
+InstallmentCount = Annotated[int, Field(ge=1, le=120)]
+
+
+class LoanInstallmentIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    due_on: date
+    amount: Amount
+
+
+class _LoanTermsIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    business_date: date
+    principal: Amount
+    funding_account_id: int  # an active cash box or bank
+    installment_count: InstallmentCount
+    first_due_on: date
+    # The schedule as confirmed (dates and amounts maybe edited); None: the default one (equal, monthly).
+    installments: Annotated[list[LoanInstallmentIn] | None, Field(default=None, max_length=120)] = None
+
+
+class LoanPreviewIn(_LoanTermsIn):
+    pass
+
+
+class LoanIn(_LoanTermsIn):
+    # Generated once per user action and resent on retries.
+    client_request_id: UUID
+    description: Annotated[str | None, Field(default=None, max_length=500)] = None
+    reference: Reference = None
+
+
+class ScheduledInstallmentOut(BaseModel):
+    number: int
+    due_on: date
+    amount: Money
+
+
+class LoanPreviewOut(BaseModel):
+    principal: Money
+    business_date: date
+    funding_account_id: int
+    funding_account_name: str
+    balance_before: Money  # internal account
+    balance_after: Money
+    legs: list[MovementLegOut]
+    installments: list[ScheduledInstallmentOut]
+    total: Money  # what the installments add up to: always the principal
+
+
+class LoanInstallmentOut(BaseModel):
+    id: int
+    number: int
+    due_on: date
+    amount: Money
+    status: InstallmentStatus
+    # The DEFERRED installment this one replaces (all or part of it).
+    deferred_from_id: int | None
+    deferred_from_number: int | None
+    # DEFERRED: who, when, why, and what replaced it.
+    deferred_reason: str | None
+    deferred_at: datetime | None
+    deferred_by_name: str | None
+    replaced_by: list[ScheduledInstallmentOut]
+    created_at: datetime
+
+
+class EmployeeLoanRow(BaseModel):
+    id: int
+    business_date: date
+    principal: Money
+    installment_count: int
+    status: Literal["ACTIVE", "REVERSED"]
+    balance: Money  # principal while in effect (R8-4: minus the installments a payroll applied); 0 reversed
+    scheduled_count: int
+    next_due_on: date | None
+    description: str | None
+
+
+class EmployeeLoanOut(EmployeeLoanRow):
+    employee_id: int
+    employee_name: str
+    funding_account_id: int
+    funding_account_name: str
+    first_due_on: date
+    reference: str | None
+    operation_id: int
+    reversal_operation_id: int | None
+    reversed_at: datetime | None
+    reversed_by_name: str | None
+    reversal_reason: str | None
+    created_at: datetime
+    created_by_name: str
+    legs: list[MovementLegOut]
+    installments: list[LoanInstallmentOut]  # every one, by number: in effect, deferred (history) and cancelled
+
+
+class LoanDeferralIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    client_request_id: UUID
+    reason: Reason
+    replacements: Annotated[list[LoanInstallmentIn], Field(min_length=1, max_length=24)]
