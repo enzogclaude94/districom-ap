@@ -50,7 +50,7 @@ export function movementErrorView(
   return deliveryErrorView(error, accountName);
 }
 
-function Problem({ children }: { children: ReactNode }) {
+export function Problem({ children }: { children: ReactNode }) {
   return (
     <div
       role="alert"

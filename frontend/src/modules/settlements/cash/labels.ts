@@ -24,6 +24,7 @@ export const OPERATION_LABELS: Record<OperationType, string> = {
   EMPLOYEE_CONSUMPTION: "Consumo de empleado",
   EMPLOYEE_ADVANCE: "Adelanto a empleado",
   EMPLOYEE_ADJUSTMENT: "Ajuste a empleado",
+  EMPLOYEE_LOAN: "Préstamo a empleado",
   EMPLOYEE_RESERVED: "Movimiento de empleado (reservado)",
 };
 
@@ -44,6 +45,7 @@ export const DOCUMENT_OPERATION_TYPES: readonly OperationType[] = [
   "EMPLOYEE_CONSUMPTION",
   "EMPLOYEE_ADVANCE",
   "EMPLOYEE_ADJUSTMENT",
+  "EMPLOYEE_LOAN",
   // Reserved (ADR 010): whoever sees it this way has no area to correct it from.
   "EMPLOYEE_RESERVED",
 ];
@@ -86,6 +88,7 @@ const SOURCE_LABELS: Record<string, string> = {
   payment: "Pago",
   outlet_remittance: "Entrega parcial de boca",
   employee_movement: "Movimiento de empleado",
+  employee_loan: "Préstamo a empleado",
 };
 
 /** Where an operation came from: entered by hand on this screen, or a document such as a settlement. */
@@ -107,6 +110,7 @@ const DOCUMENT_SCREENS: Record<string, string> = {
   expense: "/rendiciones/cajas/gastos",
   payment: "/rendiciones/pagos",
   employee_movement: "/rendiciones/empleados/movimientos",
+  employee_loan: "/rendiciones/empleados/prestamos",
 };
 
 export function sourceHref(sourceType: string | null, sourceId: number | null): string | null {

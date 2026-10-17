@@ -25,8 +25,11 @@ export type MovementOrigin =
   | "CONSUMPTION_REVERSAL"
   | "ADVANCE_REVERSAL"
   | "ADJUSTMENT_REVERSAL"
+  | "LOAN"
+  | "LOAN_REVERSAL"
   | "OTHER";
-export type DocumentKind = "DELIVERY_SETTLEMENT" | "OUTLET_SETTLEMENT" | "PENDING_COLLECTION" | "EMPLOYEE_MOVEMENT";
+export type DocumentKind =
+  "DELIVERY_SETTLEMENT" | "OUTLET_SETTLEMENT" | "PENDING_COLLECTION" | "EMPLOYEE_MOVEMENT" | "EMPLOYEE_LOAN";
 
 export interface CompensationTerm {
   id: number;
@@ -69,7 +72,7 @@ export interface AccountMovement {
   document_id: number | null;
   document_date: string | null;
   document_number: number | null;
-  /** Employee movements (R8-2): what it was, and whether the whole document was reversed since. */
+  /** Employee movements (R8-2) and loans (R8-3): what it was, and whether the whole document was reversed since. */
   description?: string | null;
   document_reversed?: boolean | null;
   created_at: string;
@@ -120,6 +123,82 @@ export interface EmployeeMovement {
   created_at: string;
   created_by_name: string;
   legs: MovementLeg[];
+}
+
+/** R8-3: an interest-free loan, its schedule and the deferrals of its installments. */
+export type LoanStatus = "ACTIVE" | "REVERSED";
+/** SCHEDULED in effect; DEFERRED history (replaced by new installments); CANCELLED by the loan's reversal. */
+export type InstallmentStatus = "SCHEDULED" | "DEFERRED" | "CANCELLED";
+
+export interface ScheduledInstallment {
+  number: number;
+  due_on: string;
+  amount: string;
+}
+
+export interface LoanPreview {
+  principal: string;
+  business_date: string;
+  funding_account_id: number;
+  funding_account_name: string;
+  balance_before: string;
+  balance_after: string;
+  legs: MovementLeg[];
+  installments: ScheduledInstallment[];
+  total: string;
+}
+
+export interface LoanInstallment extends ScheduledInstallment {
+  id: number;
+  status: InstallmentStatus;
+  deferred_from_id: number | null;
+  deferred_from_number: number | null;
+  deferred_reason: string | null;
+  deferred_at: string | null;
+  deferred_by_name: string | null;
+  replaced_by: ScheduledInstallment[];
+  created_at: string;
+}
+
+export interface EmployeeLoanRow {
+  id: number;
+  business_date: string;
+  principal: string;
+  installment_count: number;
+  status: LoanStatus;
+  /** From the loan, never from the internal account: the principal while in effect, 0 once reversed. */
+  balance: string;
+  scheduled_count: number;
+  next_due_on: string | null;
+  description: string | null;
+}
+
+export interface EmployeeLoan extends EmployeeLoanRow {
+  employee_id: number;
+  employee_name: string;
+  funding_account_id: number;
+  funding_account_name: string;
+  first_due_on: string;
+  reference: string | null;
+  operation_id: number;
+  reversal_operation_id: number | null;
+  reversed_at: string | null;
+  reversed_by_name: string | null;
+  reversal_reason: string | null;
+  created_at: string;
+  created_by_name: string;
+  legs: MovementLeg[];
+  installments: LoanInstallment[];
+}
+
+export interface LoanTerms {
+  business_date: string;
+  principal: string;
+  funding_account_id: number;
+  installment_count: number;
+  first_due_on: string;
+  /** The schedule as confirmed; omitted: the default one (equal monthly installments). */
+  installments?: { due_on: string; amount: string }[];
 }
 
 export interface Page<T> {
@@ -175,6 +254,12 @@ export const employeeFinanceApi = {
   /** A write of R8-2 (register, reverse) as `useWriteAction` sends it. */
   write: (path: string, body: Record<string, unknown>) => post<EmployeeMovement>(path, body),
   movement: (movementId: number) => apiFetch<EmployeeMovement>(`${BASE}/employee-movements/${movementId}`),
+  previewLoan: (employeeId: number, body: LoanTerms) =>
+    post<LoanPreview>(`/employees/${employeeId}/loans/preview`, body),
+  /** A write of R8-3 (give, defer, reverse): each answers the loan as it stands. */
+  writeLoan: (path: string, body: Record<string, unknown>) => post<EmployeeLoan>(path, body),
+  loans: (employeeId: number) => apiFetch<EmployeeLoanRow[]>(`${BASE}/employees/${employeeId}/loans`),
+  loan: (loanId: number) => apiFetch<EmployeeLoan>(`${BASE}/loans/${loanId}`),
 };
 
 export const employeeFinanceQueryKey = ["settlements", "employee-finance"] as const;
