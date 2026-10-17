@@ -4,6 +4,15 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Added — Empleados: préstamos, cuotas y postergación (R8‑3)
+- **Préstamo a empleado** (`0027`, documentos `employee_loans` y `employee_loan_installments`), sin interés, desde la ficha del empleado («Dar préstamo», admin del área y operator de Rendiciones): fecha, importe, caja o banco, cantidad de cuotas, primera fecha (por defecto a un mes, puede ser el mismo mes, nunca antes del préstamo). Segundo paso con las patas (Caja −P · Cuenta interna +P) y el cronograma calculado por el backend (cuotas iguales, la última absorbe el redondeo), editable antes de confirmar; tiene que sumar exacto.
+- **Operación `EMPLOYEE_LOAN`**: una sola pata en la cuenta interna; fondos como un adelanto (caja nunca negativa, banco sin descubierto, en su fecha y después).
+- **Postergación** de una cuota programada (admin del área, motivo obligatorio, sin movimiento de dinero): queda «Postergada» como historia y la reemplazan una o más cuotas nuevas que suman exacto su importe; cadenas 2 → 4 → 6. Página del préstamo con cronograma, «Postergar» («Importe reemplazado / Nuevo cronograma») e historia.
+- **Reverso** del préstamo entero (admin del área y operator de Rendiciones), con motivo y la fecha original: el dinero vuelve a la caja o el banco sin control de fondos, las cuotas programadas pasan a «Cancelada» y las postergadas quedan como estaban.
+- **Estado y saldo derivados:** «Vigente» o «Revertido»; saldo del préstamo = capital (0 revertido), nunca desde la cuenta interna. Cuotas «Programada», «Postergada», «Cancelada»: nada se lee pagado ni aplicado (R8‑4).
+- **Cajas y cuenta interna:** sin el área, «Movimiento de empleado (reservado)»; con el área, «Préstamo a empleado» con enlace. La cuenta interna muestra «Préstamo» (+P, «Le suma deuda», «Ver préstamo n.º N») y «Reverso de préstamo».
+- **Base de datos:** triggers de forma, inmutabilidad, transiciones de cuota, sin `DELETE`, sin ciclos, préstamo ↔ operación ↔ cronograma exactos al commit (vigentes = capital); downgrade protegido.
+
 ### Changed — R8‑2 DONE
 - **R8‑2 DONE** (aprobada por Enzo el 2026-10-17 con sus desvíos; PR #40 mergeado `a6be05c`; `0026` congelada). **R8‑3 autorizada** (préstamos, cuotas y postergación, `0027`): sin interés; la primera cuota puede vencer el mismo mes del préstamo, nunca antes de su fecha.
 

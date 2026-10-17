@@ -5,7 +5,7 @@
 - **Supersede parcialmente ADR 007** en una sola mención: donde ADR 007 dice «liquidación semanal de empleados», vale el modelo **por período** de este ADR (§4). ADR 007 no se edita.
 - Propuesta de origen: `PROPUESTA_R8_CUENTA_INTERNA_Y_LIQUIDACION_DE_EMPLEADOS.md` (2026-10-14).
 
-Este ADR separa lo **DECIDIDO** (vale para todo R8) de lo **IMPLEMENTADO** (lo que ya existe en el código). Al cierre de R8‑1 está implementado: el área protegida con permiso explícito, la privacidad de Cajas, la condición salarial (`0025`) y la cuenta interna en solo lectura. R8‑2 (aprobada) agrega consumos, adelantos y ajustes (`0026`, §3.1). Nada de R8‑3 a R8‑5 existe todavía.
+Este ADR separa lo **DECIDIDO** (vale para todo R8) de lo **IMPLEMENTADO** (lo que ya existe en el código). Al cierre de R8‑1 está implementado: el área protegida con permiso explícito, la privacidad de Cajas, la condición salarial (`0025`) y la cuenta interna en solo lectura. R8‑2 (aprobada) agrega consumos, adelantos y ajustes (`0026`, §3.1). R8‑3 (en revisión) agrega préstamos, cuotas y postergación (`0027`, §3.2). Nada de R8‑4 ni R8‑5 existe todavía.
 
 ## Contexto
 R8 cubre la **relación económica interna** entre DistriCom y cada empleado: sueldo, bonos, incentivos, faltantes y sobrantes ya asignados, consumos, adelantos, préstamos y cuotas, ajustes y el pago de la liquidación. **No es RRHH:** quedan afuera asistencia, vacaciones, licencias, ART, cargas sociales, recibos legales, AFIP/ARCA, convenio y contabilidad de nómina.
@@ -65,6 +65,22 @@ Antes de R8 la cuenta interna `EMPLOYEE` (una por empleado, R2) ya existía y la
 - **Base de datos:** CHECKs de forma; trigger de alta (cuenta del empleado, fecha, financiamiento válido); inmutabilidad; `forbid_delete`; triggers diferidos que exigen que documento y operación sean exactamente el uno del otro (patas, tipo, fecha, fuente, reverso exacto). La migración se niega a subir si una cuenta interna fue movida por otro tipo de operación, y a bajar si hay movimientos.
 - **Pantallas:** en la ficha del empleado, «Registrar consumo», «Entregar adelanto» y «Registrar ajuste», cada uno con confirmación calculada por el backend (efecto en palabras, saldo antes y después, patas); página del movimiento con su asiento y «Revertir». La cuenta interna lista «Consumo», «Adelanto», «Ajuste en contra», «Ajuste a favor» y sus reversos, con la descripción y la marca «Revertido».
 
+#### 3.2 Préstamos, cuotas y postergación — IMPLEMENTADO (R8‑3, `0027`, en revisión)
+- **Documento `employee_loans`**, uno por préstamo: empleado y su cuenta `EMPLOYEE`, `business_date`, `principal > 0` (**sin interés**: no hay tasa, interés, CFT ni punitorios), `funding_account_id` (caja o banco activo), `installment_count` (1–120), `first_due_on ≥ business_date`, descripción y referencia opcionales, operación, reverso (operación, quién, cuándo, motivo), idempotencia, autor. Sin `DELETE`; nada financiero cambia nunca.
+- **Operación `EMPLOYEE_LOAN`**: Caja o Banco −P · `EMPLOYEE` +P, una sola vez (una pata en la cuenta interna, nunca una por cuota). Admin del área **y** operator de Rendiciones (D9, como un adelanto). Fondos como un adelanto: la caja nunca negativa ese día ni después; el banco no entra en descubierto ni lo profundiza.
+- **Cuotas `employee_loan_installments`**: `number` correlativo por préstamo (nunca se reusa ni cambia), `due_on`, `amount > 0`, `status` `SCHEDULED`/`DEFERRED`/`CANCELLED`, `deferred_from_id` (la cuota postergada que reemplaza), motivo, quién y cuándo de la postergación, y su `client_request_id`/huella. **No mueven dinero.**
+- **Cronograma inicial:** N cuotas iguales, mensuales desde la primera fecha (mismo día o el último de un mes más corto), la última absorbe el redondeo. La UI propone la primera a un mes del préstamo; puede vencer el mismo mes y nunca antes del préstamo. Antes de confirmar el admin puede cambiar fechas e importes: tienen que sumar exacto, ir en orden y no vencer antes del préstamo. Confirmado, es inmutable.
+- **Postergación** (admin del área, motivo obligatorio, sin movimiento de ledger): una cuota `SCHEDULED` pasa a `DEFERRED` (historia: conserva número, fecha e importe) y nacen una o más cuotas `SCHEDULED` con números nuevos, `deferred_from_id` = la postergada, que suman **exacto** su importe y vencen desde la fecha del préstamo. Una `DEFERRED` no cambia más; para moverla otra vez se posterga su reemplazo (cadena 2 → 4 → 6).
+- **Invariante:** mientras el préstamo está vigente, las cuotas `SCHEDULED` suman su capital (las `DEFERRED` son historia y las `CANCELLED` no cuentan).
+- **Estado y saldo derivados:** `ACTIVE` o `REVERSED`; ningún estado financiero editable ni «pagado/cancelado por saldo». **Saldo del préstamo = capital** mientras está vigente (0 revertido); R8‑4 le restará las cuotas aplicadas. Nunca se deriva del saldo de la cuenta interna.
+- **Cuotas en R8‑3:** se leen «Programada», «Postergada» o «Cancelada»; nunca «Pagada», «Descontada» ni «Aplicada». R8‑4 aplicará una cuota entera.
+- **Reverso** (admin del área + operator de Rendiciones, motivo, préstamo entero): `REVERSAL` exacto en la fecha original (Caja +P · `EMPLOYEE` −P), sin control de fondos; en la misma transacción las cuotas `SCHEDULED` pasan a `CANCELLED` y las `DEFERRED` no se tocan. R8‑4 lo impedirá si una liquidación aplicó cuotas (`loans.applied_installments`, hoy siempre 0).
+- **Empleado inactivo:** como un adelanto, solo un préstamo con fecha anterior a hoy (documenta el pasado).
+- **Privacidad:** todo con el área (404 sin ella). En Cajas, sin el área, el préstamo y su reverso son «Movimiento de empleado (reservado)» (fecha, importe, caja, sentido): sin empleado, préstamo, cronograma, referencia ni descripción.
+- **Cuenta interna:** origen «Préstamo» (+P, «Le suma deuda») con «Ver préstamo n.º N»; su reverso, «Reverso de préstamo».
+- **Concurrencia:** alta con el orden de R8‑2 (empleado `FOR SHARE` → cuenta `EMPLOYEE` → caja o banco → ledger); postergación y reverso toman primero el préstamo (`FOR UPDATE`), así se serializan entre sí.
+- **Base de datos:** CHECKs de forma; triggers de alta e inmutabilidad del préstamo y de la cuota (número siguiente, fecha ≥ préstamo, cuota inicial solo antes de publicar, reemplazo solo de una `DEFERRED` del mismo préstamo, transiciones `SCHEDULED → DEFERRED` con préstamo vigente y `SCHEDULED → CANCELLED` solo con préstamo revertido); `deferred_from_id < id` (sin ciclos); `forbid_delete`; trigger diferido `verify_employee_loan` (operación y reverso exactos, cronograma inicial = cantidad y capital, primera fecha, en orden, cada postergada reemplazada por exactamente su importe, vigentes = capital, revertido sin programadas). `check_employee_leg` suma `EMPLOYEE_LOAN`. El downgrade se niega si hay préstamos.
+
 ### 4. Modelo por período — DECIDIDO (R8‑4)
 - Cada liquidación tiene `period_start`/`period_end` (inclusivos), `payment_date` informativa y `kind`: `REGULAR` (no se superpone con otra `REGULAR` del mismo empleado, exclusión GiST) o `EXTRAORDINARY`.
 - **Sin columna de frecuencia.** El sueldo se liquida mensual; un pago semanal de dinero es un **adelanto**, no un sueldo dividido. Esto reemplaza la mención «liquidación semanal» de ADR 007.
@@ -100,7 +116,7 @@ Antes de R8 la cuenta interna `EMPLOYEE` (una por empleado, R2) ya existía y la
 |---|---|---|---|
 | R8‑1 | Área protegida con permiso explícito, privacidad de Cajas, condición salarial, cuenta interna en solo lectura | `0025` | IMPLEMENTADO (aprobado por Enzo el 2026-10-16; `0025` congelada) |
 | R8‑2 | Consumos, adelantos y ajustes | `0026` | IMPLEMENTADO (aprobado por Enzo el 2026-10-17; `0026` congelada) |
-| R8‑3 | Préstamos, cuotas y postergación | `0027` | DECIDIDO |
+| R8‑3 | Préstamos, cuotas y postergación | `0027` | IMPLEMENTADO (en revisión) |
 | R8‑4 | Liquidación: períodos, líneas, aplicaciones, vista previa, cierre, snapshot, reapertura | `0028` | DECIDIDO |
 | R8‑5 | Pago `EMPLOYEE_PAYOUT`, consolidación y E2E de punta a punta | `0029` | DECIDIDO |
 
