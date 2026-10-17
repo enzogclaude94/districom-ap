@@ -18,7 +18,7 @@ Línea base de Fase 0 (detalle en `ARCHITECTURE.md §8` y ADR 004).
 | Contenedores | Procesos sin root; puertos publicados solo en `127.0.0.1` |
 | Redirecciones | Login solo redirige a rutas relativas del mismo sitio |
 | Datos de empleados | Administración solo para administradores de plataforma; el teléfono (PII) no se registra en auditoría ni en logs |
-| Finanzas de empleados (R8, ADR 010) | Área protegida `settlements.employee_finance` con permiso explícito que el admin de plataforma no hereda; sin el área, 404 sin detalles y Cajas oculta cuentas `EMPLOYEE` y redacta operaciones R8; logs sin identidad de empleado junto a importes |
+| Finanzas de empleados (R8, ADR 010) | Área protegida `settlements.employee_finance` con permiso explícito que el admin de plataforma no hereda; sin el área, 404 sin detalles y Cajas oculta cuentas `EMPLOYEE` y las técnicas de R8 y redacta operaciones R8; lo que mueve Caja o Banco (adelantos) exige además operator de Rendiciones; logs sin identidad de empleado junto a importes |
 
 ## Pendiente (fases siguientes)
 - Archivos subidos (Fase 1): límite de tamaño, extensión + MIME + firma, nombre sanitizado, sin macros ni fórmulas.

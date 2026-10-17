@@ -18,8 +18,8 @@ from sqlalchemy.orm import Session
 from app.modules.settlements.ledger import service as ledger
 from app.modules.settlements.ledger.service import AccountBalance, EntryDetail, Movement, OperationDetail
 
-# Accounts only the area reads. R8-2 to R8-5 add their technical accounts here as they ship (ADR 010 §20).
-PRIVATE_ACCOUNT_KINDS = frozenset({"EMPLOYEE"})
+# Accounts only the area reads: internal accounts and the technical accounts of R8 (R8-2 on), ADR 010 §20.
+PRIVATE_ACCOUNT_KINDS = frozenset({"EMPLOYEE", "EMPLOYEE_CONSUMPTIONS", "EMPLOYEE_ADJUSTMENTS"})
 # Operation types of R8, decided in ADR 010 (each ships in its own phase). Listed now so that Cajas never
 # shows one unredacted, whatever phase adds it.
 PRIVATE_OPERATION_TYPES = frozenset(

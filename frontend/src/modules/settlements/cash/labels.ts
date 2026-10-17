@@ -21,6 +21,9 @@ export const OPERATION_LABELS: Record<OperationType, string> = {
   PAYMENT: "Pago a tercero",
   OUTLET_REMITTANCE: "Entrega parcial de boca",
   REVERSAL: "Reverso",
+  EMPLOYEE_CONSUMPTION: "Consumo de empleado",
+  EMPLOYEE_ADVANCE: "Adelanto a empleado",
+  EMPLOYEE_ADJUSTMENT: "Ajuste a empleado",
   EMPLOYEE_RESERVED: "Movimiento de empleado (reservado)",
 };
 
@@ -38,6 +41,9 @@ export const DOCUMENT_OPERATION_TYPES: readonly OperationType[] = [
   "DIRECT_EXPENSE",
   "PAYMENT",
   "OUTLET_REMITTANCE",
+  "EMPLOYEE_CONSUMPTION",
+  "EMPLOYEE_ADVANCE",
+  "EMPLOYEE_ADJUSTMENT",
   // Reserved (ADR 010): whoever sees it this way has no area to correct it from.
   "EMPLOYEE_RESERVED",
 ];
@@ -61,6 +67,8 @@ export const ACCOUNT_KIND_LABELS: Record<AccountKind, string> = {
   OTHER_PAYMENTS: "Pagos realizados",
   OUTLET_COLLECTIONS: "Cuenta técnica",
   OUTLET_ADVANCES: "Cuenta técnica: entregas a cuenta",
+  EMPLOYEE_CONSUMPTIONS: "Cuenta técnica: consumos de empleados",
+  EMPLOYEE_ADJUSTMENTS: "Cuenta técnica: ajustes a empleados",
 };
 
 /** Accounts that hold money or partner contributions. Technical counterparts never show as available money. */
@@ -77,6 +85,7 @@ const SOURCE_LABELS: Record<string, string> = {
   expense: "Gasto directo",
   payment: "Pago",
   outlet_remittance: "Entrega parcial de boca",
+  employee_movement: "Movimiento de empleado",
 };
 
 /** Where an operation came from: entered by hand on this screen, or a document such as a settlement. */
@@ -97,6 +106,7 @@ const DOCUMENT_SCREENS: Record<string, string> = {
   cheque_return: "/rendiciones/cheques/documentos/cheque-returns",
   expense: "/rendiciones/cajas/gastos",
   payment: "/rendiciones/pagos",
+  employee_movement: "/rendiciones/empleados/movimientos",
 };
 
 export function sourceHref(sourceType: string | null, sourceId: number | null): string | null {

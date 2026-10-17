@@ -467,7 +467,9 @@ def test_admin_reverses_a_receipt(as_role, ids, pending, db: Session) -> None:  
     assert op["reverses_operation_id"] == body["receipts"][0]["operation_id"]
     assert op["legs"] == {"pending_collections": "60000.00", "main_cash": "-60000.00"}
     assert [e["event_type"] for e in body["events"]][-2:] == ["RECEIPT_RECORDED", "RECEIPT_REVERSED"]
-    assert balances(admin) == before
+    # The admin of the fixtures holds the employee area and also sees its technical accounts (R8-2): compare the
+    # accounts the operator saw.
+    assert {code: value for code, value in balances(admin).items() if code in before} == before
     assert_invariants(admin, db)
 
 

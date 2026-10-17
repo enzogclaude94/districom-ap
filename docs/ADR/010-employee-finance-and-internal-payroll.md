@@ -5,7 +5,7 @@
 - **Supersede parcialmente ADR 007** en una sola mención: donde ADR 007 dice «liquidación semanal de empleados», vale el modelo **por período** de este ADR (§4). ADR 007 no se edita.
 - Propuesta de origen: `PROPUESTA_R8_CUENTA_INTERNA_Y_LIQUIDACION_DE_EMPLEADOS.md` (2026-10-14).
 
-Este ADR separa lo **DECIDIDO** (vale para todo R8) de lo **IMPLEMENTADO** (lo que ya existe en el código). Al cierre de R8‑1 está implementado: el área protegida con permiso explícito, la privacidad de Cajas, la condición salarial (`0025`) y la cuenta interna en solo lectura. Nada de R8‑2 a R8‑5 existe todavía.
+Este ADR separa lo **DECIDIDO** (vale para todo R8) de lo **IMPLEMENTADO** (lo que ya existe en el código). Al cierre de R8‑1 está implementado: el área protegida con permiso explícito, la privacidad de Cajas, la condición salarial (`0025`) y la cuenta interna en solo lectura. R8‑2 (en revisión) agrega consumos, adelantos y ajustes (`0026`, §3.1). Nada de R8‑3 a R8‑5 existe todavía.
 
 ## Contexto
 R8 cubre la **relación económica interna** entre DistriCom y cada empleado: sueldo, bonos, incentivos, faltantes y sobrantes ya asignados, consumos, adelantos, préstamos y cuotas, ajustes y el pago de la liquidación. **No es RRHH:** quedan afuera asistencia, vacaciones, licencias, ART, cargas sociales, recibos legales, AFIP/ARCA, convenio y contabilidad de nómina.
@@ -20,7 +20,7 @@ Antes de R8 la cuenta interna `EMPLOYEE` (una por empleado, R2) ya existía y la
 - **Permiso explícito, también para el admin de plataforma.** Con `explicit_grant_required = True` (el caso de Empleados) el admin de plataforma **no hereda** el área: necesita su propio permiso. Un área con `False` heredaría el admin, como un módulo; el flag es por área.
 - **El área exige además un rol en su módulo.** Un permiso del área sin rol en Rendiciones no llega a nada, y un rol de Rendiciones (incluso admin) no da el área.
 - **Sin el área: 404 y nada que descubrir.** Toda endpoint del área responde `404 not_found` «No encontrado.» sin detalles, también las de escritura y aunque el recurso no exista. Con el área pero por debajo del rol requerido: `403 forbidden`.
-- **Roles del área:** `viewer` (lee), `operator` (lee; en R8‑2 registra consumos), `admin` (condición salarial y, en fases siguientes, lo que decide sobre dinero; tabla completa en §6 de la propuesta, con D9).
+- **Roles del área:** `viewer` (lee), `operator` (lee; desde R8‑2 registra consumos), `admin` (condición salarial y, en fases siguientes, lo que decide sobre dinero; tabla completa en §6 de la propuesta, con D9).
 - **Almacenamiento:** el permiso es una fila de `user_module_roles` con `module_key = 'settlements.employee_finance'` (texto de 40 caracteres, sin migración de plataforma). Alta y baja auditadas como `platform.module_role.{granted, changed, revoked}`.
 - **Bootstrap documentado.** El admin de plataforma administra permisos sin poder leer el área antes de tenerla:
   - CLI: `grant-module-role --module settlements.employee_finance --role admin` / `revoke-module-role`;
@@ -42,6 +42,28 @@ Antes de R8 la cuenta interna `EMPLOYEE` (una por empleado, R2) ya existía y la
 - **Signo:** positivo = el empleado le debe a la empresa («Debe a la empresa»); negativo = la empresa le debe («La empresa le debe»); cero = «Sin saldo».
 - **La cuenta es neta.** Cualquier desglose (qué es préstamo, qué está a pagar) sale de **documentos + aplicaciones**, nunca de descomponer el saldo con aritmética.
 - **R8‑1:** `GET /settlements/employee-finance/employees` (saldo, lectura, condición vigente y próxima), `GET /employees/{id}` y `GET /employees/{id}/movements` («Movimientos de la cuenta interna»): cada pata `EMPLOYEE` con fecha, importe con signo, su origen (faltante, sobrante, corrección de rendición, incobrable asignado y su reverso) y su documento (rendición de reparto o de boca, pendiente de cobro). Un reverso apunta al documento de la operación que revierte. Se lee del ledger y de los documentos; no se copia nada. Todavía no hay aplicaciones: la pantalla no habla de «aplicado/pendiente».
+
+#### 3.1 Consumos, adelantos y ajustes — IMPLEMENTADO (R8‑2, `0026`, en revisión)
+- **Documento `employee_movements`**, uno por movimiento: `kind` (`CONSUMPTION`/`ADVANCE`/`ADJUSTMENT`), `direction` (`CHARGE`/`CREDIT`, solo ajustes), empleado y su cuenta `EMPLOYEE`, `business_date`, `amount > 0`, `employee_amount` (la pata `EMPLOYEE` con signo, para que R8‑4 la identifique sin recalcular), `funding_account_id` (solo adelantos), descripción (o motivo) obligatoria, referencia opcional, operación, reverso (operación, quién, cuándo, motivo), idempotencia (`client_request_id`, `request_fingerprint`), `created_by`, `created_at`. Sin `DELETE`; nada financiero cambia nunca; una corrección es reverso + documento nuevo.
+- **Operaciones** (todas por `ledger/service.py`, regla con `area = settlements.employee_finance`):
+
+  | Tipo | Patas | Quién |
+  |---|---|---|
+  | `EMPLOYEE_CONSUMPTION` | `EMPLOYEE` +X · «Consumos de empleados» −X | operator o admin del área |
+  | `EMPLOYEE_ADVANCE` | Caja o Banco −X · `EMPLOYEE` +X | admin del área **y** operator de Rendiciones (D9: mueve Caja/Banco) |
+  | `EMPLOYEE_ADJUSTMENT` `CHARGE` | `EMPLOYEE` +X · «Ajustes a empleados» −X | admin del área, con motivo |
+  | `EMPLOYEE_ADJUSTMENT` `CREDIT` | `EMPLOYEE` −X · «Ajustes a empleados» +X | admin del área, con motivo |
+
+- **Cuentas técnicas** «Consumos de empleados» (`EMPLOYEE_CONSUMPTIONS`) y «Ajustes a empleados» (`EMPLOYEE_ADJUSTMENTS`), sembradas por `0026`: no son dinero disponible, no están en el tablero de Cajas, sin el área no existen (404) y solo las mueven su tipo de operación (regla del ledger + trigger por pata); su tipo, código, estado y negativo no cambian (trigger).
+- **Consumo:** solo importe (D11); sin producto, SKU, stock ni cantidades.
+- **Adelanto:** desde una caja activa o un banco activo (nunca cheques, cuentas técnicas ni internas). Débito ordinario: la caja nunca queda negativa ese día ni ningún día posterior; el banco no entra en descubierto ni lo profundiza.
+- **Ajuste:** excepcional y correctivo; **sin categorías** (decisión de Enzo, 2026-10-16): dirección, importe, motivo obligatorio y referencia opcional. No reemplaza un consumo, un adelanto, un préstamo, un sueldo ni un premio; la UI lo explica.
+- **Empleado:** tiene que existir. Activo: cualquier movimiento que su rol permita, con fecha hasta hoy. **Inactivo** (solo `employees.active`; no se inventa fecha de egreso): solo lo que documenta el pasado (un ajuste, o un consumo o adelanto con fecha anterior a hoy) y solo un admin del área (`422 inactive_employee`).
+- **Fecha:** `business_date` es la fecha financiera; nunca futura (zona del negocio); puede ser anterior a hoy (carga tardía o corrección autorizada). `created_at` dice cuándo se cargó y nunca se usa como fecha de negocio.
+- **Reverso:** admin del área (y operator de Rendiciones si es un adelanto), con motivo, del documento entero, con la **fecha original**; `REVERSAL` exacto de la operación. El de un adelanto acredita la caja o el banco: no tiene control de fondos y nunca falla por saldo; sí exige que la cuenta esté activa. Idempotente por `client_request_id`. Cajas nunca revierte un movimiento (es de un documento). En R8‑2 todo movimiento se puede revertir; R8‑4 lo bloqueará si una liquidación lo aplicó (`employee_amount` y la pata `EMPLOYEE` ya lo permiten).
+- **Concurrencia:** orden de locks fijo: empleado (`FOR SHARE`) → cuenta `EMPLOYEE` → caja o banco del adelanto (`FOR NO KEY UPDATE`, antes del insert que la toma `FOR SHARE`) → débitos del ledger en orden de id. Ningún otro flujo bloquea una cuenta interna.
+- **Base de datos:** CHECKs de forma; trigger de alta (cuenta del empleado, fecha, financiamiento válido); inmutabilidad; `forbid_delete`; triggers diferidos que exigen que documento y operación sean exactamente el uno del otro (patas, tipo, fecha, fuente, reverso exacto). La migración se niega a subir si una cuenta interna fue movida por otro tipo de operación, y a bajar si hay movimientos.
+- **Pantallas:** en la ficha del empleado, «Registrar consumo», «Entregar adelanto» y «Registrar ajuste», cada uno con confirmación calculada por el backend (efecto en palabras, saldo antes y después, patas); página del movimiento con su asiento y «Revertir». La cuenta interna lista «Consumo», «Adelanto», «Ajuste en contra», «Ajuste a favor» y sus reversos, con la descripción y la marca «Revertido».
 
 ### 4. Modelo por período — DECIDIDO (R8‑4)
 - Cada liquidación tiene `period_start`/`period_end` (inclusivos), `payment_date` informativa y `kind`: `REGULAR` (no se superpone con otra `REGULAR` del mismo empleado, exclusión GiST) o `EXTRAORDINARY`.
@@ -76,8 +98,8 @@ Antes de R8 la cuenta interna `EMPLOYEE` (una por empleado, R2) ya existía y la
 ### 9. Fases — DECIDIDO
 | Fase | Contenido | Migración | Estado |
 |---|---|---|---|
-| R8‑1 | Área protegida con permiso explícito, privacidad de Cajas, condición salarial, cuenta interna en solo lectura | `0025` | IMPLEMENTADO (pendiente de aprobación de Enzo) |
-| R8‑2 | Consumos, adelantos y ajustes | `0026` | DECIDIDO |
+| R8‑1 | Área protegida con permiso explícito, privacidad de Cajas, condición salarial, cuenta interna en solo lectura | `0025` | IMPLEMENTADO (aprobado por Enzo el 2026-10-16; `0025` congelada) |
+| R8‑2 | Consumos, adelantos y ajustes | `0026` | IMPLEMENTADO (en revisión de Enzo) |
 | R8‑3 | Préstamos, cuotas y postergación | `0027` | DECIDIDO |
 | R8‑4 | Liquidación: períodos, líneas, aplicaciones, vista previa, cierre, snapshot, reapertura | `0028` | DECIDIDO |
 | R8‑5 | Pago `EMPLOYEE_PAYOUT`, consolidación y E2E de punta a punta | `0029` | DECIDIDO |

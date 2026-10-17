@@ -4,6 +4,20 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Added — Empleados: consumos, adelantos y ajustes (R8‑2)
+- **Movimientos de la cuenta interna** (`0026`, documento `employee_movements`), registrados desde la ficha del empleado con una confirmación calculada por el backend (efecto en palabras, saldo antes y después, patas del ledger):
+  - **Consumo** (operator o admin del área): `EMPLOYEE` +X · «Consumos de empleados» −X; solo importe, sin stock.
+  - **Adelanto** (admin del área y operator de Rendiciones): Caja o Banco −X · `EMPLOYEE` +X; caja nunca negativa ni banco en descubierto, en su fecha y después.
+  - **Ajuste** (admin del área, excepcional, sin categorías): en contra (`EMPLOYEE` +X) o a favor (`EMPLOYEE` −X) contra «Ajustes a empleados», con motivo obligatorio.
+- **Reverso** del documento entero (admin del área; el de un adelanto, también operator de Rendiciones), con motivo y la fecha original; el de un adelanto devuelve el dinero aunque la caja esté vacía. Página del movimiento con su asiento.
+- **Cajas:** sin el área, el adelanto y su reverso se ven como «Movimiento de empleado (reservado)» (fecha, importe, caja, sentido); las cuentas técnicas nuevas no se listan ni se pueden abrir. Con el área, los tipos nuevos tienen nombre y enlace al movimiento.
+- **Cuenta interna:** «Consumo», «Adelanto», «Ajuste en contra», «Ajuste a favor» y sus reversos, con descripción y marca «Revertido».
+- **Base de datos:** triggers de forma, inmutabilidad, sin `DELETE`, cuentas técnicas cerradas, `EMPLOYEE` solo movida por tipos autorizados, documento ↔ operación exactos; upgrade y downgrade protegidos.
+- **Reglas documentadas:** empleado inactivo (solo lo que documenta el pasado, solo un admin), `business_date` nunca futura y distinta de `created_at`, orden de locks (empleado → cuenta interna → caja o banco → débitos).
+
+### Changed — R8‑1 DONE
+- **R8‑1 DONE** (aprobada por Enzo el 2026-10-16 con sus desvíos; PR #39 mergeado `c88377e`; `0025` congelada). **R8‑2 autorizada** (consumos, adelantos y ajustes, `0026`): los ajustes llevan dirección, importe, motivo obligatorio y referencia opcional, sin categorías.
+
 ### Added — Empleados: privacidad, cuenta interna y condición salarial (R8‑1)
 - **Arquitectura de R8 aprobada** por Enzo el 2026-10-15 con precisiones (D1–D14, A–D): ADR 010. La mención «liquidación semanal» de ADR 007 queda reemplazada por el modelo por período (sueldo base interno mensual).
 - **Áreas protegidas en la plataforma:** un módulo declara áreas con autorización propia (`ModuleSpec.protected_areas`); la capa central (`require_area_access`) exige un rol en el módulo y un permiso propio del área. Rendiciones › Empleados (`settlements.employee_finance`, viewer/operator/admin) requiere permiso explícito **también para el admin de plataforma**. Sin el área: 404 sin detalles y el menú no aparece. El admin de plataforma otorga y revoca (CLI `grant-module-role --module settlements.employee_finance`, `PUT /auth/access-grants`, `POST /auth/access-grants/revoke`) sin poder leer el área antes; `/auth/me` devuelve `areas`.

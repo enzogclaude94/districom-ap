@@ -13,11 +13,17 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { areaRole, authApi, currentUserQueryKey, roleAtLeast } from "@/lib/api/auth";
+import { areaRole, authApi, currentUserQueryKey, moduleRole, roleAtLeast } from "@/lib/api/auth";
 import { cn } from "@/lib/cn";
 import { formatDate, formatDateTime, formatMoney } from "@/lib/format";
 
-import { EMPLOYEE_FINANCE_AREA, employeeFinanceApi, employeeFinanceQueryKey, type CompensationTerm } from "./api";
+import {
+  EMPLOYEE_FINANCE_AREA,
+  employeeFinanceApi,
+  employeeFinanceQueryKey,
+  type CompensationTerm,
+  type MovementKind,
+} from "./api";
 import {
   MOVEMENT_READING,
   ORIGIN_LABELS,
@@ -27,6 +33,7 @@ import {
   TERM_STATUS_LABELS,
   documentOf,
 } from "./labels";
+import { MovementDialog } from "./movement-dialogs";
 import { EndTermDialog, NewTermDialog } from "./term-dialogs";
 
 const PAGE_SIZE = 20;
@@ -46,7 +53,7 @@ function AccountMovements({ employeeId }: { employeeId: number }) {
       <EmptyState
         icon={Wallet}
         title="Sin movimientos"
-        description="Cuando una rendición o un pendiente se le asigne, el movimiento aparece acá."
+        description="Cuando se le asigne una rendición o un pendiente, o se registre un consumo, un adelanto o un ajuste, el movimiento aparece acá."
       />
     );
   }
@@ -70,7 +77,12 @@ function AccountMovements({ employeeId }: { employeeId: number }) {
                 <TableCell data-label="Fecha" className="whitespace-nowrap tabular-nums">
                   {formatDate(movement.business_date)}
                 </TableCell>
-                <TableCell data-label="Origen">{ORIGIN_LABELS[movement.origin]}</TableCell>
+                <TableCell data-label="Origen">
+                  <span className="block">{ORIGIN_LABELS[movement.origin]}</span>
+                  {movement.description && (
+                    <span className="block text-sm break-words text-muted-foreground">{movement.description}</span>
+                  )}
+                </TableCell>
                 <TableCell data-label="Documento">
                   {document.href ? (
                     <Link href={document.href} className="text-primary hover:underline">
@@ -78,6 +90,11 @@ function AccountMovements({ employeeId }: { employeeId: number }) {
                     </Link>
                   ) : (
                     document.label
+                  )}
+                  {movement.document_reversed && (
+                    <Badge tone="neutral" className="ml-2">
+                      Revertido
+                    </Badge>
                   )}
                 </TableCell>
                 <TableCell data-label="Importe" className="text-right whitespace-nowrap tabular-nums">
@@ -213,7 +230,12 @@ function TermHistory({ employeeId, canEdit, active }: { employeeId: number; canE
 /** `/rendiciones/empleados/[id]`: the internal account (read-only) and the salary terms of one employee. */
 export function EmployeeFinanceDetailView({ employeeId }: { employeeId: number }) {
   const me = useQuery({ queryKey: currentUserQueryKey, queryFn: authApi.me });
-  const canEdit = roleAtLeast(areaRole(me.data, EMPLOYEE_FINANCE_AREA), "admin");
+  const role = areaRole(me.data, EMPLOYEE_FINANCE_AREA);
+  const canEdit = roleAtLeast(role, "admin");
+  const canOperate = roleAtLeast(role, "operator");
+  // An advance moves a cash box or the bank: it also needs operator in Rendiciones (ADR 010 D9).
+  const canAdvance = canEdit && roleAtLeast(moduleRole(me.data, "settlements"), "operator");
+  const [registering, setRegistering] = useState<MovementKind | null>(null);
   const detail = useQuery({
     queryKey: [...employeeFinanceQueryKey, "detail", employeeId],
     queryFn: () => employeeFinanceApi.detail(employeeId),
@@ -265,12 +287,37 @@ export function EmployeeFinanceDetailView({ employeeId }: { employeeId: number }
             </p>
             <Badge tone={READING_TONES[employee.balance_reading]}>{READING_LABELS[employee.balance_reading]}</Badge>
           </div>
+          {canOperate && (
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" onClick={() => setRegistering("CONSUMPTION")}>
+                Registrar consumo
+              </Button>
+              {canAdvance && (
+                <Button size="sm" variant="secondary" onClick={() => setRegistering("ADVANCE")}>
+                  Entregar adelanto
+                </Button>
+              )}
+              {canEdit && (
+                <Button size="sm" variant="secondary" onClick={() => setRegistering("ADJUSTMENT")}>
+                  Registrar ajuste
+                </Button>
+              )}
+            </div>
+          )}
           <h3 className="text-sm font-medium">Movimientos de la cuenta interna</h3>
           <AccountMovements employeeId={employeeId} />
         </CardContent>
       </Card>
 
       <TermHistory employeeId={employeeId} canEdit={canEdit} active={employee.active} />
+      {registering && (
+        <MovementDialog
+          kind={registering}
+          employeeId={employeeId}
+          employeeName={employee.full_name}
+          onClose={() => setRegistering(null)}
+        />
+      )}
     </>
   );
 }

@@ -18,8 +18,15 @@ export type MovementOrigin =
   | "SETTLEMENT_CORRECTION"
   | "PENDING_WRITE_OFF"
   | "PENDING_WRITE_OFF_REVERSAL"
+  | "CONSUMPTION"
+  | "ADVANCE"
+  | "ADJUSTMENT_CHARGE"
+  | "ADJUSTMENT_CREDIT"
+  | "CONSUMPTION_REVERSAL"
+  | "ADVANCE_REVERSAL"
+  | "ADJUSTMENT_REVERSAL"
   | "OTHER";
-export type DocumentKind = "DELIVERY_SETTLEMENT" | "OUTLET_SETTLEMENT" | "PENDING_COLLECTION";
+export type DocumentKind = "DELIVERY_SETTLEMENT" | "OUTLET_SETTLEMENT" | "PENDING_COLLECTION" | "EMPLOYEE_MOVEMENT";
 
 export interface CompensationTerm {
   id: number;
@@ -62,7 +69,57 @@ export interface AccountMovement {
   document_id: number | null;
   document_date: string | null;
   document_number: number | null;
+  /** Employee movements (R8-2): what it was, and whether the whole document was reversed since. */
+  description?: string | null;
+  document_reversed?: boolean | null;
   created_at: string;
+}
+
+/** R8-2: a consumption (operator), an advance from a cash box or bank (admin), an adjustment (admin). */
+export type MovementKind = "CONSUMPTION" | "ADVANCE" | "ADJUSTMENT";
+/** Of an adjustment: CHARGE the employee will owe more, CREDIT recognised in the employee's favour. */
+export type Direction = "CHARGE" | "CREDIT";
+
+export interface MovementLeg {
+  /** null: the internal account, created with its first movement. */
+  account_id: number | null;
+  account_name: string;
+  account_kind: string;
+  amount: string;
+}
+
+export interface MovementPreview {
+  kind: MovementKind;
+  direction: Direction | null;
+  amount: string;
+  employee_amount: string;
+  balance_before: string;
+  balance_after: string;
+  legs: MovementLeg[];
+}
+
+export interface EmployeeMovement {
+  id: number;
+  kind: MovementKind;
+  direction: Direction | null;
+  employee_id: number;
+  employee_name: string;
+  business_date: string;
+  amount: string;
+  employee_amount: string;
+  funding_account_id: number | null;
+  funding_account_name: string | null;
+  description: string;
+  reference: string | null;
+  status: "IN_EFFECT" | "REVERSED";
+  operation_id: number;
+  reversal_operation_id: number | null;
+  reversed_at: string | null;
+  reversed_by_name: string | null;
+  reversal_reason: string | null;
+  created_at: string;
+  created_by_name: string;
+  legs: MovementLeg[];
 }
 
 export interface Page<T> {
@@ -78,6 +135,15 @@ function query(params: Record<string, string | number | undefined>) {
   const text = search.toString();
   return text ? `?${text}` : "";
 }
+
+const post = <T>(path: string, body: unknown) =>
+  apiFetch<T>(`${BASE}${path}`, { method: "POST", body: JSON.stringify(body) });
+
+export const MOVEMENT_PATHS: Record<MovementKind, string> = {
+  CONSUMPTION: "consumptions",
+  ADVANCE: "advances",
+  ADJUSTMENT: "adjustments",
+};
 
 export const employeeFinanceApi = {
   list: (params: { q?: string; limit: number; offset: number }) =>
@@ -96,6 +162,19 @@ export const employeeFinanceApi = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  previewMovement: (
+    employeeId: number,
+    body: {
+      kind: MovementKind;
+      business_date: string;
+      amount: string;
+      direction?: Direction;
+      funding_account_id?: number;
+    },
+  ) => post<MovementPreview>(`/employees/${employeeId}/movements/preview`, body),
+  /** A write of R8-2 (register, reverse) as `useWriteAction` sends it. */
+  write: (path: string, body: Record<string, unknown>) => post<EmployeeMovement>(path, body),
+  movement: (movementId: number) => apiFetch<EmployeeMovement>(`${BASE}/employee-movements/${movementId}`),
 };
 
 export const employeeFinanceQueryKey = ["settlements", "employee-finance"] as const;

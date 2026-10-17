@@ -66,12 +66,13 @@ SETTLEMENTS_TABLES = {
     "outlet_remittances",
     "settlement_closing_remittances",
     "employee_compensation_terms",
+    "employee_movements",
 }
 
 # Added by 0024 (R7-3).
 REMITTANCE_TABLES = {"outlet_remittances", "settlement_closing_remittances"}
-# Added by 0025 (R8-1).
-EMPLOYEE_FINANCE_TABLES = {"employee_compensation_terms"}
+# Added by 0025 (R8-1) and 0026 (R8-2).
+EMPLOYEE_FINANCE_TABLES = {"employee_compensation_terms", "employee_movements"}
 
 
 def _settlements_tables(url: str) -> set[str]:
@@ -154,6 +155,8 @@ def test_settlements_system_accounts_seeded(migrated_db: None) -> None:
         ("third_party_refunds", "THIRD_PARTY_REFUNDS", False),
         ("other_payments", "OTHER_PAYMENTS", False),
         ("outlet_collections", "OUTLET_COLLECTIONS", True),
+        ("employee_consumptions", "EMPLOYEE_CONSUMPTIONS", True),
+        ("employee_adjustments", "EMPLOYEE_ADJUSTMENTS", True),
     ]
 
 
@@ -223,6 +226,8 @@ def test_account_name_key_backfill() -> None:
             "devoluciones a terceros",
             "otros pagos",
             "cobranzas de boca",
+            "consumos de empleados",
+            "ajustes a empleados",
         ]
     finally:
         with engine.begin() as conn:

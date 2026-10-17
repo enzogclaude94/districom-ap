@@ -9,6 +9,9 @@ from dataclasses import dataclass
 CASH_AND_BANK = frozenset({"CASH_BOX", "BANK"})
 # Where a payment to a third party goes, by concept (R6, Enzo's decision D1).
 PAYMENT_COUNTERPARTS = frozenset({"MERCHANDISE_PAYMENTS", "EXPENSE", "THIRD_PARTY_REFUNDS", "OTHER_PAYMENTS"})
+# The protected area of employee finance (ADR 010): its operations are authorized by a grant on the area, never by a
+# role in Rendiciones alone (`employee_finance.access` declares the area with this key).
+EMPLOYEE_FINANCE_AREA = "settlements.employee_finance"
 
 
 @dataclass(frozen=True)
@@ -24,6 +27,9 @@ class OperationRule:
     counterpart_one_of: frozenset[str] = frozenset()
     # Kinds of which, together, there may be at most one leg.
     at_most_one_of: frozenset[str] = frozenset()
+    # Protected area whose grant authorizes the operation (and its reversal) instead of a role in Rendiciones;
+    # `min_role` is then the role in that area.
+    area: str | None = None
 
 
 RULES: dict[str, OperationRule] = {
@@ -176,7 +182,39 @@ RULES: dict[str, OperationRule] = {
         "OUTLET_ADVANCES",
         (("OUTLET_ADVANCES", -1), ("CASH_BOX", 1)),
     ),
+    # Movements of an employee's internal account (R8-2, ADR 010). Each is the operation of its employee movement,
+    # which builds the two legs; the database checks them against it (0026). Authorized by the employee finance area.
+    # A consumption: the internal account +X, «Consumos de empleados» -X (operator of the area).
+    "EMPLOYEE_CONSUMPTION": OperationRule(
+        "operator",
+        frozenset({"EMPLOYEE", "EMPLOYEE_CONSUMPTIONS"}),
+        "EMPLOYEE_CONSUMPTIONS",
+        (("EMPLOYEE", 1), ("EMPLOYEE_CONSUMPTIONS", -1)),
+        frozenset({"EMPLOYEE"}),
+        area=EMPLOYEE_FINANCE_AREA,
+    ),
+    # An advance (admin of the area): the cash box or the bank -X, the internal account +X. An ordinary debit: the
+    # cash box is never negative and the bank never goes into an overdraft for it, nor deeper into one.
+    "EMPLOYEE_ADVANCE": OperationRule(
+        "admin",
+        CASH_AND_BANK | {"EMPLOYEE"},
+        "EMPLOYEE",
+        (("CASH_BOX", -1), ("BANK", -1), ("EMPLOYEE", 1)),
+        CASH_AND_BANK,
+        area=EMPLOYEE_FINANCE_AREA,
+    ),
+    # An adjustment (admin of the area, exceptional and corrective): the internal account ±X, «Ajustes a empleados»
+    # the opposite; CHARGE puts it in the employee's debt, CREDIT in the employee's favour.
+    "EMPLOYEE_ADJUSTMENT": OperationRule(
+        "admin",
+        frozenset({"EMPLOYEE", "EMPLOYEE_ADJUSTMENTS"}),
+        "EMPLOYEE_ADJUSTMENTS",
+        (),
+        frozenset({"EMPLOYEE"}),
+        area=EMPLOYEE_FINANCE_AREA,
+    ),
 }
+EMPLOYEE_MOVEMENT_TYPES = frozenset({"EMPLOYEE_CONSUMPTION", "EMPLOYEE_ADVANCE", "EMPLOYEE_ADJUSTMENT"})
 CHEQUE_CYCLE_TYPES = frozenset({"CHEQUE_DEPOSIT", "CHEQUE_CREDIT", "CHEQUE_REJECTION", "CHEQUE_RETURN"})
 # Operations that belong to a source document: only that document's flow corrects them, never Cajas.
 DOCUMENT_TYPES = frozenset(
@@ -191,10 +229,13 @@ DOCUMENT_TYPES = frozenset(
         "OUTLET_REMITTANCE",
     }
     | CHEQUE_CYCLE_TYPES
+    | EMPLOYEE_MOVEMENT_TYPES
 )
 # Document operations undone with `reverse_document_operation` (a settlement close is replaced instead).
 REVERSIBLE_DOCUMENT_TYPES = frozenset(
-    {"PENDING_COLLECTION", "PENDING_WRITE_OFF", "DIRECT_EXPENSE", "PAYMENT", "OUTLET_REMITTANCE"} | CHEQUE_CYCLE_TYPES
+    {"PENDING_COLLECTION", "PENDING_WRITE_OFF", "DIRECT_EXPENSE", "PAYMENT", "OUTLET_REMITTANCE"}
+    | CHEQUE_CYCLE_TYPES
+    | EMPLOYEE_MOVEMENT_TYPES
 )
 # «Banco en descubierto» (Enzo's R4-2 policy): the only debits a bank account books even if they create or
 # deepen an overdraft. A rejection of a cheque already credited is an external event, not a decision of the
@@ -204,7 +245,8 @@ EXTERNAL_BANK_DEBITS = frozenset({"CHEQUE_REJECTION"})
 # Document operations that a corrected document may withdraw without replacing them (`withdraw_document_operation`):
 # an OUTLET settlement corrected to $0 is closed again without a ledger operation (Enzo's R7-2-Q1).
 WITHDRAWABLE_DOCUMENT_TYPES = frozenset({"SETTLEMENT_CLOSE"})
-# REVERSAL has no rule here: it is only built by `reverse_operation` from the original's legs.
+# REVERSAL has no rule here: it is only built by `reverse_operation` from the original's legs. The reversal of an
+# operation of a protected area takes admin of that area instead.
 REVERSAL_MIN_ROLE = "admin"
 
 
