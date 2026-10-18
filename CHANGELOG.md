@@ -4,6 +4,15 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Added — Empleados: liquidación interna y aplicaciones (R8‑4)
+- **Liquidación interna** (`0028`; Empleados › «Liquidaciones internas», y «Nueva liquidación» desde la ficha), siempre «no es el recibo de sueldo legal»: `REGULAR` (no se superpone con otra del mismo empleado) o `EXTRAORDINARY` (puede), período inclusivo, fecha de pago informativa. Lista con empleado, período, tipo, estado, haberes, descuentos, créditos y neto.
+- **Haberes:** Sueldo, Bono, Incentivo y Otro haber (admin del área). El sueldo se propone de la condición salarial solo en una `REGULAR` de mes completo con una sola condición; si no, aviso y carga manual con nota. Bono e incentivo son manuales (no se lee Inteligencia Comercial); «Otro haber» exige descripción.
+- **Movimientos a aplicar y cuotas:** una `REGULAR` propone completo lo pendiente de la cuenta interna hasta el fin del período y las cuotas vencidas o del período; una `EXTRAORDINARY` lista los movimientos sin incluirlos y nunca aplica cuotas. Se puede excluir o aplicar una parte de un movimiento (origen, fecha, original, ya aplicado, disponible, a aplicar); una cuota se aplica entera o se excluye. Original y reverso de una rendición se muestran como «Corrección de rendición · efecto neto $0» y se cierran como dos aplicaciones.
+- **Vista previa y cierre:** haberes, descuentos, créditos aplicados, neto (≥ 0, nunca recortado) y % de descuentos, calculados en el backend; cerrar exige el token de la vista previa (cualquier cambio la vence). Con haberes > 0 publica `PAYROLL_CLOSE` («Sueldos y bonos internos» +H · cuenta interna −H, en la fecha de fin del período); sin haberes, cierre `NO_ACCRUAL` sin asiento. El cierre congela haberes, aplicaciones y un snapshot.
+- **Reapertura** (admin del área, motivo): el cierre anterior sigue vigente hasta el nuevo, que lo reemplaza en una transacción (revierte su `PAYROLL_CLOSE` si lo tenía y publica el propio). **Anular** solo una liquidación nunca cerrada.
+- **Aplicado es derivado:** cuotas «Pendiente de aplicar» / «Aplicada» con enlace a la liquidación; saldo del préstamo = capital − cuotas aplicadas. Un movimiento aplicado no se revierte, una cuota aplicada no se posterga y un préstamo con cuotas aplicadas no se revierte hasta reabrir la liquidación. Las correcciones de rendición nunca se bloquean.
+- **Base y concurrencia:** cierres, haberes y aplicaciones inmutables, sin `DELETE`, con 21 invariantes en la base; todo flujo R8 bloquea primero la cuenta interna. Privacidad: todo bajo el área; sin ella, 404 y el `PAYROLL_CLOSE` es «Movimiento de empleado (reservado)» en Cajas.
+
 ### Changed — R8‑3 DONE
 - **R8‑3 DONE** (aprobada por Enzo el 2026-10-18 con un ajuste previo al merge: los reemplazos de una postergación vencen estrictamente después de la cuota postergada; PR #41 mergeado `1fffb7b`; `0027` congelada). **R8‑4 autorizada** (liquidación interna y aplicaciones, `0028`): `NO_ACCRUAL` sin haberes nuevos, cuotas propuestas solo en una liquidación regular y nunca en una extraordinaria.
 
