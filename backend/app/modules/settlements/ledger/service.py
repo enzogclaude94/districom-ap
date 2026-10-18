@@ -1036,3 +1036,66 @@ def reversed_operation_types(db: Session, reversal_ids: Sequence[int]) -> dict[i
         .where(FinancialOperation.id.in_(reversal_ids))
     )
     return dict(rows.tuples().all())
+
+
+@dataclass(frozen=True)
+class EmployeeLeg:
+    """A leg of an internal account as the internal payroll reads it (R8-4): what it is, when and how much. A
+    reversal carries the type, the source document and the operation of what it reverses."""
+
+    entry_id: int
+    operation_id: int
+    operation_type: str
+    reversed_type: str | None
+    reversed_operation_id: int | None
+    business_date: date
+    amount: Decimal
+    source_type: str | None
+    source_id: int | None
+
+
+def employee_legs(
+    db: Session, account_id: int, *, until: date | None = None, entry_ids: Sequence[int] | None = None
+) -> list[EmployeeLeg]:
+    """Legs of an internal account, oldest first: up to a business date, or exactly the ones named."""
+    reversed_op = aliased(FinancialOperation)
+    query = (
+        select(LedgerEntry, FinancialOperation, reversed_op)
+        .join(FinancialOperation, LedgerEntry.operation_id == FinancialOperation.id)
+        .outerjoin(reversed_op, reversed_op.id == FinancialOperation.reverses_operation_id)
+        .where(LedgerEntry.account_id == account_id)
+    )
+    if until is not None:
+        query = query.where(FinancialOperation.business_date <= until)
+    if entry_ids is not None:
+        query = query.where(LedgerEntry.id.in_(list(entry_ids)))
+    rows = db.execute(query.order_by(FinancialOperation.business_date, FinancialOperation.id, LedgerEntry.id)).all()
+    legs = []
+    for entry, op, reversed_ in rows:
+        document = reversed_ or op
+        legs.append(
+            EmployeeLeg(
+                entry_id=entry.id,
+                operation_id=op.id,
+                operation_type=op.type,
+                reversed_type=reversed_.type if reversed_ is not None else None,
+                reversed_operation_id=reversed_.id if reversed_ is not None else None,
+                business_date=op.business_date,
+                amount=entry.amount,
+                source_type=document.source_type,
+                source_id=document.source_id,
+            )
+        )
+    return legs
+
+
+def leg_of_operation(db: Session, operation_id: int, account_id: int) -> int | None:
+    """The leg of an operation on one account (an R8 document has exactly one on the internal account)."""
+    return db.scalar(
+        select(LedgerEntry.id).where(LedgerEntry.operation_id == operation_id, LedgerEntry.account_id == account_id)
+    )
+
+
+def reversal_of(db: Session, operation_id: int) -> int | None:
+    """The reversal of an operation, if it was reversed."""
+    return _reversed_by(db, operation_id)

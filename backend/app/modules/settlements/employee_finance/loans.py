@@ -51,6 +51,7 @@ from app.core.clock import business_today
 from app.core.errors import AppError
 from app.modules.settlements.delivery import idempotency
 from app.modules.settlements.delivery.service import money
+from app.modules.settlements.employee_finance import payrolls
 from app.modules.settlements.employee_finance.access import AREA
 from app.modules.settlements.employee_finance.models import EmployeeLoan, EmployeeLoanInstallment
 from app.modules.settlements.ledger import service as ledger
@@ -345,10 +346,15 @@ def defer(
     if replayed is not None:
         return replayed
 
-    loan_id = db.scalar(select(EmployeeLoanInstallment.loan_id).where(EmployeeLoanInstallment.id == installment_id))
-    if loan_id is None:
+    found = db.execute(
+        select(EmployeeLoan.id, EmployeeLoan.employee_account_id)
+        .join(EmployeeLoanInstallment, EmployeeLoanInstallment.loan_id == EmployeeLoan.id)
+        .where(EmployeeLoanInstallment.id == installment_id)
+    ).one_or_none()
+    if found is None:
         raise AppError(404, "installment_not_found", "La cuota no existe.")
-    loan = _lock_loan(db, loan_id)
+    lock_account(db, found.employee_account_id)  # the internal account first (R8-4's lock order)
+    loan = _lock_loan(db, found.id)
     installment = db.scalars(
         select(EmployeeLoanInstallment)
         .where(EmployeeLoanInstallment.id == installment_id)
@@ -370,6 +376,13 @@ def defer(
             if installment.status == "DEFERRED"
             else f"La cuota {installment.number} está cancelada.",
             {"installment_id": installment.id, "status": installment.status},
+        )
+    if payrolls.applied_installment_ids(db, [installment.id]):
+        raise AppError(
+            409,
+            "installment_applied",
+            f"Una liquidación cerrada ya aplicó la cuota {installment.number}: no se posterga. Reabrí la liquidación "
+            "y excluila.",
         )
     for item in items:
         if item.amount <= 0:
@@ -456,9 +469,9 @@ def defer(
 
 
 def applied_installments(db: Session, loan_id: int) -> int:
-    """How many installments of the loan a payroll applied. Always 0 until R8-4 adds payrolls; then a loan with any
-    applied installment can no longer be reversed."""
-    return 0
+    """How many installments of the loan a close in effect applied: a loan with any can no longer be reversed."""
+    ids = list(db.scalars(select(EmployeeLoanInstallment.id).where(EmployeeLoanInstallment.loan_id == loan_id)))
+    return len(payrolls.applied_installment_ids(db, ids))
 
 
 def reverse(db: Session, actor: User, loan_id: int, reason: str, client_request_id: UUID) -> Created:
@@ -468,8 +481,10 @@ def reverse(db: Session, actor: User, loan_id: int, reason: str, client_request_
     reason = " ".join(reason.split())
     if not reason:
         raise AppError(422, "reason_required", "Indicá el motivo del reverso.")
-    if db.scalar(select(EmployeeLoan.id).where(EmployeeLoan.id == loan_id)) is None:
+    account = db.scalar(select(EmployeeLoan.employee_account_id).where(EmployeeLoan.id == loan_id))
+    if account is None:
         raise AppError(404, "employee_loan_not_found", "El préstamo no existe.")
+    lock_account(db, account)  # the internal account first (R8-4's lock order)
     loan = _lock_loan(db, loan_id)
     request_id = uuid5(NAMESPACE, f"employee-loan-reversal:{client_request_id}")
     if loan.reversal_operation_id is not None:
@@ -493,11 +508,11 @@ def reverse(db: Session, actor: User, loan_id: int, reason: str, client_request_
     if applied_installments(db, loan.id):
         raise AppError(
             409,
-            "employee_loan_has_applied_installments",
-            "Una liquidación ya aplicó cuotas de este préstamo: no se revierte.",
+            "loan_applied",
+            "Una liquidación cerrada ya aplicó cuotas de este préstamo: no se revierte. Reabrí la liquidación y "
+            "excluilas.",
         )
     assert loan.operation_id is not None  # a published loan always has it (0027)
-    lock_account(db, loan.employee_account_id)
     reversal = ledger.reverse_document_operation(
         db,
         actor=actor,

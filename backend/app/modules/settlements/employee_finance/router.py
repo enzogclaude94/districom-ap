@@ -13,7 +13,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Query, Response
 
-from app.modules.settlements.employee_finance import compensation, loans, movements, views
+from app.modules.settlements.employee_finance import compensation, loans, movements, payrolls, views
 from app.modules.settlements.employee_finance import schemas as s
 from app.modules.settlements.employee_finance.access import AreaAdmin, AreaOperator, AreaViewer
 from app.platform.auth.deps import DbSession
@@ -216,3 +216,111 @@ def defer_installment(
     result = loans.defer(db, user, installment_id, body.reason, replacements, body.client_request_id)
     response.status_code = 200
     return views.loan(db, result.id)
+
+
+# --- internal payrolls (R8-4) --------------------------------------------------------------------------------------
+
+PAYROLL_RESPONSES: dict[int | str, dict[str, str]] = {
+    200: {"description": "Repetición de una solicitud ya registrada: devuelve la liquidación como quedó."},
+    201: {"description": "Registrado."},
+}
+
+
+@router.get("/payrolls", response_model=s.PayrollPage)
+def list_payrolls(
+    db: DbSession,
+    _: AreaViewer,
+    employee_id: int | None = None,
+    status: s.PayrollStatus | None = None,
+    kind: s.PayrollKind | None = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> s.PayrollPage:
+    return views.payrolls(db, employee_id, status, kind, limit, offset)
+
+
+@router.post("/payrolls", response_model=s.PayrollOut, status_code=201, responses=PAYROLL_RESPONSES)
+def create_payroll(body: s.PayrollIn, db: DbSession, user: AreaOperator, response: Response) -> s.PayrollOut:
+    """Open a payroll for an employee and a period. A REGULAR one over a full month gets its salary proposed."""
+    result = payrolls.create(
+        db,
+        user,
+        body.employee_id,
+        body.kind,
+        body.period_start,
+        body.period_end,
+        body.payment_date,
+        body.notes,
+        body.client_request_id,
+    )
+    response.status_code = 201 if result.created else 200
+    return views.payroll(db, result.id)
+
+
+@router.get("/payrolls/{payroll_id}", response_model=s.PayrollOut)
+def get_payroll(payroll_id: int, db: DbSession, _: AreaViewer) -> s.PayrollOut:
+    """The payroll; while OPEN, its draft and the preview (totals, blockers and the token a close confirms)."""
+    return views.payroll(db, payroll_id)
+
+
+@router.patch("/payrolls/{payroll_id}", response_model=s.PayrollOut)
+def update_payroll(payroll_id: int, body: s.PayrollPeriodIn, db: DbSession, user: AreaOperator) -> s.PayrollOut:
+    payrolls.update_period(db, user, payroll_id, body.period_start, body.period_end, body.payment_date, body.notes)
+    return views.payroll(db, payroll_id)
+
+
+@router.post("/payrolls/{payroll_id}/lines", response_model=s.PayrollOut, status_code=201)
+def add_payroll_line(payroll_id: int, body: s.PayrollLineIn, db: DbSession, user: AreaAdmin) -> s.PayrollOut:
+    payrolls.add_line(db, user, payroll_id, body.kind, body.amount, body.description)
+    return views.payroll(db, payroll_id)
+
+
+@router.patch("/payroll-lines/{line_id}", response_model=s.PayrollOut)
+def update_payroll_line(line_id: int, body: s.PayrollLineUpdateIn, db: DbSession, user: AreaAdmin) -> s.PayrollOut:
+    return views.payroll(db, payrolls.update_line(db, user, line_id, body.amount, body.description))
+
+
+@router.delete("/payroll-lines/{line_id}", response_model=s.PayrollOut)
+def remove_payroll_line(line_id: int, db: DbSession, user: AreaAdmin) -> s.PayrollOut:
+    return views.payroll(db, payrolls.remove_line(db, user, line_id))
+
+
+@router.put("/payrolls/{payroll_id}/choices", response_model=s.PayrollOut)
+def choose_payroll_item(payroll_id: int, body: s.PayrollChoiceIn, db: DbSession, user: AreaOperator) -> s.PayrollOut:
+    """Include or exclude a movement or an installment, or apply part of a movement. Nothing is applied yet."""
+    payrolls.choose(
+        db,
+        user,
+        payroll_id,
+        ledger_entry_id=body.ledger_entry_id,
+        installment_id=body.installment_id,
+        included=body.included,
+        amount=body.amount,
+    )
+    return views.payroll(db, payroll_id)
+
+
+@router.post("/payrolls/{payroll_id}/close", response_model=s.PayrollOut, responses=PAYROLL_RESPONSES)
+def close_payroll(
+    payroll_id: int, body: s.PayrollCloseIn, db: DbSession, user: AreaAdmin, response: Response
+) -> s.PayrollOut:
+    """Freeze the version previewed (`preview_token`): its applications and, with credits, PAYROLL_CLOSE."""
+    result = payrolls.close(db, user, payroll_id, body.version, body.preview_token, body.confirm)
+    response.status_code = 201 if result.created else 200
+    return views.payroll(db, result.id)
+
+
+@router.post("/payrolls/{payroll_id}/reopen", response_model=s.PayrollOut, responses=PAYROLL_RESPONSES)
+def reopen_payroll(
+    payroll_id: int, body: s.PayrollReopenIn, db: DbSession, user: AreaAdmin, response: Response
+) -> s.PayrollOut:
+    """Reopen a closed payroll for correction; its close stays in effect until the next one."""
+    result = payrolls.reopen(db, user, payroll_id, body.version, body.reason)
+    response.status_code = 201 if result.created else 200
+    return views.payroll(db, result.id)
+
+
+@router.post("/payrolls/{payroll_id}/cancel", response_model=s.PayrollOut)
+def cancel_payroll(payroll_id: int, body: s.PayrollCancelIn, db: DbSession, user: AreaAdmin) -> s.PayrollOut:
+    payrolls.cancel(db, user, payroll_id, body.reason)
+    return views.payroll(db, payroll_id)
