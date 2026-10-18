@@ -8,7 +8,7 @@ import { OPERATION_LABELS, sourceHref, sourceLabel } from "@/modules/settlements
 import { EmployeeFinanceDetailView } from "@/modules/settlements/employees/employee-detail";
 import { INSTALLMENT_STATUS_LABELS, ORIGIN_LABELS, documentOf } from "@/modules/settlements/employees/labels";
 import { EmployeeLoanView } from "@/modules/settlements/employees/loan-detail";
-import { addMonths, sumAmounts } from "@/modules/settlements/employees/loan-schedule";
+import { addMonths, nextDay, sumAmounts } from "@/modules/settlements/employees/loan-schedule";
 
 import { jsonResponse, renderWithQuery } from "./render";
 
@@ -179,6 +179,8 @@ describe("labels and helpers of R8-3", () => {
     expect(addMonths("2026-11-02", 1)).toBe("2026-12-02");
     expect(addMonths("2027-01-31", 1)).toBe("2027-02-28");
     expect(addMonths("2026-12-15", 2)).toBe("2027-02-15");
+    expect(nextDay("2026-12-31")).toBe("2027-01-01");
+    expect(nextDay("2027-02-28")).toBe("2027-03-01");
     expect(sumAmounts(["33.333,33", "33333,33", "33333.34"])).toBe("100000.00");
     expect(sumAmounts(["40.000", "60.000"])).toBe("100000.00");
     expect(sumAmounts(["40.000", "x"])).toBeNull();
@@ -343,6 +345,16 @@ describe("EmployeeLoanView", () => {
     const second = within(dialog).getByLabelText("Importe de la cuota 5");
     await userEvent.clear(second);
     await userEvent.type(second, "60.000");
+    // Deferring moves debt later: a replacement on the deferred installment's own date (30/12) is refused.
+    const due = within(dialog).getByLabelText("Vencimiento de la cuota 4");
+    expect(due).toHaveAttribute("min", "2026-12-31");
+    await userEvent.clear(due);
+    await userEvent.type(due, "2026-12-30");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Confirmar postergación" }));
+    expect(within(dialog).getByText(/cada cuota nueva tiene que vencer después del 30\/12\/2026/)).toBeInTheDocument();
+    expect(posted(spy, "/defer")).toHaveLength(0);
+    await userEvent.clear(due);
+    await userEvent.type(due, "2027-01-30");
     await userEvent.click(within(dialog).getByRole("button", { name: "Confirmar postergación" }));
     await waitFor(() => expect(posted(spy, "/loan-installments/102/defer")).toHaveLength(1));
     expect(posted(spy, "/defer")[0]).toMatchObject({

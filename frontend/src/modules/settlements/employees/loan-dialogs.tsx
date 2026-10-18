@@ -26,7 +26,7 @@ import {
   type LoanTerms,
 } from "./api";
 import { employeeLoanHref, loanTitle } from "./labels";
-import { addMonths, editableAmount, sameAmount, sumAmounts } from "./loan-schedule";
+import { addMonths, editableAmount, nextDay, sameAmount, sumAmounts } from "./loan-schedule";
 import { MovementLegs, Problem, movementErrorView } from "./movement-dialogs";
 
 const MAX_INSTALLMENTS = 120;
@@ -123,6 +123,15 @@ function checkRows(rows: Row[], expected: string, minDate: string, what: string)
   const total = sumAmounts(rows.map((row) => row.amount));
   if (total === null || !sameAmount(total, expected))
     return `Las cuotas tienen que sumar exactamente ${formatMoney(expected)} (${what}).`;
+  return null;
+}
+
+/** Deferring moves debt later: each replacement falls after the deferred installment, in order (Enzo, R8-3). */
+function checkDeferral(rows: Row[], installment: LoanInstallment): string | null {
+  if (rows.some((row) => row.due_on && row.due_on <= installment.due_on))
+    return `Postergar es mover la cuota ${installment.number} más adelante: cada cuota nueva tiene que vencer después del ${formatDate(installment.due_on)}.`;
+  if (rows.some((row, index) => index > 0 && row.due_on < rows[index - 1].due_on))
+    return "Las cuotas nuevas tienen que ir en orden de vencimiento.";
   return null;
 }
 
@@ -409,11 +418,12 @@ export function DeferInstallmentDialog({
   const pending = action.mutation.isPending;
   const nextNumber = Math.max(...loan.installments.map((i) => i.number)) + 1;
   const title = `Postergar la cuota ${installment.number}`;
-  const intro = `${formatMoney(installment.amount)} · vence el ${formatDate(installment.due_on)}. La cuota queda en la historia como postergada y la reemplazan las nuevas.`;
+  const intro = `${formatMoney(installment.amount)} · vence el ${formatDate(installment.due_on)}. La cuota queda en la historia como postergada y la reemplazan las nuevas, que vencen después del ${formatDate(installment.due_on)}.`;
   const submit = (event: FormEvent) => {
     event.preventDefault();
     const local =
       (reason.trim() ? null : "Indicá el motivo de la postergación.") ??
+      checkDeferral(rows, installment) ??
       checkRows(rows, installment.amount, loan.business_date, `la cuota ${installment.number}`);
     setProblem(local);
     if (local) return;
@@ -443,7 +453,7 @@ export function DeferInstallmentDialog({
           <h3 className="text-sm font-medium">Nuevas cuotas</h3>
           <ScheduleEditor
             rows={rows}
-            minDate={loan.business_date}
+            minDate={nextDay(installment.due_on)}
             onChange={setRows}
             testId="replacement-rows"
             numberOf={(index) => nextNumber + index}

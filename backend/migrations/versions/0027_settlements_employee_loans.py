@@ -202,6 +202,11 @@ BEGIN
                 RAISE EXCEPTION 'employee_loan_installments: % replaces a deferred installment of the same loan',
                     NEW.number USING ERRCODE = 'check_violation';
             END IF;
+            IF NEW.due_on <= parent.due_on THEN
+                RAISE EXCEPTION 'employee_loan_installments: replacement % is due on %, not after the deferred '
+                    'installment % (%)', NEW.number, NEW.due_on, parent.number, parent.due_on
+                    USING ERRCODE = 'check_violation';
+            END IF;
         END IF;
         RETURN NEW;
     END IF;
@@ -308,6 +313,16 @@ BEGIN
                                            WHERE r.deferred_from_id = d.id))
     THEN
         RAISE EXCEPTION 'a deferred installment of employee loan % is not replaced by exactly its amount', lid
+            USING ERRCODE = 'check_violation';
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM (
+            SELECT due_on, lag(due_on) OVER (PARTITION BY deferred_from_id ORDER BY number) AS previous_due_on
+            FROM settlements.employee_loan_installments
+            WHERE loan_id = lid AND deferred_from_id IS NOT NULL) r
+        WHERE r.due_on < r.previous_due_on)
+    THEN
+        RAISE EXCEPTION 'the replacements of a deferred installment of employee loan % are out of order', lid
             USING ERRCODE = 'check_violation';
     END IF;
     IF l.reversal_operation_id IS NULL AND (

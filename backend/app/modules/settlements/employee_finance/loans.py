@@ -17,8 +17,9 @@ deferring one moves nothing. The database checks every rule at commit (migration
   one may fall in the loan's own month). Once confirmed the schedule never changes: only a deferral replaces an
   installment.
 - A deferral marks a SCHEDULED installment DEFERRED (who, when, why: history, never rewritten) and creates one or
-  more new SCHEDULED installments, with new numbers, adding up to exactly its amount. A DEFERRED installment is
-  deferred again through its replacement.
+  more new SCHEDULED installments, with new numbers, adding up to exactly its amount, each due strictly after the
+  deferred one and in order (deferring moves debt later, never earlier: bringing installments forward would be
+  another operation). A DEFERRED installment is deferred again through its replacement, against its own date.
 - The balance of a loan is its principal while it is in effect (R8-4 will subtract the installments a payroll
   applies), never derived from the internal account. Its state is derived: ACTIVE or REVERSED.
 - Reversal: the whole loan, with a reason; the REVERSAL of its operation on the original date puts the money back
@@ -38,6 +39,7 @@ import logging
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import ROUND_DOWN, Decimal
+from itertools import pairwise
 from typing import Any
 from uuid import UUID, uuid5
 
@@ -372,8 +374,16 @@ def defer(
     for item in items:
         if item.amount <= 0:
             raise AppError(422, "invalid_installment_amount", "Cada cuota nueva tiene que ser mayor a cero.")
-        if item.due_on < loan.business_date:
-            raise _due_before_loan(item.due_on, loan.business_date)
+        if item.due_on <= installment.due_on:
+            raise AppError(
+                422,
+                "replacement_due_not_after_original",
+                f"Postergar es mover la cuota {installment.number} más adelante: cada cuota nueva tiene que vencer "
+                f"después del {installment.due_on.strftime('%d/%m/%Y')}.",
+                {"due_on": item.due_on.isoformat(), "deferred_due_on": installment.due_on.isoformat()},
+            )
+    if any(b.due_on < a.due_on for a, b in pairwise(items)):
+        raise AppError(422, "schedule_out_of_order", "Las cuotas nuevas tienen que ir en orden de vencimiento.")
     total = sum((i.amount for i in items), Decimal("0"))
     if total != installment.amount:
         raise AppError(

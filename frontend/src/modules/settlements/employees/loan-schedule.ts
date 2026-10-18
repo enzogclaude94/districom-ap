@@ -16,6 +16,12 @@ export function addMonths(iso: string, months: number): string {
   return `${targetYear}-${pad(targetMonth)}-${pad(Math.min(day, last))}`;
 }
 
+/** The next day, ISO in, ISO out: the earliest date a replacement may fall on when deferring (Enzo, R8-3). */
+export function nextDay(iso: string): string {
+  const [year, month, day] = iso.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day + 1)).toISOString().slice(0, 10);
+}
+
 /** An API amount ("100000.00") as the form shows it for editing ("100000,00"). */
 export const editableAmount = (amount: string) => amount.replace(".", ",");
 

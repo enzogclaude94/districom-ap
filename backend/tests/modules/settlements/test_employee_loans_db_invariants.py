@@ -367,6 +367,55 @@ def test_deferring_is_exact(world: dict[str, Any], db: Session) -> None:
     )
 
 
+def test_a_replacement_falls_after_the_deferred_installment_and_in_order(world: dict[str, Any], db: Session) -> None:
+    """[13] (Enzo's adjustment) a replacement is due strictly after the installment it replaces, and the
+    replacements of one deferral go in order: written by hand, the insert or the commit fails."""
+    w = world
+    loan = w["loan"]
+    one = _inst_id(loan, 1)  # $1.000, due on 30/11/2026
+    defer_sql = (
+        "UPDATE settlements.employee_loan_installments SET status = 'DEFERRED', deferred_reason = 'x', "
+        "deferred_by = :u, deferred_at = now(), deferral_request_id = :k, deferral_fingerprint = :f WHERE id = :i"
+    )
+
+    def _defer(*replacements: tuple[date, str]) -> Callable[[], None]:
+        def _write() -> None:
+            db.execute(text(defer_sql), {"u": w["user"], "k": uuid4(), "f": FINGERPRINT, "i": one})
+            for k, (due_on, amount) in enumerate(replacements):
+                _installment(db, loan["id"], 4 + k, amount, due_on, one)
+
+        return _write
+
+    db.rollback()
+    not_after = "not after the deferred installment"
+    assert not_after in _refused(db, _defer((date(2026, 11, 30), "1000")))
+    assert not_after in _refused(db, _defer((date(2026, 11, 15), "1000")))
+    assert not_after in _refused(db, _defer((date(2026, 12, 15), "400"), (date(2026, 11, 29), "600")))
+    out_of_order = "are out of order"
+    assert out_of_order in _refused(db, _defer((date(2027, 1, 31), "400"), (date(2026, 12, 31), "600")))
+    _defer((date(2026, 12, 1), "400"), (date(2026, 12, 1), "600"))()
+    db.commit()
+    # A chain: #4 (01/12) is deferred against its own date, not #1's.
+    four = int(
+        db.execute(
+            text("SELECT id FROM settlements.employee_loan_installments WHERE loan_id = :l AND number = 4"),
+            {"l": loan["id"]},
+        ).scalar_one()
+    )
+    db.rollback()
+
+    def _defer_four(due_on: date) -> Callable[[], None]:
+        def _write() -> None:
+            db.execute(text(defer_sql), {"u": w["user"], "k": uuid4(), "f": FINGERPRINT, "i": four})
+            _installment(db, loan["id"], 6, "400", due_on, four)
+
+        return _write
+
+    assert not_after in _refused(db, _defer_four(date(2026, 12, 1)))
+    _defer_four(date(2026, 12, 2))()
+    db.commit()
+
+
 def test_installments_never_change_nor_go_away(world: dict[str, Any], db: Session) -> None:
     """[12] DEFERRED is immutable · [18] no DELETE · [19] number, date and amount never change."""
     w = world

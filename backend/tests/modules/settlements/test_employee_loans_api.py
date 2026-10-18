@@ -443,7 +443,7 @@ def test_a_deferred_installment_is_deferred_again_through_its_replacement(
     assert sum(Decimal(i["amount"]) for i in loan["installments"] if i["status"] == "SCHEDULED") == Decimal("300000")
 
 
-def test_a_deferral_adds_up_exactly_with_a_reason_and_dates_after_the_loan(
+def test_a_deferral_adds_up_exactly_with_a_reason(
     user_as: Callable[..., TestClient], ana: int, funded: dict[str, int], db: Session
 ) -> None:
     client = area_admin(user_as)
@@ -458,9 +458,48 @@ def test_a_deferral_adds_up_exactly_with_a_reason_and_dates_after_the_loan(
     assert error(defer(client, two, [(later, "100000")], reason=" \t ")) == (422, "reason_required")
     assert error(defer(client, two, [])) == (422, "validation_error")
     assert error(defer(client, two, [(later, "0")])) == (422, "validation_error")
-    assert error(defer(client, two, [(days_ago(400), "100000")])) == (422, "due_before_loan")
     assert error(defer(client, 999999, [(later, "100000")])) == (404, "installment_not_found")
     assert _count(db, "employee_loan_installments") == 3
+
+
+def test_a_replacement_falls_strictly_after_the_deferred_installment(
+    user_as: Callable[..., TestClient], ana: int, funded: dict[str, int], db: Session
+) -> None:
+    """Enzo's adjustment: deferring moves debt later. #2 is due on 30/12/2026; every replacement must be due after
+    it, in order. Bringing installments forward would be another operation, never a deferral."""
+    client = area_admin(user_as)
+    loan = _loan(user_as, ana, funded)
+    two = installment(loan, 2)
+    assert two["due_on"] == "2026-12-30"
+    # 2. The same date is refused; 3. an earlier one too (even if after the loan).
+    same = defer(client, two["id"], [(date(2026, 12, 30), "100000")])
+    assert error(same) == (422, "replacement_due_not_after_original")
+    assert same.json()["details"] == {"due_on": "2026-12-30", "deferred_due_on": "2026-12-30"}
+    assert error(defer(client, two["id"], [(date(2026, 12, 15), "100000")])) == (
+        422,
+        "replacement_due_not_after_original",
+    )
+    # 4. Several replacements with one of them earlier: the whole deferral fails, nothing changes.
+    one_earlier = defer(client, two["id"], [(date(2026, 12, 15), "40000"), (date(2027, 1, 31), "60000")])
+    assert error(one_earlier) == (422, "replacement_due_not_after_original")
+    assert error(defer(client, two["id"], [(date(2027, 1, 31), "40000"), (date(2027, 1, 15), "60000")])) == (
+        422,
+        "schedule_out_of_order",
+    )
+    assert _count(db, "employee_loan_installments") == 3
+    assert installment(client.get(f"{EF}/loans/{loan['id']}").json(), 2)["status"] == "SCHEDULED"
+    # 1. The next day is enough; the same day for two replacements keeps the order.
+    loan = deferred(client, two["id"], [(date(2026, 12, 31), "40000"), (date(2026, 12, 31), "60000")])
+    assert schedule(loan)[3:] == [
+        (4, "2026-12-31", "40000.00", "SCHEDULED"),
+        (5, "2026-12-31", "60000.00", "SCHEDULED"),
+    ]
+    # 5. A chain is checked against the installment being deferred now: #4 is due on 31/12, so 31/12 is refused
+    # (although it is after #2's 30/12) and 01/01 is fine.
+    four = installment(loan, 4)["id"]
+    assert error(defer(client, four, [(date(2026, 12, 31), "40000")])) == (422, "replacement_due_not_after_original")
+    loan = deferred(client, four, [(date(2027, 1, 1), "40000")])
+    assert installment(loan, 6)["due_on"] == "2027-01-01"
 
 
 def test_who_defers(user_as: Callable[..., TestClient], ana: int, funded: dict[str, int]) -> None:
