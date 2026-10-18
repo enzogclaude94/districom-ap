@@ -18,7 +18,7 @@ const cents = (amount: string) => Math.round(Number(amount) * 100);
 /** Accounts with a code, as any Rendiciones user sees them: the employee area's own (ADR 010) only show with it. */
 async function balances(page: Page) {
   const accounts = await api<Account[]>(page.request, "GET", "/settlements/accounts?include_inactive=true");
-  const visible = accounts.filter((a) => a.code && !a.kind?.startsWith("EMPLOYEE"));
+  const visible = accounts.filter((a) => a.code && !a.kind?.startsWith("EMPLOYEE") && a.kind !== "PAYROLL_EXPENSE");
   return Object.fromEntries(visible.map((a) => [a.code!, cents(a.balance)]));
 }
 
