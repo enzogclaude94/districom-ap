@@ -4,7 +4,16 @@ import { parseAmount } from "@/modules/settlements/cash/amount";
 import { pendingHref, pendingTitle } from "@/modules/settlements/pending/labels";
 import { settlementTitle } from "@/modules/settlements/delivery/labels";
 
-import type { AccountMovement, BalanceReading, Direction, MovementKind, MovementOrigin, TermStatus } from "./api";
+import type {
+  AccountMovement,
+  BalanceReading,
+  Direction,
+  InstallmentStatus,
+  LoanStatus,
+  MovementKind,
+  MovementOrigin,
+  TermStatus,
+} from "./api";
 
 export const SALARY_NOTICE = "Sueldo base interno (mensual). No es el recibo de sueldo legal.";
 
@@ -33,6 +42,8 @@ export const ORIGIN_LABELS: Record<MovementOrigin, string> = {
   CONSUMPTION_REVERSAL: "Reverso de consumo",
   ADVANCE_REVERSAL: "Reverso de adelanto",
   ADJUSTMENT_REVERSAL: "Reverso de ajuste",
+  LOAN: "Préstamo",
+  LOAN_REVERSAL: "Reverso de préstamo",
   OTHER: "Otro movimiento",
 };
 
@@ -47,6 +58,17 @@ export const MOVEMENT_READING = { CHARGE: "Le suma deuda", CREDIT: "Le acredita"
 
 export const employeeFinanceHref = (employeeId: number) => `/rendiciones/empleados/${employeeId}`;
 export const employeeMovementHref = (movementId: number) => `/rendiciones/empleados/movimientos/${movementId}`;
+export const employeeLoanHref = (loanId: number) => `/rendiciones/empleados/prestamos/${loanId}`;
+export const loanTitle = (loanId: number) => `Préstamo n.º ${loanId}`;
+
+export const LOAN_STATUS_LABELS: Record<LoanStatus, string> = { ACTIVE: "Vigente", REVERSED: "Revertido" };
+
+/** No installment reads paid, deducted or applied: there is no payroll yet (R8-4). */
+export const INSTALLMENT_STATUS_LABELS: Record<InstallmentStatus, string> = {
+  SCHEDULED: "Programada",
+  DEFERRED: "Postergada",
+  CANCELLED: "Cancelada",
+};
 
 export const MOVEMENT_KIND_LABELS: Record<MovementKind, string> = {
   CONSUMPTION: "Consumo",
@@ -81,6 +103,7 @@ export function documentOf(movement: AccountMovement): { label: string; href: st
   const { document_kind: kind, document_id: id, document_number: number } = movement;
   if (kind === null || id === null) return { label: "—", href: null };
   if (kind === "EMPLOYEE_MOVEMENT") return { label: `Movimiento n.º ${id}`, href: employeeMovementHref(id) };
+  if (kind === "EMPLOYEE_LOAN") return { label: `Ver préstamo n.º ${id}`, href: employeeLoanHref(id) };
   if (kind === "PENDING_COLLECTION") return { label: pendingTitle(id), href: pendingHref(id) };
   const title = number !== null ? settlementTitle(number) : `Rendición #${id}`;
   if (kind === "OUTLET_SETTLEMENT") return { label: `${title} (boca)`, href: `/rendiciones/boca/${id}` };

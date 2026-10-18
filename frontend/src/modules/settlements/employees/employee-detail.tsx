@@ -25,6 +25,7 @@ import {
   type MovementKind,
 } from "./api";
 import {
+  LOAN_STATUS_LABELS,
   MOVEMENT_READING,
   ORIGIN_LABELS,
   READING_LABELS,
@@ -32,7 +33,10 @@ import {
   SALARY_NOTICE,
   TERM_STATUS_LABELS,
   documentOf,
+  employeeLoanHref,
+  loanTitle,
 } from "./labels";
+import { LoanDialog } from "./loan-dialogs";
 import { MovementDialog } from "./movement-dialogs";
 import { EndTermDialog, NewTermDialog } from "./term-dialogs";
 
@@ -53,7 +57,7 @@ function AccountMovements({ employeeId }: { employeeId: number }) {
       <EmptyState
         icon={Wallet}
         title="Sin movimientos"
-        description="Cuando se le asigne una rendición o un pendiente, o se registre un consumo, un adelanto o un ajuste, el movimiento aparece acá."
+        description="Cuando se le asigne una rendición o un pendiente, o se registre un consumo, un adelanto, un ajuste o un préstamo, el movimiento aparece acá."
       />
     );
   }
@@ -134,6 +138,82 @@ function AccountMovements({ employeeId }: { employeeId: number }) {
         </div>
       )}
     </>
+  );
+}
+
+/** The employee's loans (R8-3): each with its own balance, from the loan, never from the internal account. */
+function Loans({ employeeId, canGive, onGive }: { employeeId: number; canGive: boolean; onGive: () => void }) {
+  const loans = useQuery({
+    queryKey: [...employeeFinanceQueryKey, "loans", employeeId],
+    queryFn: () => employeeFinanceApi.loans(employeeId),
+  });
+  return (
+    <Card>
+      <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3">
+        <div className="space-y-1">
+          <CardTitle>Préstamos</CardTitle>
+          <CardDescription>Sin interés, en cuotas. Cada préstamo suma una vez a la cuenta interna.</CardDescription>
+        </div>
+        {canGive && (
+          <Button size="sm" onClick={onGive}>
+            Dar préstamo
+          </Button>
+        )}
+      </CardHeader>
+      <CardContent>
+        {loans.isPending ? (
+          <Skeleton className="h-16 w-full" />
+        ) : loans.isError ? (
+          <ErrorState error={loans.error} onRetry={() => void loans.refetch()} />
+        ) : loans.data.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Sin préstamos.</p>
+        ) : (
+          <Table stacked aria-label="Préstamos del empleado">
+            <TableHeader>
+              <TableRow>
+                <TableHead>Préstamo</TableHead>
+                <TableHead>Fecha</TableHead>
+                <TableHead className="text-right">Importe</TableHead>
+                <TableHead className="text-right">Saldo</TableHead>
+                <TableHead>Próximo vencimiento</TableHead>
+                <TableHead>Estado</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {loans.data.map((loan) => (
+                <TableRow key={loan.id} data-testid={`loan-row-${loan.id}`}>
+                  <TableCell data-label="Préstamo">
+                    <Link href={employeeLoanHref(loan.id)} className="text-primary hover:underline">
+                      {loanTitle(loan.id)}
+                    </Link>
+                    {loan.description && (
+                      <span className="block text-sm break-words text-muted-foreground">{loan.description}</span>
+                    )}
+                  </TableCell>
+                  <TableCell data-label="Fecha" className="whitespace-nowrap tabular-nums">
+                    {formatDate(loan.business_date)}
+                  </TableCell>
+                  <TableCell data-label="Importe" className="text-right whitespace-nowrap tabular-nums">
+                    {formatMoney(loan.principal)}
+                  </TableCell>
+                  <TableCell data-label="Saldo" className="text-right whitespace-nowrap tabular-nums">
+                    {formatMoney(loan.balance)}
+                  </TableCell>
+                  <TableCell data-label="Próximo vencimiento" className="whitespace-nowrap tabular-nums">
+                    {loan.next_due_on ? formatDate(loan.next_due_on) : "—"}
+                  </TableCell>
+                  <TableCell data-label="Estado">
+                    <Badge tone={loan.status === "ACTIVE" ? "info" : "neutral"}>
+                      {LOAN_STATUS_LABELS[loan.status]}
+                    </Badge>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -233,9 +313,10 @@ export function EmployeeFinanceDetailView({ employeeId }: { employeeId: number }
   const role = areaRole(me.data, EMPLOYEE_FINANCE_AREA);
   const canEdit = roleAtLeast(role, "admin");
   const canOperate = roleAtLeast(role, "operator");
-  // An advance moves a cash box or the bank: it also needs operator in Rendiciones (ADR 010 D9).
+  // An advance or a loan moves a cash box or the bank: it also needs operator in Rendiciones (ADR 010 D9).
   const canAdvance = canEdit && roleAtLeast(moduleRole(me.data, "settlements"), "operator");
   const [registering, setRegistering] = useState<MovementKind | null>(null);
+  const [lending, setLending] = useState(false);
   const detail = useQuery({
     queryKey: [...employeeFinanceQueryKey, "detail", employeeId],
     queryFn: () => employeeFinanceApi.detail(employeeId),
@@ -309,7 +390,11 @@ export function EmployeeFinanceDetailView({ employeeId }: { employeeId: number }
         </CardContent>
       </Card>
 
+      <Loans employeeId={employeeId} canGive={canAdvance} onGive={() => setLending(true)} />
       <TermHistory employeeId={employeeId} canEdit={canEdit} active={employee.active} />
+      {lending && (
+        <LoanDialog employeeId={employeeId} employeeName={employee.full_name} onClose={() => setLending(false)} />
+      )}
       {registering && (
         <MovementDialog
           kind={registering}

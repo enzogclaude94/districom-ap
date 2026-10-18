@@ -27,6 +27,8 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 
 # Tables emptied after each test that uses the database.
 TRUNCATED_TABLES = (
+    "settlements.employee_loan_installments",
+    "settlements.employee_loans",
     "settlements.employee_movements",
     "settlements.employee_compensation_terms",
     "vehicles",

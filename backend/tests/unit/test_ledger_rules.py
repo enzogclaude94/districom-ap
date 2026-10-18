@@ -102,6 +102,15 @@ def test_fingerprint_changes_with_the_command(change: dict[str, object]) -> None
         ("EMPLOYEE_ADJUSTMENT", ["EMPLOYEE", "EMPLOYEE_ADJUSTMENTS"], [-1, 1], True),
         ("EMPLOYEE_ADJUSTMENT", ["EMPLOYEE", "ADJUSTMENT"], [1, -1], False),
         ("EMPLOYEE_ADJUSTMENT", ["CASH_BOX", "EMPLOYEE_ADJUSTMENTS"], [1, -1], False),
+        # R8-3: a loan, from one cash box or bank to the internal account; installments have no legs.
+        ("EMPLOYEE_LOAN", ["CASH_BOX", "EMPLOYEE"], [-1, 1], True),
+        ("EMPLOYEE_LOAN", ["BANK", "EMPLOYEE"], [-1, 1], True),
+        ("EMPLOYEE_LOAN", ["CASH_BOX", "EMPLOYEE"], [1, -1], False),
+        ("EMPLOYEE_LOAN", ["CASH_BOX", "BANK", "EMPLOYEE"], [-1, -1, 1], False),
+        ("EMPLOYEE_LOAN", ["CASH_BOX", "EMPLOYEE", "EMPLOYEE"], [-1, 1, 1], False),
+        ("EMPLOYEE_LOAN", ["CHEQUE_PORTFOLIO", "EMPLOYEE"], [-1, 1], False),
+        ("EMPLOYEE_LOAN", ["OUTLET_ADVANCES", "EMPLOYEE"], [-1, 1], False),
+        ("EMPLOYEE_LOAN", ["EMPLOYEE_ADJUSTMENTS", "EMPLOYEE"], [-1, 1], False),
     ],
 )
 def test_leg_shapes(type: str, kinds: list[str], signs: list[int], ok: bool) -> None:
@@ -114,11 +123,13 @@ def test_employee_movements_are_authorized_by_the_area() -> None:
         "EMPLOYEE_CONSUMPTION",
         "EMPLOYEE_ADVANCE",
         "EMPLOYEE_ADJUSTMENT",
+        "EMPLOYEE_LOAN",
     }
     assert {t: RULES[t].min_role for t in RULES if RULES[t].area is not None} == {
         "EMPLOYEE_CONSUMPTION": "operator",
         "EMPLOYEE_ADVANCE": "admin",
         "EMPLOYEE_ADJUSTMENT": "admin",
+        "EMPLOYEE_LOAN": "admin",
     }
     assert {rule.area for rule in RULES.values() if rule.area is not None} == {AREA}
 

@@ -67,12 +67,19 @@ SETTLEMENTS_TABLES = {
     "settlement_closing_remittances",
     "employee_compensation_terms",
     "employee_movements",
+    "employee_loans",
+    "employee_loan_installments",
 }
 
 # Added by 0024 (R7-3).
 REMITTANCE_TABLES = {"outlet_remittances", "settlement_closing_remittances"}
-# Added by 0025 (R8-1) and 0026 (R8-2).
-EMPLOYEE_FINANCE_TABLES = {"employee_compensation_terms", "employee_movements"}
+# Added by 0025 (R8-1), 0026 (R8-2) and 0027 (R8-3).
+EMPLOYEE_FINANCE_TABLES = {
+    "employee_compensation_terms",
+    "employee_movements",
+    "employee_loans",
+    "employee_loan_installments",
+}
 
 
 def _settlements_tables(url: str) -> set[str]:

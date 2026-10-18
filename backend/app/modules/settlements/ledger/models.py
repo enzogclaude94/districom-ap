@@ -121,6 +121,8 @@ OPERATION_TYPES = (
     "EMPLOYEE_CONSUMPTION",
     "EMPLOYEE_ADVANCE",
     "EMPLOYEE_ADJUSTMENT",
+    # R8-3: a loan handed to an employee; its document is the loan (its installments move no money).
+    "EMPLOYEE_LOAN",
 )
 # Operations whose document is an employee movement (R8-2): exactly one each.
 EMPLOYEE_MOVEMENT_TYPES = ("EMPLOYEE_CONSUMPTION", "EMPLOYEE_ADVANCE", "EMPLOYEE_ADJUSTMENT")
@@ -251,6 +253,14 @@ class FinancialOperation(IdMixin, Base):
             "source_id",
             unique=True,
             postgresql_where=text(f"type IN ({_in(EMPLOYEE_MOVEMENT_TYPES)})"),
+        ),
+        # A loan to an employee has exactly one operation (R8-3).
+        Index(
+            "uq_financial_operations_employee_loan",
+            "source_type",
+            "source_id",
+            unique=True,
+            postgresql_where=text("type = 'EMPLOYEE_LOAN'"),
         ),
         {"schema": SCHEMA},
     )
