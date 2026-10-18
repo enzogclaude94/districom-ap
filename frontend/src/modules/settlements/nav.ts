@@ -26,6 +26,14 @@ export const SETTLEMENTS_NAV: NavSection[] = [
   },
   { label: "Combustible", icon: Fuel, href: "/rendiciones/combustible" },
   // Protected area (ADR 010): listed only with an explicit grant, not even for the platform admin.
-  { label: "Empleados", icon: Users, href: "/rendiciones/empleados", area: "settlements.employee_finance" },
+  {
+    label: "Empleados",
+    icon: Users,
+    area: "settlements.employee_finance",
+    items: [
+      { label: "Cuentas internas", href: "/rendiciones/empleados", exact: true },
+      { label: "Liquidaciones internas", href: "/rendiciones/empleados/liquidaciones" },
+    ],
+  },
   { label: "Configuración del módulo", icon: SlidersHorizontal, href: "/rendiciones/configuracion" },
 ];

@@ -6,6 +6,9 @@ import { settlementTitle } from "@/modules/settlements/delivery/labels";
 
 import type {
   AccountMovement,
+  PayrollKind,
+  PayrollLineKind,
+  PayrollStatus,
   BalanceReading,
   Direction,
   InstallmentStatus,
@@ -44,6 +47,8 @@ export const ORIGIN_LABELS: Record<MovementOrigin, string> = {
   ADJUSTMENT_REVERSAL: "Reverso de ajuste",
   LOAN: "Préstamo",
   LOAN_REVERSAL: "Reverso de préstamo",
+  PAYROLL: "Liquidación interna (haberes)",
+  PAYROLL_CORRECTION: "Corrección de liquidación (reverso)",
   OTHER: "Otro movimiento",
 };
 
@@ -60,10 +65,39 @@ export const employeeFinanceHref = (employeeId: number) => `/rendiciones/emplead
 export const employeeMovementHref = (movementId: number) => `/rendiciones/empleados/movimientos/${movementId}`;
 export const employeeLoanHref = (loanId: number) => `/rendiciones/empleados/prestamos/${loanId}`;
 export const loanTitle = (loanId: number) => `Préstamo n.º ${loanId}`;
+export const payrollsHref = "/rendiciones/empleados/liquidaciones";
+export const payrollHref = (payrollId: number) => `${payrollsHref}/${payrollId}`;
+export const payrollTitle = (payrollId: number) => `Liquidación interna n.º ${payrollId}`;
+
+/** An internal payroll, never the legal payslip (ADR 010). */
+export const PAYROLL_NOTICE = "Liquidación interna: no es el recibo de sueldo legal.";
+export const PAYROLL_KIND_LABELS: Record<PayrollKind, string> = { REGULAR: "Regular", EXTRAORDINARY: "Extraordinaria" };
+export const PAYROLL_STATUS_LABELS: Record<PayrollStatus, string> = {
+  OPEN: "Abierta",
+  CLOSED: "Cerrada",
+  CANCELLED: "Anulada",
+};
+export const PAYROLL_STATUS_TONES: Record<PayrollStatus, NonNullable<BadgeProps["tone"]>> = {
+  OPEN: "info",
+  CLOSED: "success",
+  CANCELLED: "neutral",
+};
+export const LINE_KIND_LABELS: Record<PayrollLineKind, string> = {
+  SALARY: "Sueldo",
+  BONUS: "Bono",
+  INCENTIVE: "Incentivo",
+  OTHER_CREDIT: "Otro haber",
+};
+
+/** Applied derives from a close in effect; nothing is stored (Enzo's R8-4 point 6). */
+export function installmentLabel(status: InstallmentStatus, applied: boolean) {
+  if (status !== "SCHEDULED") return INSTALLMENT_STATUS_LABELS[status];
+  return applied ? "Aplicada" : "Pendiente de aplicar";
+}
 
 export const LOAN_STATUS_LABELS: Record<LoanStatus, string> = { ACTIVE: "Vigente", REVERSED: "Revertido" };
 
-/** No installment reads paid, deducted or applied: there is no payroll yet (R8-4). */
+/** The stored states; a scheduled one reads «Aplicada» or «Pendiente de aplicar» (`installmentLabel`). */
 export const INSTALLMENT_STATUS_LABELS: Record<InstallmentStatus, string> = {
   SCHEDULED: "Programada",
   DEFERRED: "Postergada",
@@ -104,6 +138,7 @@ export function documentOf(movement: AccountMovement): { label: string; href: st
   if (kind === null || id === null) return { label: "—", href: null };
   if (kind === "EMPLOYEE_MOVEMENT") return { label: `Movimiento n.º ${id}`, href: employeeMovementHref(id) };
   if (kind === "EMPLOYEE_LOAN") return { label: `Ver préstamo n.º ${id}`, href: employeeLoanHref(id) };
+  if (kind === "EMPLOYEE_PAYROLL") return { label: payrollTitle(id), href: payrollHref(id) };
   if (kind === "PENDING_COLLECTION") return { label: pendingTitle(id), href: pendingHref(id) };
   const title = number !== null ? settlementTitle(number) : `Rendición #${id}`;
   if (kind === "OUTLET_SETTLEMENT") return { label: `${title} (boca)`, href: `/rendiciones/boca/${id}` };

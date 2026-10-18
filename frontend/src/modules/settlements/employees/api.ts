@@ -27,9 +27,16 @@ export type MovementOrigin =
   | "ADJUSTMENT_REVERSAL"
   | "LOAN"
   | "LOAN_REVERSAL"
+  | "PAYROLL"
+  | "PAYROLL_CORRECTION"
   | "OTHER";
 export type DocumentKind =
-  "DELIVERY_SETTLEMENT" | "OUTLET_SETTLEMENT" | "PENDING_COLLECTION" | "EMPLOYEE_MOVEMENT" | "EMPLOYEE_LOAN";
+  | "DELIVERY_SETTLEMENT"
+  | "OUTLET_SETTLEMENT"
+  | "PENDING_COLLECTION"
+  | "EMPLOYEE_MOVEMENT"
+  | "EMPLOYEE_LOAN"
+  | "EMPLOYEE_PAYROLL";
 
 export interface CompensationTerm {
   id: number;
@@ -75,6 +82,8 @@ export interface AccountMovement {
   /** Employee movements (R8-2) and loans (R8-3): what it was, and whether the whole document was reversed since. */
   description?: string | null;
   document_reversed?: boolean | null;
+  /** R8-4: what the closes in effect of internal payrolls applied of it (absolute). */
+  applied?: string;
   created_at: string;
 }
 
@@ -151,6 +160,9 @@ export interface LoanPreview {
 export interface LoanInstallment extends ScheduledInstallment {
   id: number;
   status: InstallmentStatus;
+  /** Derived (R8-4): a close in effect applied it («Aplicada») or not yet («Pendiente de aplicar»). */
+  applied: boolean;
+  applied_payroll_id: number | null;
   deferred_from_id: number | null;
   deferred_from_number: number | null;
   deferred_reason: string | null;
@@ -166,8 +178,10 @@ export interface EmployeeLoanRow {
   principal: string;
   installment_count: number;
   status: LoanStatus;
-  /** From the loan, never from the internal account: the principal while in effect, 0 once reversed. */
+  /** From the loan, never from the internal account: principal minus the installments applied; 0 reversed. */
   balance: string;
+  applied_total: string;
+  /** Installments still to apply. */
   scheduled_count: number;
   next_due_on: string | null;
   description: string | null;
@@ -199,6 +213,125 @@ export interface LoanTerms {
   first_due_on: string;
   /** The schedule as confirmed; omitted: the default one (equal monthly installments). */
   installments?: { due_on: string; amount: string }[];
+}
+
+/** R8-4: internal payrolls («liquidaciones internas»): not a legal payslip. */
+export type PayrollKind = "REGULAR" | "EXTRAORDINARY";
+export type PayrollStatus = "OPEN" | "CLOSED" | "CANCELLED";
+export type PayrollLineKind = "SALARY" | "BONUS" | "INCENTIVE" | "OTHER_CREDIT";
+
+export interface PayrollTotals {
+  credits: string;
+  deductions: string;
+  credits_applied: string;
+  net: string;
+  deduction_pct: string | null;
+}
+
+export interface PayrollRow {
+  id: number;
+  employee_id: number;
+  employee_name: string;
+  kind: PayrollKind;
+  period_start: string;
+  period_end: string;
+  payment_date: string | null;
+  status: PayrollStatus;
+  version: number;
+  totals: PayrollTotals;
+  totals_from_draft: boolean;
+  in_correction: boolean;
+}
+
+export interface PayrollLine {
+  id: number;
+  kind: PayrollLineKind;
+  amount: string;
+  description: string | null;
+  source: "TERM" | "MANUAL";
+  compensation_term_id: number | null;
+}
+
+export interface PayrollLeg {
+  entry_id: number;
+  operation_id: number;
+  origin: MovementOrigin;
+  business_date: string;
+  document_kind: DocumentKind | null;
+  document_id: number | null;
+  description: string | null;
+  group_operation_id: number;
+  reversed: boolean;
+  original_amount: string;
+  applied_elsewhere: string;
+  available: string;
+  proposed: boolean;
+  included: boolean;
+  amount: string;
+  partial: boolean;
+}
+
+export interface PayrollInstallment {
+  installment_id: number;
+  loan_id: number;
+  loan_description: string | null;
+  number: number;
+  due_on: string;
+  amount: string;
+  overdue: boolean;
+  included: boolean;
+}
+
+export interface PayrollPreview extends PayrollTotals {
+  preview_token: string;
+  blockers: { code: string; message: string }[];
+  accrual: "FINANCIAL" | "NO_ACCRUAL";
+}
+
+export interface PayrollApplication {
+  entry_id: number;
+  origin: MovementOrigin;
+  business_date: string;
+  amount: string;
+  installment_id: number | null;
+  installment_number: number | null;
+  loan_id: number | null;
+}
+
+export interface PayrollClosing extends PayrollTotals {
+  id: number;
+  version: number;
+  kind: "FINANCIAL" | "NO_ACCRUAL";
+  operation_id: number | null;
+  reversal_operation_id: number | null;
+  closed_at: string;
+  closed_by_name: string;
+  superseded_at: string | null;
+  lines: PayrollLine[];
+  applications: PayrollApplication[];
+}
+
+export interface Payroll extends PayrollRow {
+  notes: string | null;
+  created_at: string;
+  created_by_name: string;
+  cancelled_at: string | null;
+  cancelled_by_name: string | null;
+  cancel_reason: string | null;
+  salary_hint: { status: "PROPOSED" | "MANUAL" | "NONE"; message: string; amount: string | null };
+  lines: PayrollLine[];
+  legs: PayrollLeg[];
+  installments: PayrollInstallment[];
+  preview: PayrollPreview | null;
+  closing: PayrollClosing | null;
+  closings: PayrollClosing[];
+  reopenings: {
+    from_version: number;
+    to_version: number;
+    reason: string;
+    reopened_at: string;
+    reopened_by_name: string;
+  }[];
 }
 
 export interface Page<T> {
@@ -260,6 +393,12 @@ export const employeeFinanceApi = {
   writeLoan: (path: string, body: Record<string, unknown>) => post<EmployeeLoan>(path, body),
   loans: (employeeId: number) => apiFetch<EmployeeLoanRow[]>(`${BASE}/employees/${employeeId}/loans`),
   loan: (loanId: number) => apiFetch<EmployeeLoan>(`${BASE}/loans/${loanId}`),
+  payrolls: (params: { employee_id?: number; status?: PayrollStatus; limit: number; offset: number }) =>
+    apiFetch<Page<PayrollRow>>(`${BASE}/payrolls${query(params)}`),
+  payroll: (payrollId: number) => apiFetch<Payroll>(`${BASE}/payrolls/${payrollId}`),
+  /** A write of R8-4: each answers the payroll as it stands (draft and preview included). */
+  writePayroll: (method: "POST" | "PUT" | "PATCH" | "DELETE", path: string, body?: Record<string, unknown>) =>
+    apiFetch<Payroll>(`${BASE}${path}`, { method, body: body === undefined ? undefined : JSON.stringify(body) }),
 };
 
 export const employeeFinanceQueryKey = ["settlements", "employee-finance"] as const;
