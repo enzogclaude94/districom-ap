@@ -111,6 +111,12 @@ def test_fingerprint_changes_with_the_command(change: dict[str, object]) -> None
         ("EMPLOYEE_LOAN", ["CHEQUE_PORTFOLIO", "EMPLOYEE"], [-1, 1], False),
         ("EMPLOYEE_LOAN", ["OUTLET_ADVANCES", "EMPLOYEE"], [-1, 1], False),
         ("EMPLOYEE_LOAN", ["EMPLOYEE_ADJUSTMENTS", "EMPLOYEE"], [-1, 1], False),
+        # R8-4: a payroll's credits, from its expense to the internal account (the company owes them).
+        ("PAYROLL_CLOSE", ["PAYROLL_EXPENSE", "EMPLOYEE"], [1, -1], True),
+        ("PAYROLL_CLOSE", ["PAYROLL_EXPENSE", "EMPLOYEE"], [-1, 1], False),
+        ("PAYROLL_CLOSE", ["EXPENSE", "EMPLOYEE"], [1, -1], False),
+        ("PAYROLL_CLOSE", ["PAYROLL_EXPENSE", "CASH_BOX"], [1, -1], False),
+        ("PAYROLL_CLOSE", ["PAYROLL_EXPENSE", "EMPLOYEE", "EMPLOYEE"], [1, -1, -1], False),
     ],
 )
 def test_leg_shapes(type: str, kinds: list[str], signs: list[int], ok: bool) -> None:
@@ -124,12 +130,14 @@ def test_employee_movements_are_authorized_by_the_area() -> None:
         "EMPLOYEE_ADVANCE",
         "EMPLOYEE_ADJUSTMENT",
         "EMPLOYEE_LOAN",
+        "PAYROLL_CLOSE",
     }
     assert {t: RULES[t].min_role for t in RULES if RULES[t].area is not None} == {
         "EMPLOYEE_CONSUMPTION": "operator",
         "EMPLOYEE_ADVANCE": "admin",
         "EMPLOYEE_ADJUSTMENT": "admin",
         "EMPLOYEE_LOAN": "admin",
+        "PAYROLL_CLOSE": "admin",
     }
     assert {rule.area for rule in RULES.values() if rule.area is not None} == {AREA}
 

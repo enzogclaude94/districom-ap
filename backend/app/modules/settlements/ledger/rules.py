@@ -223,6 +223,18 @@ RULES: dict[str, OperationRule] = {
         CASH_AND_BANK,
         area=EMPLOYEE_FINANCE_AREA,
     ),
+    # The close of an internal payroll (R8-4, admin of the area): «Sueldos y bonos internos» +H, the internal account
+    # -H, with H the salaries, bonuses, incentives and other credits it accrues. What the payroll applies of the
+    # internal account (shortages, consumptions, advances, installments...) moves no money: those legs already exist.
+    # No cash box nor bank: paying the payroll is R8-5. Its document is the payroll (one per financial close).
+    "PAYROLL_CLOSE": OperationRule(
+        "admin",
+        frozenset({"PAYROLL_EXPENSE", "EMPLOYEE"}),
+        "PAYROLL_EXPENSE",
+        (("PAYROLL_EXPENSE", 1), ("EMPLOYEE", -1)),
+        frozenset({"EMPLOYEE"}),
+        area=EMPLOYEE_FINANCE_AREA,
+    ),
 }
 EMPLOYEE_MOVEMENT_TYPES = frozenset({"EMPLOYEE_CONSUMPTION", "EMPLOYEE_ADVANCE", "EMPLOYEE_ADJUSTMENT"})
 EMPLOYEE_DOCUMENT_TYPES = EMPLOYEE_MOVEMENT_TYPES | {"EMPLOYEE_LOAN"}
@@ -238,6 +250,7 @@ DOCUMENT_TYPES = frozenset(
         "DIRECT_EXPENSE",
         "PAYMENT",
         "OUTLET_REMITTANCE",
+        "PAYROLL_CLOSE",
     }
     | CHEQUE_CYCLE_TYPES
     | EMPLOYEE_DOCUMENT_TYPES
@@ -255,7 +268,8 @@ REVERSIBLE_DOCUMENT_TYPES = frozenset(
 EXTERNAL_BANK_DEBITS = frozenset({"CHEQUE_REJECTION"})
 # Document operations that a corrected document may withdraw without replacing them (`withdraw_document_operation`):
 # an OUTLET settlement corrected to $0 is closed again without a ledger operation (Enzo's R7-2-Q1).
-WITHDRAWABLE_DOCUMENT_TYPES = frozenset({"SETTLEMENT_CLOSE"})
+# R8-4: a payroll corrected to no accrual (NO_ACCRUAL) withdraws its PAYROLL_CLOSE the same way.
+WITHDRAWABLE_DOCUMENT_TYPES = frozenset({"SETTLEMENT_CLOSE", "PAYROLL_CLOSE"})
 # REVERSAL has no rule here: it is only built by `reverse_operation` from the original's legs. The reversal of an
 # operation of a protected area takes admin of that area instead.
 REVERSAL_MIN_ROLE = "admin"
