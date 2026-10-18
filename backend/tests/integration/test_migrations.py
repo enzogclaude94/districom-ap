@@ -252,6 +252,7 @@ def test_account_name_key_backfill() -> None:
             "cobranzas de boca",
             "consumos de empleados",
             "ajustes a empleados",
+            "sueldos y bonos internos",
         ]
     finally:
         with engine.begin() as conn:
