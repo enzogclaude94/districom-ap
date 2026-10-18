@@ -4,6 +4,9 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Changed — R8‑3 DONE
+- **R8‑3 DONE** (aprobada por Enzo el 2026-10-18 con un ajuste previo al merge: los reemplazos de una postergación vencen estrictamente después de la cuota postergada; PR #41 mergeado `1fffb7b`; `0027` congelada). **R8‑4 autorizada** (liquidación interna y aplicaciones, `0028`): `NO_ACCRUAL` sin haberes nuevos, cuotas propuestas solo en una liquidación regular y nunca en una extraordinaria.
+
 ### Added — Empleados: préstamos, cuotas y postergación (R8‑3)
 - **Préstamo a empleado** (`0027`, documentos `employee_loans` y `employee_loan_installments`), sin interés, desde la ficha del empleado («Dar préstamo», admin del área y operator de Rendiciones): fecha, importe, caja o banco, cantidad de cuotas, primera fecha (por defecto a un mes, puede ser el mismo mes, nunca antes del préstamo). Segundo paso con las patas (Caja −P · Cuenta interna +P) y el cronograma calculado por el backend (cuotas iguales, la última absorbe el redondeo), editable antes de confirmar; tiene que sumar exacto.
 - **Operación `EMPLOYEE_LOAN`**: una sola pata en la cuenta interna; fondos como un adelanto (caja nunca negativa, banco sin descubierto, en su fecha y después).
