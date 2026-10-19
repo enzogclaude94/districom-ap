@@ -27,6 +27,8 @@ import {
 import {
   LOAN_STATUS_LABELS,
   MOVEMENT_READING,
+  PAYMENT_STATUS_LABELS,
+  PAYMENT_STATUS_TONES,
   ORIGIN_LABELS,
   READING_LABELS,
   READING_TONES,
@@ -35,10 +37,14 @@ import {
   documentOf,
   employeeLoanHref,
   loanTitle,
+  payoutHref,
+  payoutTitle,
+  payrollHref,
+  payrollTitle,
 } from "./labels";
 import { LoanDialog } from "./loan-dialogs";
 import { MovementDialog } from "./movement-dialogs";
-import { NewPayrollDialog } from "./payroll-list";
+import { NewPayrollDialog, periodLabel } from "./payroll-list";
 import { EndTermDialog, NewTermDialog } from "./term-dialogs";
 
 const PAGE_SIZE = 20;
@@ -308,6 +314,101 @@ function TermHistory({ employeeId, canEdit, active }: { employeeId: number; canE
   );
 }
 
+/**
+ * Liquidaciones y pagos (R8-5): the last payroll, what the closed payrolls still owe and the latest payouts. Never mixed
+ * with the internal account's balance (Enzo's R8-5 point 16): both are shown apart, each with its own label.
+ */
+function PaySummary({
+  employeeId,
+  balanceReading,
+  balance,
+}: {
+  employeeId: number;
+  balanceReading: string;
+  balance: string;
+}) {
+  const summary = useQuery({
+    queryKey: [...employeeFinanceQueryKey, "pay-summary", employeeId],
+    queryFn: () => employeeFinanceApi.paySummary(employeeId),
+  });
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Liquidaciones y pagos</CardTitle>
+        <CardDescription>
+          Lo pendiente de pago de las liquidaciones cerradas es aparte del saldo de la cuenta interna.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {summary.isPending ? (
+          <Skeleton className="h-24 w-full" />
+        ) : summary.isError ? (
+          <ErrorState error={summary.error} onRetry={() => void summary.refetch()} />
+        ) : (
+          <>
+            <dl className="divide-y divide-border rounded-md border border-border text-sm" data-testid="pay-summary">
+              <div className="flex flex-wrap justify-between gap-x-4 gap-y-0.5 px-3 py-2">
+                <dt className="text-muted-foreground">Cuenta interna</dt>
+                <dd className="font-medium tabular-nums">
+                  {balanceReading} {formatMoney(balance.replace(/^-/, ""))}
+                </dd>
+              </div>
+              <div className="flex flex-wrap justify-between gap-x-4 gap-y-0.5 px-3 py-2">
+                <dt className="text-muted-foreground">Liquidaciones pendientes de pago</dt>
+                <dd className="font-medium tabular-nums">
+                  {formatMoney(summary.data.pending_payrolls)}
+                  {summary.data.pending_payroll_count > 0 && ` (${summary.data.pending_payroll_count})`}
+                </dd>
+              </div>
+              {summary.data.last_payroll && (
+                <div className="flex flex-wrap justify-between gap-x-4 gap-y-0.5 px-3 py-2">
+                  <dt className="text-muted-foreground">Última liquidación</dt>
+                  <dd className="flex flex-wrap items-center gap-2">
+                    <Link href={payrollHref(summary.data.last_payroll.id)} className="font-medium hover:underline">
+                      {periodLabel(summary.data.last_payroll)}
+                    </Link>
+                    {summary.data.last_payroll.payment_status && (
+                      <Badge tone={PAYMENT_STATUS_TONES[summary.data.last_payroll.payment_status]}>
+                        {PAYMENT_STATUS_LABELS[summary.data.last_payroll.payment_status]}
+                      </Badge>
+                    )}
+                  </dd>
+                </div>
+              )}
+            </dl>
+            {summary.data.recent_payouts.length > 0 && (
+              <>
+                <h3 className="text-sm font-medium">Pagos recientes</h3>
+                <ul
+                  className="divide-y divide-border rounded-md border border-border text-sm"
+                  data-testid="recent-payouts"
+                >
+                  {summary.data.recent_payouts.map((p) => (
+                    <li key={p.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+                      <span>
+                        <Link href={payoutHref(p.id)} className="font-medium hover:underline">
+                          {payoutTitle(p.id)}
+                        </Link>
+                        <span className="block text-xs text-muted-foreground">
+                          {formatDate(p.business_date)} · {payrollTitle(p.payroll_id)}
+                        </span>
+                      </span>
+                      <span className={cn("tabular-nums", !p.in_effect && "line-through")}>
+                        {formatMoney(p.amount)}
+                        {!p.in_effect && <span className="sr-only"> (revertido)</span>}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 /** `/rendiciones/empleados/[id]`: the internal account (read-only) and the salary terms of one employee. */
 export function EmployeeFinanceDetailView({ employeeId }: { employeeId: number }) {
   const me = useQuery({ queryKey: currentUserQueryKey, queryFn: authApi.me });
@@ -395,6 +496,11 @@ export function EmployeeFinanceDetailView({ employeeId }: { employeeId: number }
         </CardContent>
       </Card>
 
+      <PaySummary
+        employeeId={employeeId}
+        balanceReading={READING_LABELS[employee.balance_reading]}
+        balance={employee.balance}
+      />
       <Loans employeeId={employeeId} canGive={canAdvance} onGive={() => setLending(true)} />
       <TermHistory employeeId={employeeId} canEdit={canEdit} active={employee.active} />
       {lending && (

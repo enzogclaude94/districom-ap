@@ -15,7 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { areaRole, authApi, currentUserQueryKey, roleAtLeast } from "@/lib/api/auth";
+import { areaRole, authApi, currentUserQueryKey, moduleRole, roleAtLeast } from "@/lib/api/auth";
 import { ApiError } from "@/lib/api/client";
 import { formatDate, formatDateTime, formatMoney } from "@/lib/format";
 import { parseAmount } from "@/modules/settlements/cash/amount";
@@ -25,6 +25,7 @@ import {
   EMPLOYEE_FINANCE_AREA,
   employeeFinanceApi,
   employeeFinanceQueryKey,
+  type Payout,
   type Payroll,
   type PayrollClosing,
   type PayrollLeg,
@@ -35,16 +36,22 @@ import {
 import {
   LINE_KIND_LABELS,
   ORIGIN_LABELS,
+  PAYMENT_STATUS_LABELS,
+  PAYMENT_STATUS_TONES,
+  PAYOUT_METHOD_LABELS,
   PAYROLL_KIND_LABELS,
   PAYROLL_NOTICE,
   PAYROLL_STATUS_LABELS,
   PAYROLL_STATUS_TONES,
   employeeFinanceHref,
   employeeLoanHref,
+  payoutHref,
+  payoutTitle,
   payrollTitle,
   payrollsHref,
 } from "./labels";
 import { Problem } from "./movement-dialogs";
+import { PayoutDialog, ReversePayoutDialog } from "./payout-dialogs";
 import { periodLabel } from "./payroll-list";
 
 const errorText = (error: unknown) =>
@@ -400,12 +407,111 @@ function ClosingView({ closing, current }: { closing: PayrollClosing; current: b
   );
 }
 
+/** One payout as history: never deleted; a reversed one keeps who, when and why (Enzo's R8-5 point 15). */
+export function PayoutHistoryItem({ payout, onReverse }: { payout: Payout; onReverse?: (payout: Payout) => void }) {
+  return (
+    <li className="space-y-1 rounded-md border border-border px-3 py-2 text-sm" data-testid={`payout-${payout.id}`}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <Link href={payoutHref(payout.id)} className="font-medium hover:underline">
+          {payoutTitle(payout.id)}
+        </Link>
+        <span className="flex items-center gap-2">
+          <span className={payout.in_effect ? "font-medium tabular-nums" : "tabular-nums line-through"}>
+            {formatMoney(payout.amount)}
+          </span>
+          <Badge tone={payout.in_effect ? "success" : "neutral"}>{payout.in_effect ? "Vigente" : "Revertido"}</Badge>
+        </span>
+      </div>
+      <p className="text-muted-foreground">
+        {formatDate(payout.business_date)} ·{" "}
+        {payout.items
+          .map((i) => `${PAYOUT_METHOD_LABELS[i.method]} ${i.account_name} ${formatMoney(i.amount)}`)
+          .join(" · ")}
+      </p>
+      <p className="text-muted-foreground">
+        Registrado por {payout.created_by_name} el {formatDateTime(payout.created_at)} · operación n.º{" "}
+        {payout.operation_id}
+        {payout.reference && ` · ref. ${payout.reference}`}
+      </p>
+      {!payout.in_effect && (
+        <p className="break-words">
+          Revertido por {payout.reversed_by_name} el {formatDateTime(payout.reversed_at!)}: {payout.reversal_reason}
+        </p>
+      )}
+      {payout.in_effect && onReverse && (
+        <Button size="sm" variant="ghost" onClick={() => onReverse(payout)}>
+          Revertir pago
+        </Button>
+      )}
+    </li>
+  );
+}
+
+/** «Pago» of a CLOSED payroll: net, paid and pending, all from the backend (R8-5). */
+function PaymentCard({ row, canPay, canReverse }: { row: Payroll; canPay: boolean; canReverse: boolean }) {
+  const [paying, setPaying] = useState(false);
+  const [reversing, setReversing] = useState<Payout | null>(null);
+  const payment = row.payment;
+  return (
+    <Card>
+      <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <CardTitle>Pago</CardTitle>
+          {payment && (
+            <Badge tone={PAYMENT_STATUS_TONES[payment.status]} data-testid="payment-status">
+              {PAYMENT_STATUS_LABELS[payment.status]}
+            </Badge>
+          )}
+        </div>
+        {payment && canPay && Number(payment.pending) > 0 && (
+          <Button onClick={() => setPaying(true)}>Registrar pago</Button>
+        )}
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {payment ? (
+          <Facts
+            testId="payroll-payment"
+            items={[
+              ["Neto", formatMoney(payment.net)],
+              ["Pagado", formatMoney(payment.paid)],
+              [
+                "Pendiente de pago",
+                <span key="pending" className="text-base">
+                  {formatMoney(payment.pending)}
+                </span>,
+              ],
+            ]}
+          />
+        ) : (
+          <p className="text-sm text-muted-foreground">Se paga cuando la liquidación está cerrada.</p>
+        )}
+        {payment && Number(payment.paid) > 0 && (
+          <p className="text-sm text-muted-foreground">
+            Con pagos vigentes la liquidación no se reabre: revertí los pagos o corregí en una liquidación posterior.
+          </p>
+        )}
+        {row.payouts.length > 0 && (
+          <ol className="space-y-2" data-testid="payout-history">
+            {row.payouts.map((p) => (
+              <PayoutHistoryItem key={p.id} payout={p} onReverse={canReverse ? setReversing : undefined} />
+            ))}
+          </ol>
+        )}
+      </CardContent>
+      {paying && <PayoutDialog payroll={row} onClose={() => setPaying(false)} />}
+      {reversing && <ReversePayoutDialog payout={reversing} onClose={() => setReversing(null)} />}
+    </Card>
+  );
+}
+
 /** `/rendiciones/empleados/liquidaciones/[id]`: the draft, its preview, the close and the history (R8-4). */
 export function PayrollView({ payrollId }: { payrollId: number }) {
   const me = useQuery({ queryKey: currentUserQueryKey, queryFn: authApi.me });
   const role = areaRole(me.data, EMPLOYEE_FINANCE_AREA);
   const areaAdmin = roleAtLeast(role, "admin");
   const areaOperator = roleAtLeast(role, "operator");
+  // A payout moves a cash box or the bank: it also needs operator in Rendiciones (Enzo's R8-5 permissions).
+  const cashOperator = roleAtLeast(moduleRole(me.data, "settlements"), "operator");
   const [lineDialog, setLineDialog] = useState<PayrollLine | "new" | null>(null);
   const [dialog, setDialog] = useState<"close" | "reopen" | "cancel" | null>(null);
   const payroll = useQuery({
@@ -659,6 +765,10 @@ export function PayrollView({ payrollId }: { payrollId: number }) {
             </Card>
           )}
         </>
+      )}
+
+      {(row.status === "CLOSED" || row.payouts.length > 0) && (
+        <PaymentCard row={row} canPay={areaOperator && cashOperator} canReverse={areaAdmin && cashOperator} />
       )}
 
       {row.closing && (

@@ -22,7 +22,8 @@ export type AccountKind =
   | "OUTLET_COLLECTIONS"
   | "OUTLET_ADVANCES"
   | "EMPLOYEE_CONSUMPTIONS"
-  | "EMPLOYEE_ADJUSTMENTS";
+  | "EMPLOYEE_ADJUSTMENTS"
+  | "PAYROLL_EXPENSE";
 
 export type OperationType =
   | "OPENING_BALANCE"
@@ -49,6 +50,8 @@ export type OperationType =
   | "EMPLOYEE_ADVANCE"
   | "EMPLOYEE_ADJUSTMENT"
   | "EMPLOYEE_LOAN"
+  | "PAYROLL_CLOSE"
+  | "EMPLOYEE_PAYOUT"
   /** An employee finance operation (R8) shown to someone without the area: only date, amount and box (ADR 010). */
   | "EMPLOYEE_RESERVED";
 

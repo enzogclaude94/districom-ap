@@ -33,6 +33,7 @@ export const SETTLEMENTS_NAV: NavSection[] = [
     items: [
       { label: "Cuentas internas", href: "/rendiciones/empleados", exact: true },
       { label: "Liquidaciones internas", href: "/rendiciones/empleados/liquidaciones" },
+      { label: "Pagos de liquidaciones", href: "/rendiciones/empleados/pagos" },
     ],
   },
   { label: "Configuración del módulo", icon: SlidersHorizontal, href: "/rendiciones/configuracion" },

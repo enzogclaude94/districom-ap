@@ -33,6 +33,8 @@ import {
 } from "./api";
 import { Problem } from "./movement-dialogs";
 import {
+  PAYMENT_STATUS_LABELS,
+  PAYMENT_STATUS_TONES,
   PAYROLL_KIND_LABELS,
   PAYROLL_NOTICE,
   PAYROLL_STATUS_LABELS,
@@ -266,6 +268,11 @@ export function PayrollList() {
                       {row.in_correction && <span className="block text-xs text-muted-foreground">En corrección</span>}
                       {row.totals_from_draft && row.status === "OPEN" && (
                         <span className="block text-xs text-muted-foreground">Importes del borrador</span>
+                      )}
+                      {row.payment_status && (
+                        <Badge tone={PAYMENT_STATUS_TONES[row.payment_status]} className="mt-1">
+                          {PAYMENT_STATUS_LABELS[row.payment_status]}
+                        </Badge>
                       )}
                     </TableCell>
                     <TableCell data-label="Haberes" className="text-right tabular-nums">
