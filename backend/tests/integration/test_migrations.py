@@ -77,12 +77,14 @@ SETTLEMENTS_TABLES = {
         "employee_payroll_closing_lines",
         "employee_payroll_applications",
         "employee_payroll_reopenings",
+        "employee_payouts",
+        "employee_payout_items",
     ),
 }
 
 # Added by 0024 (R7-3).
 REMITTANCE_TABLES = {"outlet_remittances", "settlement_closing_remittances"}
-# Added by 0025 (R8-1), 0026 (R8-2), 0027 (R8-3) and 0028 (R8-4).
+# Added by 0025 (R8-1), 0026 (R8-2), 0027 (R8-3), 0028 (R8-4) and 0029 (R8-5).
 EMPLOYEE_FINANCE_TABLES = {
     "employee_compensation_terms",
     "employee_movements",
@@ -95,6 +97,8 @@ EMPLOYEE_FINANCE_TABLES = {
     "employee_payroll_closing_lines",
     "employee_payroll_applications",
     "employee_payroll_reopenings",
+    "employee_payouts",
+    "employee_payout_items",
 }
 
 

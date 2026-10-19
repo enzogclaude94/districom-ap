@@ -131,6 +131,9 @@ OPERATION_TYPES = (
     # R8-4: what the close of an internal payroll accrues; its document is the payroll (one per financial close, a
     # correction reverses it and publishes the new one).
     "PAYROLL_CLOSE",
+    # R8-5: the payment of a closed internal payroll to the employee, from one or more cash boxes and banks; its
+    # document is the payout (one operation each).
+    "EMPLOYEE_PAYOUT",
 )
 # Operations whose document is an employee movement (R8-2): exactly one each.
 EMPLOYEE_MOVEMENT_TYPES = ("EMPLOYEE_CONSUMPTION", "EMPLOYEE_ADVANCE", "EMPLOYEE_ADJUSTMENT")
@@ -269,6 +272,14 @@ class FinancialOperation(IdMixin, Base):
             "source_id",
             unique=True,
             postgresql_where=text("type = 'EMPLOYEE_LOAN'"),
+        ),
+        # A payout of an internal payroll has exactly one operation (R8-5).
+        Index(
+            "uq_financial_operations_employee_payout",
+            "source_type",
+            "source_id",
+            unique=True,
+            postgresql_where=text("type = 'EMPLOYEE_PAYOUT'"),
         ),
         {"schema": SCHEMA},
     )

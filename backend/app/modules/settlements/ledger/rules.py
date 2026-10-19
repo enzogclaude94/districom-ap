@@ -235,9 +235,20 @@ RULES: dict[str, OperationRule] = {
         frozenset({"EMPLOYEE"}),
         area=EMPLOYEE_FINANCE_AREA,
     ),
+    # The payment of a closed payroll (R8-5, operator of the area; the payout also asks operator in Rendiciones because
+    # it moves cash boxes and banks): each item leaves its cash box (cash) or bank (transfer) -X; ONE leg for the whole
+    # amount enters the internal account +total. The same ordinary debit as an advance. Its document is the payout
+    # (0029), which builds the legs; the database checks them against it.
+    "EMPLOYEE_PAYOUT": OperationRule(
+        "operator",
+        CASH_AND_BANK | {"EMPLOYEE"},
+        "EMPLOYEE",
+        (("CASH_BOX", -1), ("BANK", -1), ("EMPLOYEE", 1)),
+        area=EMPLOYEE_FINANCE_AREA,
+    ),
 }
 EMPLOYEE_MOVEMENT_TYPES = frozenset({"EMPLOYEE_CONSUMPTION", "EMPLOYEE_ADVANCE", "EMPLOYEE_ADJUSTMENT"})
-EMPLOYEE_DOCUMENT_TYPES = EMPLOYEE_MOVEMENT_TYPES | {"EMPLOYEE_LOAN"}
+EMPLOYEE_DOCUMENT_TYPES = EMPLOYEE_MOVEMENT_TYPES | {"EMPLOYEE_LOAN", "EMPLOYEE_PAYOUT"}
 CHEQUE_CYCLE_TYPES = frozenset({"CHEQUE_DEPOSIT", "CHEQUE_CREDIT", "CHEQUE_REJECTION", "CHEQUE_RETURN"})
 # Operations that belong to a source document: only that document's flow corrects them, never Cajas.
 DOCUMENT_TYPES = frozenset(
