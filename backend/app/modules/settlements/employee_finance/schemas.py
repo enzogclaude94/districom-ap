@@ -82,10 +82,17 @@ Origin = Literal[
     "ADJUSTMENT_REVERSAL",
     "LOAN",  # préstamo (R8-3)
     "LOAN_REVERSAL",
+    "PAYROLL",  # haberes devengados por una liquidación interna (R8-4)
+    "PAYROLL_CORRECTION",  # reverso de esos haberes al corregir la liquidación
     "OTHER",
 ]
 DocumentKind = Literal[
-    "DELIVERY_SETTLEMENT", "OUTLET_SETTLEMENT", "PENDING_COLLECTION", "EMPLOYEE_MOVEMENT", "EMPLOYEE_LOAN"
+    "DELIVERY_SETTLEMENT",
+    "OUTLET_SETTLEMENT",
+    "PENDING_COLLECTION",
+    "EMPLOYEE_MOVEMENT",
+    "EMPLOYEE_LOAN",
+    "EMPLOYEE_PAYROLL",
 ]
 
 
@@ -103,6 +110,8 @@ class AccountMovementOut(BaseModel):
     # Employee movements (R8-2) and loans (R8-3): what it was and whether the whole document was reversed since.
     description: str | None = None
     document_reversed: bool | None = None
+    # What the closes in effect of internal payrolls applied of it (absolute, R8-4).
+    applied: Money = Decimal("0.00")
     created_at: datetime
 
 
@@ -261,6 +270,10 @@ class LoanInstallmentOut(BaseModel):
     due_on: date
     amount: Money
     status: InstallmentStatus
+    # SCHEDULED and applied by a close in effect («Aplicada»), or not yet («Pendiente de aplicar»): derived, never
+    # stored (R8-4). The payroll that applied it, when it did.
+    applied: bool
+    applied_payroll_id: int | None
     # The DEFERRED installment this one replaces (all or part of it).
     deferred_from_id: int | None
     deferred_from_number: int | None
@@ -278,7 +291,9 @@ class EmployeeLoanRow(BaseModel):
     principal: Money
     installment_count: int
     status: Literal["ACTIVE", "REVERSED"]
-    balance: Money  # principal while in effect (R8-4: minus the installments a payroll applied); 0 reversed
+    balance: Money  # principal minus the installments a close in effect applied; 0 reversed
+    applied_total: Money
+    # SCHEDULED installments still to apply, and the first one due.
     scheduled_count: int
     next_due_on: date | None
     description: str | None
@@ -308,3 +323,218 @@ class LoanDeferralIn(BaseModel):
     client_request_id: UUID
     reason: Reason
     replacements: Annotated[list[LoanInstallmentIn], Field(min_length=1, max_length=24)]
+
+
+# --- internal payrolls (R8-4) --------------------------------------------------------------------------------
+
+PayrollKind = Literal["REGULAR", "EXTRAORDINARY"]
+PayrollStatus = Literal["OPEN", "CLOSED", "CANCELLED"]
+PayrollLineKind = Literal["SALARY", "BONUS", "INCENTIVE", "OTHER_CREDIT"]
+LineDescription = Annotated[str | None, Field(default=None, max_length=300)]
+
+
+class PayrollIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    client_request_id: UUID
+    employee_id: int
+    kind: PayrollKind
+    period_start: date
+    period_end: date  # inclusive
+    payment_date: date | None = None  # informative: the payout is R8-5
+    notes: str | None = Field(default=None, max_length=1000)
+
+
+class PayrollPeriodIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    period_start: date
+    period_end: date
+    payment_date: date | None = None
+    notes: str | None = Field(default=None, max_length=1000)
+
+
+class PayrollLineIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: PayrollLineKind
+    amount: Amount
+    description: LineDescription = None
+
+
+class PayrollLineUpdateIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    amount: Amount
+    description: LineDescription = None
+
+
+class PayrollChoiceIn(BaseModel):
+    """Include or exclude one item of the draft; `amount` applies part of a leg (absolute, never of an installment)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ledger_entry_id: int | None = None
+    installment_id: int | None = None
+    included: bool
+    amount: Amount | None = None
+
+
+class PayrollCloseIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    version: int
+    preview_token: str = Field(min_length=64, max_length=64)
+    confirm: bool = False
+
+
+class PayrollReopenIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    version: int
+    reason: Reason
+
+
+class PayrollCancelIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reason: Reason
+
+
+class PayrollTotals(BaseModel):
+    credits: Money  # haberes
+    deductions: Money  # descuentos: what the payroll applies in the company's favour
+    credits_applied: Money  # créditos: what it applies in the employee's favour (absolute)
+    net: Money  # credits - deductions + credits_applied
+    deduction_pct: Decimal | None  # deductions over credits, shown, never capped (D6); None without credits
+
+
+class PayrollRow(BaseModel):
+    id: int
+    employee_id: int
+    employee_name: str
+    kind: PayrollKind
+    period_start: date
+    period_end: date
+    payment_date: date | None
+    status: PayrollStatus
+    version: int
+    # A CLOSED payroll's are its close's; an OPEN one's are its draft's (`totals_from_draft`); CANCELLED: zero.
+    totals: PayrollTotals
+    totals_from_draft: bool
+    in_correction: bool  # OPEN after a reopening: its previous close is still in effect
+
+
+class PayrollPage(BaseModel):
+    items: list[PayrollRow]
+    total: int
+
+
+class SalaryHintOut(BaseModel):
+    status: Literal["PROPOSED", "MANUAL", "NONE"]
+    message: str
+    amount: Money | None
+    compensation_term_id: int | None
+
+
+class PayrollLineOut(BaseModel):
+    id: int
+    kind: PayrollLineKind
+    amount: Money
+    description: str | None
+    source: Literal["TERM", "MANUAL"]
+    compensation_term_id: int | None
+
+
+class PayrollLegOut(BaseModel):
+    """A leg of the internal account the payroll may apply, and what the draft does with it."""
+
+    entry_id: int
+    operation_id: int
+    origin: Origin
+    business_date: date
+    document_kind: DocumentKind | None
+    document_id: int | None
+    description: str | None
+    # The original operation: a leg and its reversal share it, so the screen can show them as one correction.
+    group_operation_id: int
+    reversed: bool  # its operation was reversed since (the reversal is another leg)
+    original_amount: Money  # signed, as on the account
+    applied_elsewhere: Money  # signed: what closes in effect of other payrolls already applied
+    available: Money  # signed: what is still applicable
+    proposed: bool
+    included: bool
+    amount: Money  # signed amount the close would apply (when included)
+    partial: bool  # a chosen amount below what is available
+
+
+class PayrollInstallmentOut(BaseModel):
+    installment_id: int
+    loan_id: int
+    loan_description: str | None
+    number: int
+    due_on: date
+    amount: Money  # whole: never reduced
+    overdue: bool  # due before the period starts
+    included: bool
+
+
+class PayrollBlocker(BaseModel):
+    code: str
+    message: str
+
+
+class PayrollPreviewOut(PayrollTotals):
+    preview_token: str
+    blockers: list[PayrollBlocker]
+    accrual: Literal["FINANCIAL", "NO_ACCRUAL"]  # whether the close publishes PAYROLL_CLOSE
+
+
+class PayrollApplicationOut(BaseModel):
+    entry_id: int
+    origin: Origin
+    business_date: date
+    amount: Money  # signed
+    installment_id: int | None
+    installment_number: int | None
+    loan_id: int | None
+
+
+class PayrollClosingOut(PayrollTotals):
+    id: int
+    version: int
+    kind: Literal["FINANCIAL", "NO_ACCRUAL"]
+    operation_id: int | None
+    reversal_operation_id: int | None
+    closed_at: datetime
+    closed_by_name: str
+    superseded_at: datetime | None
+    lines: list[PayrollLineOut]
+    applications: list[PayrollApplicationOut]
+
+
+class PayrollReopeningOut(BaseModel):
+    from_version: int
+    to_version: int
+    reason: str
+    reopened_at: datetime
+    reopened_by_name: str
+
+
+class PayrollOut(PayrollRow):
+    notes: str | None
+    created_at: datetime
+    created_by_name: str
+    cancelled_at: datetime | None
+    cancelled_by_name: str | None
+    cancel_reason: str | None
+    salary_hint: SalaryHintOut
+    # The draft (OPEN only; empty otherwise).
+    lines: list[PayrollLineOut]
+    legs: list[PayrollLegOut]
+    installments: list[PayrollInstallmentOut]
+    preview: PayrollPreviewOut | None
+    # The close in effect, then the history: every close (superseded ones too) and every reopening.
+    closing: PayrollClosingOut | None
+    closings: list[PayrollClosingOut]
+    reopenings: list[PayrollReopeningOut]

@@ -27,6 +27,13 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 
 # Tables emptied after each test that uses the database.
 TRUNCATED_TABLES = (
+    "settlements.employee_payroll_reopenings",
+    "settlements.employee_payroll_applications",
+    "settlements.employee_payroll_closing_lines",
+    "settlements.employee_payroll_closings",
+    "settlements.employee_payroll_choices",
+    "settlements.employee_payroll_lines",
+    "settlements.employee_payrolls",
     "settlements.employee_loan_installments",
     "settlements.employee_loans",
     "settlements.employee_movements",
@@ -97,6 +104,7 @@ SEEDED_ACCOUNTS = (
     "outlet_collections",
     "employee_consumptions",
     "employee_adjustments",
+    "payroll_expense",
 )
 
 

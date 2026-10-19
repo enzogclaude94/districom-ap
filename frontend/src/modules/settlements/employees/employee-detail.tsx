@@ -38,6 +38,7 @@ import {
 } from "./labels";
 import { LoanDialog } from "./loan-dialogs";
 import { MovementDialog } from "./movement-dialogs";
+import { NewPayrollDialog } from "./payroll-list";
 import { EndTermDialog, NewTermDialog } from "./term-dialogs";
 
 const PAGE_SIZE = 20;
@@ -317,6 +318,7 @@ export function EmployeeFinanceDetailView({ employeeId }: { employeeId: number }
   const canAdvance = canEdit && roleAtLeast(moduleRole(me.data, "settlements"), "operator");
   const [registering, setRegistering] = useState<MovementKind | null>(null);
   const [lending, setLending] = useState(false);
+  const [liquidating, setLiquidating] = useState(false);
   const detail = useQuery({
     queryKey: [...employeeFinanceQueryKey, "detail", employeeId],
     queryFn: () => employeeFinanceApi.detail(employeeId),
@@ -383,6 +385,9 @@ export function EmployeeFinanceDetailView({ employeeId }: { employeeId: number }
                   Registrar ajuste
                 </Button>
               )}
+              <Button size="sm" variant="secondary" onClick={() => setLiquidating(true)}>
+                Nueva liquidación
+              </Button>
             </div>
           )}
           <h3 className="text-sm font-medium">Movimientos de la cuenta interna</h3>
@@ -394,6 +399,12 @@ export function EmployeeFinanceDetailView({ employeeId }: { employeeId: number }
       <TermHistory employeeId={employeeId} canEdit={canEdit} active={employee.active} />
       {lending && (
         <LoanDialog employeeId={employeeId} employeeName={employee.full_name} onClose={() => setLending(false)} />
+      )}
+      {liquidating && (
+        <NewPayrollDialog
+          employee={{ id: employeeId, name: employee.full_name }}
+          onClose={() => setLiquidating(false)}
+        />
       )}
       {registering && (
         <MovementDialog

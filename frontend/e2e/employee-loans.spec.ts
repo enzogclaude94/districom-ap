@@ -101,7 +101,7 @@ test("a loan with its schedule, deferrals in a chain, a reversal and privacy in 
   // 4. The schedule: three installments of $1.000, scheduled.
   for (const number of [1, 2, 3]) {
     await expect(page.getByTestId(`installment-${number}`)).toContainText("$ 1.000,00");
-    await expect(page.getByTestId(`installment-${number}`)).toContainText("Programada");
+    await expect(page.getByTestId(`installment-${number}`)).toContainText("Pendiente de aplicar");
   }
   await noSideScroll(page);
 

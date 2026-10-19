@@ -179,3 +179,18 @@ def _require_no_overlap(db: Session, employee_id: int, valid_from: date) -> None
             "Terminala antes de cargar la nueva.",
             {"compensation_term_id": other.id},
         )
+
+
+def overlapping(db: Session, employee_id: int, start: date, end: date) -> list[EmployeeCompensationTerm]:
+    """The employee's terms in effect on any day of `start`..`end` (inclusive), oldest first."""
+    return list(
+        db.scalars(
+            select(EmployeeCompensationTerm)
+            .where(
+                EmployeeCompensationTerm.employee_id == employee_id,
+                EmployeeCompensationTerm.valid_from <= end,
+                or_(EmployeeCompensationTerm.valid_to.is_(None), EmployeeCompensationTerm.valid_to >= start),
+            )
+            .order_by(EmployeeCompensationTerm.valid_from, EmployeeCompensationTerm.id)
+        )
+    )

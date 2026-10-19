@@ -48,6 +48,7 @@ from app.core.clock import business_today
 from app.core.errors import AppError
 from app.modules.settlements.delivery import idempotency
 from app.modules.settlements.delivery.service import money
+from app.modules.settlements.employee_finance import payrolls
 from app.modules.settlements.employee_finance.access import AREA
 from app.modules.settlements.employee_finance.models import EmployeeMovement
 from app.modules.settlements.ledger import service as ledger
@@ -267,14 +268,17 @@ def reverse(db: Session, actor: User, movement_id: int, reason: str, client_requ
     reason = " ".join(reason.split())
     if not reason:
         raise AppError(422, "reason_required", "Indicá el motivo del reverso.")
+    # The internal account first (the lock order of every R8 flow, R8-4): a payroll closing over it waits or wins.
+    account = db.scalar(select(EmployeeMovement.employee_account_id).where(EmployeeMovement.id == movement_id))
+    if account is None:
+        raise AppError(404, "employee_movement_not_found", "El movimiento no existe.")
+    lock_account(db, account)
     movement = db.scalars(
         select(EmployeeMovement)
         .where(EmployeeMovement.id == movement_id)
         .with_for_update()
         .execution_options(populate_existing=True)
-    ).one_or_none()
-    if movement is None:
-        raise AppError(404, "employee_movement_not_found", "El movimiento no existe.")
+    ).one()
     if movement.kind == "ADVANCE":
         _require_cash_role(actor)
     request_id = uuid5(NAMESPACE, f"employee-movement-reversal:{client_request_id}")
@@ -297,7 +301,13 @@ def reverse(db: Session, actor: User, movement_id: int, reason: str, client_requ
             {"reversal_operation_id": reversal.id},
         )
     assert movement.operation_id is not None  # a published movement always has it (0026)
-    lock_account(db, movement.employee_account_id)
+    if payrolls.operation_applied(db, movement.operation_id, movement.employee_account_id):
+        raise AppError(
+            409,
+            "movement_applied",
+            "Una liquidación cerrada ya aplicó este movimiento: no se revierte directamente. Reabrí la liquidación y "
+            "excluilo, o corregí con un ajuste.",
+        )
     reversal = ledger.reverse_document_operation(
         db,
         actor=actor,

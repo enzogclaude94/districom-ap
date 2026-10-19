@@ -69,16 +69,32 @@ SETTLEMENTS_TABLES = {
     "employee_movements",
     "employee_loans",
     "employee_loan_installments",
+    *(
+        "employee_payrolls",
+        "employee_payroll_lines",
+        "employee_payroll_choices",
+        "employee_payroll_closings",
+        "employee_payroll_closing_lines",
+        "employee_payroll_applications",
+        "employee_payroll_reopenings",
+    ),
 }
 
 # Added by 0024 (R7-3).
 REMITTANCE_TABLES = {"outlet_remittances", "settlement_closing_remittances"}
-# Added by 0025 (R8-1), 0026 (R8-2) and 0027 (R8-3).
+# Added by 0025 (R8-1), 0026 (R8-2), 0027 (R8-3) and 0028 (R8-4).
 EMPLOYEE_FINANCE_TABLES = {
     "employee_compensation_terms",
     "employee_movements",
     "employee_loans",
     "employee_loan_installments",
+    "employee_payrolls",
+    "employee_payroll_lines",
+    "employee_payroll_choices",
+    "employee_payroll_closings",
+    "employee_payroll_closing_lines",
+    "employee_payroll_applications",
+    "employee_payroll_reopenings",
 }
 
 
@@ -164,6 +180,7 @@ def test_settlements_system_accounts_seeded(migrated_db: None) -> None:
         ("outlet_collections", "OUTLET_COLLECTIONS", True),
         ("employee_consumptions", "EMPLOYEE_CONSUMPTIONS", True),
         ("employee_adjustments", "EMPLOYEE_ADJUSTMENTS", True),
+        ("payroll_expense", "PAYROLL_EXPENSE", True),
     ]
 
 
@@ -235,6 +252,7 @@ def test_account_name_key_backfill() -> None:
             "cobranzas de boca",
             "consumos de empleados",
             "ajustes a empleados",
+            "sueldos y bonos internos",
         ]
     finally:
         with engine.begin() as conn:

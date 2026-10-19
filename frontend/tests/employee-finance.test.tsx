@@ -120,6 +120,8 @@ describe("protected area in the navigation", () => {
       visibleSections(SETTLEMENTS_NAV, areas).flatMap((s) => [s.href, ...(s.items ?? []).map((i) => i.href)]);
     expect(hrefs([])).not.toContain("/rendiciones/empleados");
     expect(hrefs([AREA])).toContain("/rendiciones/empleados");
+    expect(hrefs([AREA])).toContain("/rendiciones/empleados/liquidaciones");
+    expect(hrefs([])).not.toContain("/rendiciones/empleados/liquidaciones");
     expect(areaRole(me("admin", null), AREA)).toBeNull();
     expect(areaRole(me("viewer", "operator"), AREA)).toBe("operator");
   });
@@ -147,7 +149,13 @@ describe("protected area in the navigation", () => {
       </AppShell>,
     );
     await screen.findByText("contenido");
-    expect(screen.getByRole("link", { name: "Empleados" })).toHaveAttribute("href", "/rendiciones/empleados");
+    // R8-4: Empleados groups the internal accounts and the internal payrolls.
+    expect(screen.getByText("Empleados")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Cuentas internas" })).toHaveAttribute("href", "/rendiciones/empleados");
+    expect(screen.getByRole("link", { name: "Liquidaciones internas" })).toHaveAttribute(
+      "href",
+      "/rendiciones/empleados/liquidaciones",
+    );
   });
 });
 

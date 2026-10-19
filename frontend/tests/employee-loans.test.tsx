@@ -6,7 +6,12 @@ import type { CurrentUser } from "@/lib/api/auth";
 import { todayIso } from "@/lib/format";
 import { OPERATION_LABELS, sourceHref, sourceLabel } from "@/modules/settlements/cash/labels";
 import { EmployeeFinanceDetailView } from "@/modules/settlements/employees/employee-detail";
-import { INSTALLMENT_STATUS_LABELS, ORIGIN_LABELS, documentOf } from "@/modules/settlements/employees/labels";
+import {
+  INSTALLMENT_STATUS_LABELS,
+  ORIGIN_LABELS,
+  documentOf,
+  installmentLabel,
+} from "@/modules/settlements/employees/labels";
 import { EmployeeLoanView } from "@/modules/settlements/employees/loan-detail";
 import { addMonths, nextDay, sumAmounts } from "@/modules/settlements/employees/loan-schedule";
 
@@ -59,6 +64,8 @@ const installment = (number: number, due_on: string, amount: string, status = "S
   due_on,
   amount,
   status,
+  applied: false,
+  applied_payroll_id: null,
   deferred_from_id: null,
   deferred_from_number: null,
   deferred_reason: null,
@@ -76,6 +83,7 @@ const LOAN = {
   installment_count: 3,
   status: "ACTIVE",
   balance: "300000.00",
+  applied_total: "0.00",
   scheduled_count: 3,
   next_due_on: "2026-11-30",
   description: "Moto",
@@ -171,8 +179,11 @@ describe("labels and helpers of R8-3", () => {
     expect(sourceHref("employee_loan", 4)).toBe("/rendiciones/empleados/prestamos/4");
   });
 
-  it("an installment is scheduled, deferred or cancelled: never paid nor applied", () => {
+  it("an installment is stored scheduled, deferred or cancelled; «Aplicada» is derived (R8-4)", () => {
     expect(Object.values(INSTALLMENT_STATUS_LABELS)).toEqual(["Programada", "Postergada", "Cancelada"]);
+    expect(installmentLabel("SCHEDULED", false)).toBe("Pendiente de aplicar");
+    expect(installmentLabel("SCHEDULED", true)).toBe("Aplicada");
+    expect(installmentLabel("DEFERRED", false)).toBe("Postergada");
   });
 
   it("adds months keeping the day or the month's last day, and sums typed amounts in cents", () => {
@@ -325,7 +336,7 @@ describe("EmployeeLoanView", () => {
     expect(await screen.findByRole("heading", { name: "Préstamo n.º 4" })).toBeInTheDocument();
     expect(screen.getByTestId("loan-status")).toHaveTextContent("Vigente");
     expect(screen.getByTestId("loan-facts")).toHaveTextContent("Saldo del préstamo$ 300.000,00");
-    expect(screen.getByTestId("installment-1")).toHaveTextContent("Programada");
+    expect(screen.getByTestId("installment-1")).toHaveTextContent("Pendiente de aplicar");
     // Deferring moves no money: the area admin does it without the cash role; reversing needs it.
     expect(screen.queryByRole("button", { name: "Revertir" })).not.toBeInTheDocument();
     await userEvent.click(within(screen.getByTestId("installment-2")).getByRole("button", { name: "Postergar" }));

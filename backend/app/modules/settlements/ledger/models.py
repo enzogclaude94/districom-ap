@@ -67,6 +67,10 @@ ACCOUNT_KINDS = (
     # own movement and its reversal touch them.
     "EMPLOYEE_CONSUMPTIONS",
     "EMPLOYEE_ADJUSTMENTS",
+    # R8-4: counterpart of the close of an internal payroll («Sueldos y bonos internos»): the salaries, bonuses and
+    # other credits it accrues. Technical, never available money, outside the cash board; only a payroll close and
+    # its reversal touch it.
+    "PAYROLL_EXPENSE",
 )
 # Accounts whose every leg is one cheque (`ledger_entries.cheque_id`), and only those.
 CHEQUE_KINDS = ("CHEQUE_PORTFOLIO", "CHEQUES_IN_TRANSIT")
@@ -87,6 +91,7 @@ TECHNICAL_KINDS = (
     "OUTLET_COLLECTIONS",
     "EMPLOYEE_CONSUMPTIONS",
     "EMPLOYEE_ADJUSTMENTS",
+    "PAYROLL_EXPENSE",
 )
 
 OPERATION_TYPES = (
@@ -123,6 +128,9 @@ OPERATION_TYPES = (
     "EMPLOYEE_ADJUSTMENT",
     # R8-3: a loan handed to an employee; its document is the loan (its installments move no money).
     "EMPLOYEE_LOAN",
+    # R8-4: what the close of an internal payroll accrues; its document is the payroll (one per financial close, a
+    # correction reverses it and publishes the new one).
+    "PAYROLL_CLOSE",
 )
 # Operations whose document is an employee movement (R8-2): exactly one each.
 EMPLOYEE_MOVEMENT_TYPES = ("EMPLOYEE_CONSUMPTION", "EMPLOYEE_ADVANCE", "EMPLOYEE_ADJUSTMENT")

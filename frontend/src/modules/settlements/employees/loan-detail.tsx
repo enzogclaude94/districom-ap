@@ -16,7 +16,7 @@ import { areaRole, authApi, currentUserQueryKey, moduleRole, roleAtLeast } from 
 import { formatDate, formatDateTime, formatMoney } from "@/lib/format";
 
 import { EMPLOYEE_FINANCE_AREA, employeeFinanceApi, employeeFinanceQueryKey, type LoanInstallment } from "./api";
-import { INSTALLMENT_STATUS_LABELS, LOAN_STATUS_LABELS, employeeFinanceHref, loanTitle } from "./labels";
+import { LOAN_STATUS_LABELS, employeeFinanceHref, installmentLabel, loanTitle, payrollHref } from "./labels";
 import { DeferInstallmentDialog, ReverseLoanDialog } from "./loan-dialogs";
 import { MovementLegs } from "./movement-dialogs";
 
@@ -75,6 +75,7 @@ export function EmployeeLoanView({ loanId }: { loanId: number }) {
     ["Entregado desde", row.funding_account_name],
     ["Cuotas", `${row.installment_count} · la primera vence el ${formatDate(row.first_due_on)}`],
     ["Saldo del préstamo", formatMoney(row.balance)],
+    ["Cuotas aplicadas", formatMoney(row.applied_total)],
   ];
   if (row.description) facts.push(["Descripción", row.description]);
   if (row.reference) facts.push(["Referencia", row.reference]);
@@ -130,7 +131,8 @@ export function EmployeeLoanView({ loanId }: { loanId: number }) {
         <CardHeader>
           <CardTitle>Cronograma</CardTitle>
           <CardDescription>
-            Las cuotas programadas suman el saldo del préstamo. Una cuota postergada queda como historia.
+            Las cuotas pendientes de aplicar suman el saldo del préstamo; una cuota la aplica una liquidación interna al
+            cerrarse. Una cuota postergada queda como historia.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -164,12 +166,17 @@ export function EmployeeLoanView({ loanId }: { loanId: number }) {
                     {formatMoney(i.amount)}
                   </TableCell>
                   <TableCell data-label="Estado">
-                    <Badge tone={i.status === "SCHEDULED" ? "info" : "neutral"}>
-                      {INSTALLMENT_STATUS_LABELS[i.status]}
+                    <Badge tone={i.status === "SCHEDULED" && !i.applied ? "info" : "neutral"}>
+                      {installmentLabel(i.status, i.applied)}
                     </Badge>
+                    {i.applied_payroll_id !== null && (
+                      <Link href={payrollHref(i.applied_payroll_id)} className="block text-xs hover:underline">
+                        Liquidación n.º {i.applied_payroll_id}
+                      </Link>
+                    )}
                   </TableCell>
                   <TableCell>
-                    {canDefer && i.status === "SCHEDULED" && (
+                    {canDefer && i.status === "SCHEDULED" && !i.applied && (
                       <Button variant="ghost" size="sm" onClick={() => setDeferring(i)}>
                         Postergar
                       </Button>
