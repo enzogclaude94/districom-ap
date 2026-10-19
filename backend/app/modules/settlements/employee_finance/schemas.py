@@ -84,6 +84,8 @@ Origin = Literal[
     "LOAN_REVERSAL",
     "PAYROLL",  # haberes devengados por una liquidación interna (R8-4)
     "PAYROLL_CORRECTION",  # reverso de esos haberes al corregir la liquidación
+    "PAYOUT",  # pago de una liquidación interna (R8-5)
+    "PAYOUT_REVERSAL",
     "OTHER",
 ]
 DocumentKind = Literal[
@@ -93,6 +95,7 @@ DocumentKind = Literal[
     "EMPLOYEE_MOVEMENT",
     "EMPLOYEE_LOAN",
     "EMPLOYEE_PAYROLL",
+    "EMPLOYEE_PAYOUT",
 ]
 
 
@@ -329,6 +332,9 @@ class LoanDeferralIn(BaseModel):
 
 PayrollKind = Literal["REGULAR", "EXTRAORDINARY"]
 PayrollStatus = Literal["OPEN", "CLOSED", "CANCELLED"]
+# «Sin pagar», «Pagada parcialmente», «Pagada» (R8-5): derived, never stored.
+PaymentStatus = Literal["UNPAID", "PARTIALLY_PAID", "PAID"]
+PayoutMethod = Literal["CASH", "TRANSFER"]
 PayrollLineKind = Literal["SALARY", "BONUS", "INCENTIVE", "OTHER_CREDIT"]
 LineDescription = Annotated[str | None, Field(default=None, max_length=300)]
 
@@ -423,6 +429,8 @@ class PayrollRow(BaseModel):
     totals: PayrollTotals
     totals_from_draft: bool
     in_correction: bool  # OPEN after a reopening: its previous close is still in effect
+    # Derived from the payouts in effect of the close in effect (R8-5); None unless CLOSED.
+    payment_status: PaymentStatus | None = None
 
 
 class PayrollPage(BaseModel):
@@ -521,6 +529,44 @@ class PayrollReopeningOut(BaseModel):
     reopened_by_name: str
 
 
+class PayrollPaymentOut(BaseModel):
+    """The payment state of a CLOSED payroll (R8-5): always derived from its close's payouts in effect."""
+
+    net: Money
+    paid: Money
+    pending: Money
+    status: PaymentStatus
+
+
+class PayoutItemOut(BaseModel):
+    method: PayoutMethod
+    account_id: int
+    account_name: str
+    amount: Money
+
+
+class PayoutOut(BaseModel):
+    id: int
+    payroll_id: int
+    payroll_closing_id: int
+    payroll_version: int
+    payroll_period: str
+    employee_id: int
+    employee_name: str
+    business_date: date
+    amount: Money
+    reference: str | None
+    items: list[PayoutItemOut]
+    operation_id: int
+    in_effect: bool
+    reversal_operation_id: int | None
+    reversed_at: datetime | None
+    reversed_by_name: str | None
+    reversal_reason: str | None
+    created_at: datetime
+    created_by_name: str
+
+
 class PayrollOut(PayrollRow):
     notes: str | None
     created_at: datetime
@@ -538,3 +584,62 @@ class PayrollOut(PayrollRow):
     closing: PayrollClosingOut | None
     closings: list[PayrollClosingOut]
     reopenings: list[PayrollReopeningOut]
+    # R8-5: what is paid of the close in effect (CLOSED only) and every payout of the payroll, reversed ones too.
+    payment: PayrollPaymentOut | None = None
+    payouts: list[PayoutOut] = []
+
+
+# --- payouts (R8-5) ------------------------------------------------------------------------------------
+
+
+class PayoutItemIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    method: PayoutMethod
+    account_id: int
+    amount: Amount
+
+
+class PayoutPreviewIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # The close the client saw: a different close in effect is `payroll_version_changed`.
+    payroll_closing_id: int
+    business_date: date
+    items: list[PayoutItemIn] = Field(min_length=1, max_length=10)
+    reference: Reference = None
+
+
+class PayoutIn(PayoutPreviewIn):
+    client_request_id: UUID
+
+
+class PayoutPreviewOut(BaseModel):
+    net: Money  # «Liquidación»
+    paid: Money  # «Ya pagado»
+    amount: Money  # «Este pago»
+    pending_after: Money  # «Quedará pendiente»
+    balance_before: Money  # the internal account (+ the employee owes the company)
+    balance_after: Money
+    legs: list[MovementLegOut]
+
+
+class PayoutReversalIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    client_request_id: UUID
+    reason: Reason
+
+
+class EmployeePaySummary(BaseModel):
+    """The employee's payrolls and payouts, never mixed with the internal account's balance (Enzo's R8-5 point 16)."""
+
+    pending_payrolls: Money  # what the CLOSED payrolls still owe them
+    pending_payroll_count: int
+    last_payroll: PayrollRow | None
+    recent_payouts: list[PayoutOut]
+
+
+class PayoutPage(BaseModel):
+    items: list[PayoutOut]
+    total: int

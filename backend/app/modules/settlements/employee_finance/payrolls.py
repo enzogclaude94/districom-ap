@@ -24,7 +24,8 @@ supersedes the previous one in the same transaction: it reverses the previous PA
 NO_ACCRUAL close never invents a reversal. The previous applications stay in effect until then.
 
 Reopen (admin, with a reason): the close stays in effect (OPEN, version + 1) until the new one. A payroll with payouts
-in effect will not reopen (R8-5; none exist yet). Cancel (admin, with a reason): only a payroll never closed.
+in effect on its close will not reopen (R8-5): reverse them first. Cancel (admin, with a reason): only a payroll never
+closed.
 
 Lock order, always: the employee's internal account, the payroll, the loans of the installments it may apply (FOR
 SHARE, by id), then (inside the ledger) the accounts that lose value. Every flow that undoes something a payroll may
@@ -55,6 +56,7 @@ from app.modules.settlements.employee_finance.models import (
     EmployeeCompensationTerm,
     EmployeeLoan,
     EmployeeLoanInstallment,
+    EmployeePayout,
     EmployeePayroll,
     EmployeePayrollApplication,
     EmployeePayrollChoice,
@@ -802,8 +804,17 @@ def close(db: Session, actor: User, payroll_id: int, version: int, token: str, c
 
 
 def payouts_in_effect(db: Session, payroll_id: int) -> int:
-    """Payouts in effect of a payroll (R8-5 hook): a paid payroll does not reopen (D7). R8-4 has no payouts."""
-    return 0
+    """Payouts in effect of the payroll's close in effect (R8-5): a paid payroll does not reopen (D7). A reversed
+    payout does not count."""
+    return (
+        db.scalar(
+            select(func.count())
+            .select_from(EmployeePayout)
+            .join(EmployeePayroll, EmployeePayroll.current_closing_id == EmployeePayout.payroll_closing_id)
+            .where(EmployeePayroll.id == payroll_id, EmployeePayout.reversal_operation_id.is_(None))
+        )
+        or 0
+    )
 
 
 def reopen(db: Session, actor: User, payroll_id: int, version: int, reason: str) -> Created:
@@ -829,7 +840,9 @@ def reopen(db: Session, actor: User, payroll_id: int, version: int, reason: str)
         raise AppError(
             409,
             "payroll_has_payouts",
-            "La liquidación tiene pagos vigentes: no se reabre. Revertí los pagos o corregí con un ajuste posterior.",
+            "Esta liquidación tiene pagos vigentes. Revertí los pagos antes de reabrirla o registrá la corrección "
+            "económica en una liquidación posterior.",
+            {"payroll_id": payroll.id},
         )
     assert payroll.current_closing_id is not None
     now = datetime.now(UTC)
@@ -1087,6 +1100,11 @@ def _line_description(kind: str, description: str | None, *, manual_salary: bool
             "Un sueldo cargado a mano necesita una nota (período parcial, cambio de condición...).",
         )
     return text
+
+
+def lock(db: Session, payroll_id: int) -> EmployeePayroll:
+    """The payroll locked in R8's order (a payout or its reversal takes it too)."""
+    return _lock(db, payroll_id)
 
 
 def _lock(db: Session, payroll_id: int) -> EmployeePayroll:

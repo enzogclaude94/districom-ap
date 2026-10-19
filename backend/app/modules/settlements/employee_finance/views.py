@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import exists, func, or_, select
+from sqlalchemy import Select, exists, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.clock import business_today
@@ -22,6 +22,7 @@ from app.modules.settlements.delivery.models import Settlement
 from app.modules.settlements.employee_finance import compensation
 from app.modules.settlements.employee_finance import loans as loan_service
 from app.modules.settlements.employee_finance import movements as movement_service
+from app.modules.settlements.employee_finance import payouts as payout_service
 from app.modules.settlements.employee_finance import payrolls as payroll_service
 from app.modules.settlements.employee_finance import schemas as s
 from app.modules.settlements.employee_finance.models import (
@@ -29,6 +30,8 @@ from app.modules.settlements.employee_finance.models import (
     EmployeeLoan,
     EmployeeLoanInstallment,
     EmployeeMovement,
+    EmployeePayout,
+    EmployeePayoutItem,
     EmployeePayroll,
     EmployeePayrollApplication,
     EmployeePayrollClosing,
@@ -44,6 +47,7 @@ PENDING_SOURCE = "pending_collection"
 MOVEMENT_SOURCE = movement_service.SOURCE
 LOAN_SOURCE = loan_service.SOURCE
 PAYROLL_SOURCE = payroll_service.SOURCE
+PAYOUT_SOURCE = payout_service.SOURCE
 
 
 def reading(balance: Decimal) -> s.BalanceReading:
@@ -165,6 +169,10 @@ def _origin(op_type: str, reversed_type: str | None, amount: Decimal) -> s.Origi
         return "PAYROLL"
     if op_type == "REVERSAL" and reversed_type == "PAYROLL_CLOSE":
         return "PAYROLL_CORRECTION"
+    if op_type == "EMPLOYEE_PAYOUT":
+        return "PAYOUT"
+    if op_type == "REVERSAL" and reversed_type == "EMPLOYEE_PAYOUT":
+        return "PAYOUT_REVERSAL"
     return "OTHER"
 
 
@@ -209,6 +217,20 @@ def _documents(
         for p in db.scalars(select(EmployeePayroll).where(EmployeePayroll.id.in_(wanted))):
             result[(PAYROLL_SOURCE, p.id)] = _Document(
                 "EMPLOYEE_PAYROLL", p.period_end, None, f"Liquidación {_period_label(p)}", None
+            )
+    if wanted := ids(PAYOUT_SOURCE):
+        rows = db.execute(
+            select(EmployeePayout, EmployeePayroll)
+            .join(EmployeePayroll, EmployeePayroll.id == EmployeePayout.payroll_id)
+            .where(EmployeePayout.id.in_(wanted))
+        ).all()
+        for payout, p in rows:
+            result[(PAYOUT_SOURCE, payout.id)] = _Document(
+                "EMPLOYEE_PAYOUT",
+                payout.business_date,
+                None,
+                f"Pago de la liquidación {_period_label(p)}",
+                payout.reversal_operation_id is not None,
             )
     return result
 
@@ -613,6 +635,8 @@ def payroll(db: Session, payroll_id: int) -> s.PayrollOut:
             )
             for r in reopenings
         ],
+        payment=_payment(db, row),
+        payouts=_payout_outs(db, list(db.scalars(_payouts_query().where(EmployeePayout.payroll_id == row.id)))),
     )
 
 
@@ -647,6 +671,11 @@ def _payroll_row(
         totals=totals,
         totals_from_draft=from_draft,
         in_correction=row.status == "OPEN" and row.current_closing_id is not None,
+        payment_status=(
+            payout_service.state(closing.net, payout_service.paid(db, closing.id)).status
+            if row.status == "CLOSED" and closing is not None
+            else None
+        ),
     )
 
 
@@ -770,3 +799,156 @@ def _employee_names(db: Session, ids: set[int]) -> dict[int, str]:
     if not ids:
         return {}
     return dict(db.execute(select(Employee.id, Employee.full_name).where(Employee.id.in_(ids))).all())
+
+
+# --- payouts (R8-5) -----------------------------------------------------------------------------------
+
+
+def payout_command(payroll_id: int, body: s.PayoutPreviewIn | s.PayoutIn) -> payout_service.Command:
+    return payout_service.command(
+        payroll_id,
+        body.payroll_closing_id,
+        body.business_date,
+        [payout_service.Item(i.method, i.account_id, i.amount) for i in body.items],
+        body.reference,
+    )
+
+
+def preview_payout(db: Session, actor: User, payroll_id: int, body: s.PayoutPreviewIn) -> s.PayoutPreviewOut:
+    """What paying would publish, validated (roles, payroll, date, pending, funds), without writing anything."""
+    planned = payout_service.plan(db, actor, payout_command(payroll_id, body))
+    employee_id = planned.payroll.employee_id
+    before = ledger.employee_balances(db, [employee_id]).get(employee_id, Decimal("0"))
+    amount = planned.command.amount
+    return s.PayoutPreviewOut(
+        net=planned.payment.net,
+        paid=planned.payment.paid,
+        amount=amount,
+        pending_after=planned.pending_after,
+        balance_before=before,
+        balance_after=before + amount,
+        legs=[s.MovementLegOut(**leg.__dict__) for leg in planned.legs],
+    )
+
+
+def payout(db: Session, payout_id: int) -> s.PayoutOut:
+    rows = list(db.scalars(_payouts_query().where(EmployeePayout.id == payout_id)))
+    if not rows:
+        raise AppError(404, "employee_payout_not_found", "El pago no existe.")
+    return _payout_outs(db, rows)[0]
+
+
+def payouts(db: Session, employee_id: int | None, limit: int, offset: int) -> s.PayoutPage:
+    """Payouts, newest first, reversed ones too."""
+    query = _payouts_query()
+    if employee_id is not None:
+        query = query.where(EmployeePayout.employee_id == employee_id)
+    total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
+    return s.PayoutPage(items=_payout_outs(db, list(db.scalars(query.limit(limit).offset(offset)))), total=total)
+
+
+def pay_summary(db: Session, employee_id: int) -> s.EmployeePaySummary:
+    """The employee's payrolls and payouts, apart from the internal account's balance."""
+    if db.get(Employee, employee_id) is None:
+        raise AppError(404, "employee_not_found", "El empleado no existe.")
+    last = db.scalars(
+        select(EmployeePayroll)
+        .where(EmployeePayroll.employee_id == employee_id, EmployeePayroll.status != "CANCELLED")
+        .order_by(EmployeePayroll.period_end.desc(), EmployeePayroll.id.desc())
+        .limit(1)
+    ).first()
+    closed = list(
+        db.scalars(
+            select(EmployeePayroll).where(
+                EmployeePayroll.employee_id == employee_id, EmployeePayroll.status == "CLOSED"
+            )
+        )
+    )
+    pending = [p for p in (payout_service.payment(db, row) for row in closed) if p is not None and p.pending > 0]
+    recent = list(db.scalars(_payouts_query().where(EmployeePayout.employee_id == employee_id).limit(5)))
+    last_row = None
+    if last is not None:
+        closings = _closings_by_id(db, [last.current_closing_id] if last.current_closing_id is not None else [])
+        last_row = _payroll_row(
+            db, last, _employee_names(db, {employee_id}), closings.get(last.current_closing_id or 0)
+        )
+    return s.EmployeePaySummary(
+        pending_payrolls=sum((p.pending for p in pending), Decimal("0")),
+        pending_payroll_count=len(pending),
+        last_payroll=last_row,
+        recent_payouts=_payout_outs(db, recent),
+    )
+
+
+def _payment(db: Session, row: EmployeePayroll) -> s.PayrollPaymentOut | None:
+    state = payout_service.payment(db, row)
+    if state is None:
+        return None
+    return s.PayrollPaymentOut(net=state.net, paid=state.paid, pending=state.pending, status=state.status)
+
+
+def _payouts_query() -> Select[EmployeePayout]:
+    return select(EmployeePayout).order_by(EmployeePayout.business_date.desc(), EmployeePayout.id.desc())
+
+
+def _payout_outs(db: Session, rows: list[EmployeePayout]) -> list[s.PayoutOut]:
+    if not rows:
+        return []
+    ids = [r.id for r in rows]
+    items: dict[int, list[EmployeePayoutItem]] = {}
+    for item in db.scalars(
+        select(EmployeePayoutItem).where(EmployeePayoutItem.payout_id.in_(ids)).order_by(EmployeePayoutItem.id)
+    ):
+        items.setdefault(item.payout_id, []).append(item)
+    account_ids = {i.account_id for group in items.values() for i in group}
+    accounts = {
+        b.account_id: b.name for b in ledger.account_balances(db, include_inactive=True) if b.account_id in account_ids
+    }
+    payrolls = {
+        p.id: p for p in db.scalars(select(EmployeePayroll).where(EmployeePayroll.id.in_({r.payroll_id for r in rows})))
+    }
+    versions = dict(
+        db.execute(
+            select(EmployeePayrollClosing.id, EmployeePayrollClosing.payroll_version).where(
+                EmployeePayrollClosing.id.in_({r.payroll_closing_id for r in rows})
+            )
+        ).all()
+    )
+    user_ids = {r.created_by for r in rows} | {r.reversed_by for r in rows if r.reversed_by is not None}
+    users = dict(db.execute(select(User.id, User.full_name).where(User.id.in_(user_ids))).all())
+    names = _employee_names(db, {r.employee_id for r in rows})
+    result = []
+    for r in rows:
+        assert r.operation_id is not None
+        result.append(
+            s.PayoutOut(
+                id=r.id,
+                payroll_id=r.payroll_id,
+                payroll_closing_id=r.payroll_closing_id,
+                payroll_version=versions[r.payroll_closing_id],
+                payroll_period=_period_label(payrolls[r.payroll_id]),
+                employee_id=r.employee_id,
+                employee_name=names.get(r.employee_id, ""),
+                business_date=r.business_date,
+                amount=r.amount,
+                reference=r.reference,
+                items=[
+                    s.PayoutItemOut(
+                        method=i.method,
+                        account_id=i.account_id,
+                        account_name=accounts.get(i.account_id, ""),
+                        amount=i.amount,
+                    )
+                    for i in items.get(r.id, [])
+                ],
+                operation_id=r.operation_id,
+                in_effect=r.reversal_operation_id is None,
+                reversal_operation_id=r.reversal_operation_id,
+                reversed_at=r.reversed_at,
+                reversed_by_name=users.get(r.reversed_by) if r.reversed_by is not None else None,
+                reversal_reason=r.reversal_reason,
+                created_at=r.created_at,
+                created_by_name=users.get(r.created_by, ""),
+            )
+        )
+    return result
