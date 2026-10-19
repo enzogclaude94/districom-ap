@@ -5,7 +5,7 @@
 - **Supersede parcialmente ADR 007** en una sola mención: donde ADR 007 dice «liquidación semanal de empleados», vale el modelo **por período** de este ADR (§4). ADR 007 no se edita.
 - Propuesta de origen: `PROPUESTA_R8_CUENTA_INTERNA_Y_LIQUIDACION_DE_EMPLEADOS.md` (2026-10-14).
 
-Este ADR separa lo **DECIDIDO** (vale para todo R8) de lo **IMPLEMENTADO** (lo que ya existe en el código). Al cierre de R8‑1 está implementado: el área protegida con permiso explícito, la privacidad de Cajas, la condición salarial (`0025`) y la cuenta interna en solo lectura. R8‑2 (aprobada) agrega consumos, adelantos y ajustes (`0026`, §3.1). R8‑3 (aprobada) agrega préstamos, cuotas y postergación (`0027`, §3.2). R8‑4 (en revisión) agrega la liquidación interna y sus aplicaciones (`0028`, §8.1). Nada de R8‑5 existe todavía.
+Este ADR separa lo **DECIDIDO** (vale para todo R8) de lo **IMPLEMENTADO** (lo que ya existe en el código). Al cierre de R8‑1 está implementado: el área protegida con permiso explícito, la privacidad de Cajas, la condición salarial (`0025`) y la cuenta interna en solo lectura. R8‑2 (aprobada) agrega consumos, adelantos y ajustes (`0026`, §3.1). R8‑3 (aprobada) agrega préstamos, cuotas y postergación (`0027`, §3.2). R8‑4 (aprobada) agrega la liquidación interna y sus aplicaciones (`0028`, §8.1). R8‑5 (en curso) agrega el pago de la liquidación (`0029`, §8.2).
 
 ## Contexto
 R8 cubre la **relación económica interna** entre DistriCom y cada empleado: sueldo, bonos, incentivos, faltantes y sobrantes ya asignados, consumos, adelantos, préstamos y cuotas, ajustes y el pago de la liquidación. **No es RRHH:** quedan afuera asistencia, vacaciones, licencias, ART, cargas sociales, recibos legales, AFIP/ARCA, convenio y contabilidad de nómina.
@@ -111,7 +111,7 @@ Antes de R8 la cuenta interna `EMPLOYEE` (una por empleado, R2) ya existía y la
 - **D7:** una liquidación con pagos vigentes **no se reabre**: se revierten los pagos o se corrige después con un ajuste.
 - **D8:** un documento R8 aplicado en un cierre vigente no se revierte directo. Si la liquidación no está pagada, un admin la reabre y corrige; si ya está pagada, ajuste compensatorio en un período posterior, con motivo, referencia al documento original y auditoría.
 
-#### 8.1 Liquidación interna — IMPLEMENTADO (R8‑4, `0028`, en revisión)
+#### 8.1 Liquidación interna — IMPLEMENTADO (R8‑4, `0028`)
 - **Tablas** (schema `settlements`): `employee_payrolls` (empleado y su cuenta `EMPLOYEE`, `kind`, período inclusivo, `payment_date` informativa, `status` `OPEN`/`CLOSED`/`CANCELLED`, `version`, cierre vigente, anulación, idempotencia, autor); el **borrador** mientras está `OPEN`: `employee_payroll_lines` (haberes) y `employee_payroll_choices` (las decisiones del preparador sobre patas y cuotas); lo **congelado** por cada cierre: `employee_payroll_closings` (versión, `kind` `FINANCIAL`/`NO_ACCRUAL`, totales, operación, `snapshot` JSON, quién y cuándo, reemplazo), `employee_payroll_closing_lines` y `employee_payroll_applications`; y `employee_payroll_reopenings` (de versión N a N+1, motivo, quién, cuándo). Sin `DELETE` en ninguna.
 - **Períodos:** `period_start ≤ period_end`; dos `REGULAR` del mismo empleado no se superponen (exclusión GiST con rango `[]`, ignora las anuladas); las `EXTRAORDINARY` sí pueden. El período se edita solo mientras nunca se cerró; cerrar exige `period_end ≤ hoy` (bloqueo `period_not_ended`). Anular (admin del área, motivo) solo una liquidación nunca cerrada: libera su período.
 - **Haberes:** `SALARY`, `BONUS`, `INCENTIVE`, `OTHER_CREDIT`, importe > 0. Sueldo propuesto (`source = TERM`, con la condición) solo en una `REGULAR` de un mes calendario completo con exactamente una condición que lo cubre; si no, aviso en «Haberes» y el sueldo se carga a mano con nota obligatoria (`salary_note_required`). `BONUS` e `INCENTIVE` son manuales (no se lee nada de Inteligencia Comercial); `OTHER_CREDIT` exige descripción. Alta, edición y baja: admin del área.
@@ -133,8 +133,8 @@ Antes de R8 la cuenta interna `EMPLOYEE` (una por empleado, R2) ya existía y la
 | R8‑1 | Área protegida con permiso explícito, privacidad de Cajas, condición salarial, cuenta interna en solo lectura | `0025` | IMPLEMENTADO (aprobado por Enzo el 2026-10-16; `0025` congelada) |
 | R8‑2 | Consumos, adelantos y ajustes | `0026` | IMPLEMENTADO (aprobado por Enzo el 2026-10-17; `0026` congelada) |
 | R8‑3 | Préstamos, cuotas y postergación | `0027` | IMPLEMENTADO (aprobado por Enzo el 2026-10-18; `0027` congelada) |
-| R8‑4 | Liquidación: períodos, líneas, aplicaciones, vista previa, cierre, snapshot, reapertura | `0028` | IMPLEMENTADO (en revisión de Enzo) |
-| R8‑5 | Pago `EMPLOYEE_PAYOUT`, consolidación y E2E de punta a punta | `0029` | DECIDIDO |
+| R8‑4 | Liquidación: períodos, líneas, aplicaciones, vista previa, cierre, snapshot, reapertura | `0028` | IMPLEMENTADO (aprobado por Enzo el 2026-10-19; `0028` congelada) |
+| R8‑5 | Pago `EMPLOYEE_PAYOUT`, consolidación y E2E de punta a punta | `0029` | EN CURSO |
 
 Cada fase frena con su informe y la aprobación de Enzo.
 

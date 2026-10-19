@@ -4,6 +4,9 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Changed — R8‑4 DONE
+- **R8‑4 DONE** (aprobada por Enzo el 2026-10-19 con sus 10 desvíos; PR #42 mergeado `adf8a4e`; `0028` congelada). En `main`, Backend y Frontend en verde; E2E y Docker no llegaron a correr por un bloqueo de facturación de GitHub Actions (la cabeza del PR, `e0930db`, pasó los cuatro jobs). **R8‑5 autorizada** (pago de la liquidación, `0029`): una `NO_ACCRUAL` con neto > 0 se paga; fecha entre el fin del período y hoy; el límite es el neto pendiente del cierre vigente, no el saldo de la cuenta interna.
+
 ### Added — Empleados: liquidación interna y aplicaciones (R8‑4)
 - **Liquidación interna** (`0028`; Empleados › «Liquidaciones internas», y «Nueva liquidación» desde la ficha), siempre «no es el recibo de sueldo legal»: `REGULAR` (no se superpone con otra del mismo empleado) o `EXTRAORDINARY` (puede), período inclusivo, fecha de pago informativa. Lista con empleado, período, tipo, estado, haberes, descuentos, créditos y neto.
 - **Haberes:** Sueldo, Bono, Incentivo y Otro haber (admin del área). El sueldo se propone de la condición salarial solo en una `REGULAR` de mes completo con una sola condición; si no, aviso y carga manual con nota. Bono e incentivo son manuales (no se lee Inteligencia Comercial); «Otro haber» exige descripción.
