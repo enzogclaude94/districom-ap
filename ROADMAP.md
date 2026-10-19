@@ -45,7 +45,7 @@ DistriCom es una plataforma modular (ADR 006). Este roadmap tiene tres carriles:
 | R5 | Combustible y vehículos | **DONE** (R5‑1 a R5‑4; `0014`–`0017` congeladas) | R2 |
 | R6 | Pagos a proveedores y terceros | **DONE** (2026-10-11) | R1 · R4 |
 | R7 | Boca de expendio | **DONE** (2026-10-14; R7‑1 a R7‑4, ADR 009) | R2–R5 |
-| R8 | Cuenta interna y liquidación de empleados | IN_PROGRESS (arquitectura aprobada 2026-10-15, ADR 010; R8‑1 a R8‑4 DONE, R8‑5 en curso) | R1 · R2 |
+| R8 | Cuenta interna y liquidación de empleados | IN_PROGRESS (arquitectura aprobada 2026-10-15, ADR 010; R8‑1 a R8‑4 DONE, R8‑5 en revisión) | R1 · R2 |
 | R9 | Endurecimiento | PLANNED | todas |
 
 Cada fase empieza solo con aprobación explícita de Enzo y termina con un informe y una pausa para revisión.
@@ -254,7 +254,7 @@ R7 **DONE** el 2026-10-14: aprobada por Enzo (R7‑1 a R7‑4: maestro de bocas,
 | R8‑2 | Consumos, adelantos y ajustes (`0026`) | DONE (aprobada por Enzo el 2026-10-17 con sus desvíos; PR #40 mergeado `a6be05c`; `0026` congelada) |
 | R8‑3 | Préstamos, cuotas y postergación (`0027`) | DONE (aprobada por Enzo el 2026-10-18 con un ajuste previo al merge; PR #41 mergeado `1fffb7b`; `0027` congelada) |
 | R8‑4 | Liquidación interna: períodos, líneas, aplicaciones, vista previa, cierre, snapshot, reapertura (`0028`) | DONE (aprobada por Enzo el 2026-10-19 con sus 10 desvíos; PR #42 mergeado `adf8a4e`; `0028` congelada) |
-| R8‑5 | Pago `EMPLOYEE_PAYOUT`, consolidación y E2E de punta a punta (`0029`) | IN_PROGRESS (autorizada 2026-10-19: pago parcial, `NO_ACCRUAL` con neto > 0 pagable, fecha entre fin del período y hoy, límite = neto pendiente del cierre vigente) |
+| R8‑5 | Pago `EMPLOYEE_PAYOUT`, consolidación y E2E de punta a punta (`0029`) | IN_REVIEW (autorizada 2026-10-19; PR #43, esperando la aprobación de Enzo y CI completo: pago parcial, `NO_ACCRUAL` con neto > 0 pagable, fecha entre fin del período y hoy, límite = neto pendiente del cierre vigente) |
 
 Cada fase frena con su informe y la aprobación de Enzo.
 

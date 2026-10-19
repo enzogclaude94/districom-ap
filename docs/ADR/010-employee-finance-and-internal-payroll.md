@@ -5,7 +5,7 @@
 - **Supersede parcialmente ADR 007** en una sola mención: donde ADR 007 dice «liquidación semanal de empleados», vale el modelo **por período** de este ADR (§4). ADR 007 no se edita.
 - Propuesta de origen: `PROPUESTA_R8_CUENTA_INTERNA_Y_LIQUIDACION_DE_EMPLEADOS.md` (2026-10-14).
 
-Este ADR separa lo **DECIDIDO** (vale para todo R8) de lo **IMPLEMENTADO** (lo que ya existe en el código). Al cierre de R8‑1 está implementado: el área protegida con permiso explícito, la privacidad de Cajas, la condición salarial (`0025`) y la cuenta interna en solo lectura. R8‑2 (aprobada) agrega consumos, adelantos y ajustes (`0026`, §3.1). R8‑3 (aprobada) agrega préstamos, cuotas y postergación (`0027`, §3.2). R8‑4 (aprobada) agrega la liquidación interna y sus aplicaciones (`0028`, §8.1). R8‑5 (en curso) agrega el pago de la liquidación (`0029`, §8.2).
+Este ADR separa lo **DECIDIDO** (vale para todo R8) de lo **IMPLEMENTADO** (lo que ya existe en el código). Al cierre de R8‑1 está implementado: el área protegida con permiso explícito, la privacidad de Cajas, la condición salarial (`0025`) y la cuenta interna en solo lectura. R8‑2 (aprobada) agrega consumos, adelantos y ajustes (`0026`, §3.1). R8‑3 (aprobada) agrega préstamos, cuotas y postergación (`0027`, §3.2). R8‑4 (aprobada) agrega la liquidación interna y sus aplicaciones (`0028`, §8.1). R8‑5 (en revisión) agrega el pago de la liquidación (`0029`, §8.2).
 
 ## Contexto
 R8 cubre la **relación económica interna** entre DistriCom y cada empleado: sueldo, bonos, incentivos, faltantes y sobrantes ya asignados, consumos, adelantos, préstamos y cuotas, ajustes y el pago de la liquidación. **No es RRHH:** quedan afuera asistencia, vacaciones, licencias, ART, cargas sociales, recibos legales, AFIP/ARCA, convenio y contabilidad de nómina.
@@ -148,7 +148,7 @@ Antes de R8 la cuenta interna `EMPLOYEE` (una por empleado, R2) ya existía y la
 | R8‑2 | Consumos, adelantos y ajustes | `0026` | IMPLEMENTADO (aprobado por Enzo el 2026-10-17; `0026` congelada) |
 | R8‑3 | Préstamos, cuotas y postergación | `0027` | IMPLEMENTADO (aprobado por Enzo el 2026-10-18; `0027` congelada) |
 | R8‑4 | Liquidación: períodos, líneas, aplicaciones, vista previa, cierre, snapshot, reapertura | `0028` | IMPLEMENTADO (aprobado por Enzo el 2026-10-19; `0028` congelada) |
-| R8‑5 | Pago `EMPLOYEE_PAYOUT`, consolidación y E2E de punta a punta | `0029` | EN CURSO |
+| R8‑5 | Pago `EMPLOYEE_PAYOUT`, consolidación y E2E de punta a punta | `0029` | IMPLEMENTADO (en revisión de Enzo) |
 
 Cada fase frena con su informe y la aprobación de Enzo.
 
