@@ -1,9 +1,7 @@
-import { execFileSync } from "node:child_process";
-
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 
-import { login } from "./helpers";
-import { api, day, driver, openSettlement } from "./settlement-setup";
+import { mainCash, noSideScroll, settlement, setUp } from "./employee-finance-setup";
+import { api, day } from "./settlement-setup";
 
 /**
  * R8-4 end to end (Enzo's point 20), on desktop and mobile: the four cases of the internal payroll. The setup (the
@@ -11,51 +9,7 @@ import { api, day, driver, openSettlement } from "./settlement-setup";
  * A fresh platform admin, created with the CLI, holds the area only for these tests.
  */
 
-const AREA = "settlements.employee_finance";
-const PASSWORD = "root-password-123";
 const EF = "/settlements/employee-finance";
-
-function createPlatformAdmin(email: string) {
-  execFileSync(
-    "uv",
-    ["run", "--directory", "../backend", "python", "-m", "app.cli", "create-admin", "--email", email, "--name", "Root"],
-    { input: `${PASSWORD}\n`, stdio: ["pipe", "ignore", "inherit"] },
-  );
-}
-
-async function mainCash(request: APIRequestContext) {
-  const accounts = await api<{ id: number; code: string | null }[]>(request, "GET", "/settlements/accounts");
-  return accounts.find((a) => a.code === "main_cash")!.id;
-}
-
-/** A delivery settlement (yesterday) of $`expected`, counted `counted` in $10.000 bills into the main cash box; any
- * difference (`assigned`) goes to the driver's internal account. */
-async function settlement(request: APIRequestContext, driverId: number, expected: number, counted: number) {
-  const id = await openSettlement(request, driverId, String(expected));
-  const box = await mainCash(request);
-  await api(request, "PUT", `/settlements/deliveries/${id}/count`, {
-    lines: [{ denomination_code: "ARS_10000", quantity: counted / 10000, destination_account_id: box }],
-  });
-  const preview = await api<{ preview_token: string }>(request, "GET", `/settlements/deliveries/${id}/closing-preview`);
-  const difference = Math.abs(expected - counted);
-  await api(request, "POST", `/settlements/deliveries/${id}/close`, {
-    version: 1,
-    preview_token: preview.preview_token,
-    allocations: difference ? [{ target: "EMPLOYEE", employee_id: driverId, amount: String(difference) }] : [],
-    confirm: true,
-  });
-  return id;
-}
-
-async function setUp(page: Page, tag: string) {
-  const suffix = `${Date.now()}${Math.floor(Math.random() * 1000)}`;
-  const email = `e2e-r84-${tag}-${suffix}@districom.local`;
-  const name = `Empleado R8-4 ${tag} ${suffix}`;
-  createPlatformAdmin(email);
-  await login(page, "/rendiciones", email, PASSWORD);
-  await api(page.request, "PUT", "/auth/access-grants", { email, key: AREA, role: "admin" });
-  return { name, employeeId: await driver(page.request, name) };
-}
 
 /** Opens a payroll from the employee's page: the period runs from 30 days ago to today. */
 async function newPayroll(page: Page, employeeId: number, kind: "Regular" | "Extraordinaria" = "Regular") {
@@ -100,13 +54,6 @@ async function expectTotals(page: Page, testId: string, [credits, deductions, ap
   await expect(totals).toContainText(`Descuentos${deductions}`);
   await expect(totals).toContainText(`Créditos aplicados${applied}`);
   await expect(totals).toContainText(`Neto${net}`);
-}
-
-async function noSideScroll(page: Page) {
-  const overflow = await page.evaluate(
-    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
-  );
-  expect(overflow).toBeLessThanOrEqual(0);
 }
 
 interface Payroll {
