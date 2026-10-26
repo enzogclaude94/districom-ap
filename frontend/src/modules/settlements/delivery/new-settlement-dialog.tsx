@@ -16,7 +16,8 @@ import { useDeliveryAction } from "./use-delivery-action";
 
 /**
  * Nueva rendición: date, driver, expected amount and reference. The number is never typed: the backend
- * gives the n-th settlement of that driver and day. A second one the same day needs an explicit "yes".
+ * gives the n-th settlement of that driver and day. A second one the same day needs an explicit "yes". The
+ * expected amount may stay empty (R9-1): Store Sys or a manual load fills it before the close.
  */
 export function NewSettlementDialog({
   onClose,
@@ -59,7 +60,7 @@ export function NewSettlementDialog({
     if (!businessDate) return "Indicá la fecha.";
     if (businessDate > todayIso()) return "La fecha no puede ser posterior a hoy.";
     if (employeeId === null) return "Elegí el repartidor.";
-    if (!parseAmount(expected)) return "Ingresá el importe esperado.";
+    if (expected.trim() && !parseAmount(expected)) return "Ingresá un importe esperado mayor a 0 o dejalo vacío.";
     if (existing.length > 0 && !sameDayConfirmed) return "Confirmá que es otra rendición del mismo día.";
     return null;
   };
@@ -73,7 +74,7 @@ export function NewSettlementDialog({
       onClose={onClose}
       validate={validate}
       build={(requestId) => {
-        const amount = parseAmount(expected)!;
+        const amount = parseAmount(expected);
         return {
           method: "POST",
           path: "/deliveries",
@@ -85,7 +86,7 @@ export function NewSettlementDialog({
             external_reference: reference.trim() || null,
             notes: notes.trim() || null,
           },
-          summary: `Rendición de ${driverName ?? "repartidor"} del ${formatDate(businessDate)} por ${formatMoney(amount)}`,
+          summary: `Rendición de ${driverName ?? "repartidor"} del ${formatDate(businessDate)} ${amount ? `por ${formatMoney(amount)}` : "sin esperado cargado"}`,
         };
       }}
     >
@@ -132,7 +133,8 @@ export function NewSettlementDialog({
           <ul className="list-inside list-disc">
             {existing.map((item) => (
               <li key={item.id}>
-                {settlementTitle(item.sequence_number)} · esperado {formatMoney(item.expected_amount)}
+                {settlementTitle(item.sequence_number)} · esperado{" "}
+                {item.expected_amount ? formatMoney(item.expected_amount) : "sin cargar"}
               </li>
             ))}
           </ul>
@@ -148,6 +150,9 @@ export function NewSettlementDialog({
         </div>
       )}
       <AmountField label="Importe esperado" value={expected} onChange={setExpected} />
+      <p className="text-xs text-muted-foreground">
+        Si lo dejás vacío, lo completa Store Sys o lo cargás después. Hace falta para cerrar.
+      </p>
       <TextField label="Referencia (opcional)" value={reference} onChange={setReference} maxLength={100} />
       <TextField label="Notas (opcional)" value={notes} onChange={setNotes} multiline />
     </ActionDialog>

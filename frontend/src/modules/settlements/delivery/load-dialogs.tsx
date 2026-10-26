@@ -291,14 +291,22 @@ export function FuelCorrectionDialog({ settlement, expense, onClose }: Base & { 
 
 /**
  * Correct the expected amount, reference or notes of an open settlement. Driver (or boca), date and number
- * never change. A boca's expected amount may be 0 or left empty until Store Sys gives it (R7-2).
+ * never change. A boca's expected amount may be 0 or left empty until Store Sys gives it (R7-2); a delivery's may
+ * stay empty until it is loaded, but once loaded it is never cleared (R9-1). The amount is sent only when it
+ * changes: every change is an event, and correcting one that came from Store Sys takes a reason.
  */
 export function EditSettlementDialog({ settlement, onClose }: Base) {
   const outlet = settlement.type === "OUTLET";
-  const [expected, setExpected] = useState((settlement.expected_amount ?? "").replace(".", ","));
+  const current = settlement.expected_amount;
+  const [expected, setExpected] = useState((current ?? "").replace(".", ","));
+  const [reason, setReason] = useState("");
   const [reference, setReference] = useState(settlement.external_reference ?? "");
   const [notes, setNotes] = useState(settlement.notes ?? "");
   const action = useDeliveryAction(`edit:${settlement.id}`, onClose);
+  const parsed = outlet ? parseExpected(expected) : parseAmount(expected);
+  const changed = parsed !== current && !(parsed !== null && current !== null && Number(parsed) === Number(current));
+  const fromStoreSys = current !== null && settlement.expected_source === "STORE_SYS";
+  const pending = Boolean(settlement.expected_pending);
   return (
     <ActionDialog
       title="Corregir datos"
@@ -308,27 +316,24 @@ export function EditSettlementDialog({ settlement, onClose }: Base) {
       submitLabel="Guardar"
       action={action}
       onClose={onClose}
-      validate={() =>
-        outlet
-          ? expected.trim() && parseExpected(expected) === null
-            ? "Ingresá un importe válido o dejalo vacío."
-            : null
-          : !parseAmount(expected)
-            ? "Ingresá el importe esperado."
-            : null
-      }
+      validate={() => {
+        if (expected.trim() && parsed === null)
+          return outlet ? "Ingresá un importe válido o dejalo vacío." : "Ingresá un importe mayor a cero.";
+        if (!outlet && parsed === null && current !== null) return "El importe esperado no se puede borrar.";
+        if (changed && pending) return EXPECTED_PENDING_EDIT;
+        if (changed && fromStoreSys && !reason.trim())
+          return "Indicá el motivo para corregir el esperado de Store Sys.";
+        return null;
+      }}
       build={() => ({
         method: "PATCH",
         path: settlementPath(settlement),
         body: {
-          expected_amount: outlet ? parseExpected(expected) : parseAmount(expected),
+          ...(changed ? { expected_amount: parsed, expected_reason: reason.trim() || null } : {}),
           external_reference: reference.trim() || null,
           notes: notes.trim() || null,
         },
-        summary:
-          outlet && parseExpected(expected) === null
-            ? "Esperado sin cargar"
-            : `Esperado ${formatMoney((outlet ? parseExpected(expected) : parseAmount(expected))!)}`,
+        summary: parsed === null ? "Esperado sin cargar" : `Esperado ${formatMoney(parsed)}`,
       })}
     >
       <AmountField
@@ -336,8 +341,18 @@ export function EditSettlementDialog({ settlement, onClose }: Base) {
         value={expected}
         onChange={setExpected}
       />
+      {!outlet && current === null && (
+        <p className="text-xs text-muted-foreground">Si todavía no está, dejalo vacío: hace falta para cerrar.</p>
+      )}
+      {pending && <p className="text-sm text-warning">{EXPECTED_PENDING_EDIT}</p>}
+      {fromStoreSys && changed && (
+        <TextField label="Motivo de la corrección del esperado" value={reason} onChange={setReason} multiline />
+      )}
       <TextField label="Referencia (opcional)" value={reference} onChange={setReference} maxLength={100} />
       <TextField label="Notas (opcional)" value={notes} onChange={setNotes} multiline />
     </ActionDialog>
   );
 }
+
+export const EXPECTED_PENDING_EDIT =
+  "Hay una actualización de Store Sys sin decidir: aceptala o mantené el cargado antes de cambiar el esperado.";

@@ -26,7 +26,7 @@ export interface CashByBox {
 
 export interface Summary {
   expected: string;
-  /** Boca settlements only (R7-2): the Store Sys amount is not loaded yet; `expected` reads 0 meanwhile. */
+  /** The expected amount is not loaded yet (a boca since R7-2, a delivery since R9-1); `expected` reads 0. */
   expected_missing?: boolean;
   cash_counted: string;
   cash_additions: string;
@@ -102,14 +102,18 @@ export interface SettlementItem {
   employee_id: number;
   employee_name: string;
   sequence_number: number;
-  expected_amount: string;
+  /** Null while it is not loaded (R9-1). */
+  expected_amount: string | null;
   external_reference: string | null;
   status: string;
   version: number;
   financial_state: FinancialState;
   created_at: string;
   justified: string;
-  difference: string;
+  /** Null without an expected amount. */
+  difference: string | null;
+  /** A Store Sys update waits for a decision (R9-1). */
+  expected_update_pending?: boolean;
 }
 
 export interface SettlementPage {
@@ -251,10 +255,65 @@ export interface ResponsibleSuggestion {
   full_name: string;
 }
 
+export type ExpectedSource = "MANUAL" | "STORE_SYS";
+export type ExpectedOutcome =
+  "APPLIED" | "MATCHED" | "PENDING_CONFIRMATION" | "CONFIRMED" | "KEPT" | "REJECTED_CLOSED" | "SUPERSEDED" | "MANUAL";
+
+/** Where the expected amount in effect comes from (R9-1). */
+export interface ExpectedOrigin {
+  source: ExpectedSource;
+  /** Loaded before the Store Sys integration: no event («Manual · anterior a integración Store Sys»). */
+  legacy: boolean;
+  external_reference: string | null;
+  revision: number | null;
+  set_at: string | null;
+  set_by_name: string | null;
+}
+
+/** A Store Sys update waiting for a decision: the expected amount does not change until someone accepts it. */
+export interface ExpectedPending {
+  event_id: number;
+  expected_amount: string;
+  current_amount: string | null;
+  external_reference: string;
+  revision: number;
+  received_at: string;
+  /** The settlement is being corrected: deciding takes an admin of Rendiciones. */
+  requires_admin: boolean;
+}
+
+/** One change of the expected amount, manual or from Store Sys (R9-1). Nothing is removed. */
+export interface ExpectedEvent {
+  id: number;
+  source: ExpectedSource;
+  outcome: ExpectedOutcome;
+  expected_amount: string | null;
+  previous_amount: string | null;
+  previous_source: ExpectedSource | null;
+  external_reference: string | null;
+  revision: number | null;
+  reported_at: string | null;
+  settlement_version: number;
+  reason: string | null;
+  received_by_name: string | null;
+  received_at: string;
+  decided_by_name: string | null;
+  decided_at: string | null;
+  decision_reason: string | null;
+  in_effect: boolean;
+}
+
+export interface ExpectedHistory {
+  settlement_id: number;
+  events: ExpectedEvent[];
+  origin: ExpectedOrigin | null;
+  pending: ExpectedPending | null;
+}
+
 /**
- * A delivery settlement (R2) or a boca settlement (R7-2): the same board. A delivery has its driver and an
- * expected amount always loaded; a boca has its outlet, the responsables of the day as suggestions and an
- * expected amount that may still be unknown (null).
+ * A delivery settlement (R2) or a boca settlement (R7-2): the same board. A delivery has its driver, a boca its
+ * outlet and the responsables of the day as suggestions; either may have its expected amount still unknown (null,
+ * R7-2 and R9-1).
  */
 export interface Settlement {
   id: number;
@@ -269,7 +328,10 @@ export interface Settlement {
   responsible_suggestions?: ResponsibleSuggestion[];
   sequence_number: number;
   expected_amount: string | null;
-  expected_source: string;
+  expected_source: ExpectedSource;
+  expected_event_id?: number | null;
+  expected_origin?: ExpectedOrigin | null;
+  expected_pending?: ExpectedPending | null;
   external_reference: string | null;
   notes: string | null;
   status: "OPEN" | "CLOSED";
@@ -322,9 +384,10 @@ export interface ClosingPreview {
   status: string;
   financial_state: FinancialState;
   summary: Summary;
-  difference: string;
-  difference_kind: DifferenceKind;
-  amount_to_allocate: string;
+  /** Null without an expected amount: the close is blocked and no difference is invented (R9-1). */
+  difference: string | null;
+  difference_kind: DifferenceKind | null;
+  amount_to_allocate: string | null;
   blockers: Blocker[];
   legs: Leg[];
   /** What the close would publish per pending (the load) next to what is in effect now. */
@@ -469,6 +532,12 @@ export const deliveryApi = {
     apiFetch<ClosingPreview>(`${BASE}${settlementPath(settlement, "/closing-preview")}`),
   history: (settlement: Pick<Settlement, "id" | "type">) =>
     apiFetch<History>(`${BASE}${settlementPath(settlement, "/history")}`),
+  /** Every change of the expected amount, of either type (R9-1). */
+  expectedHistory: (id: number) => apiFetch<ExpectedHistory>(`${BASE}/settlements/${id}/expected-history`),
+  acceptExpected: (eventId: number) =>
+    apiFetch<ExpectedHistory>(`${BASE}/expected-updates/${eventId}/accept`, { method: "POST" }),
+  keepExpected: (eventId: number, reason: string) =>
+    send<ExpectedHistory>("POST", `/expected-updates/${eventId}/keep`, { reason }),
   /** Every write answers with the whole settlement, already recomputed by the backend. */
   write: (method: "POST" | "PUT" | "PATCH", path: string, body: unknown) => send<Settlement>(method, path, body),
 };

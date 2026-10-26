@@ -10,6 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { formatDate, formatDateTime, formatMoney } from "@/lib/format";
 
 import { deliveryApi, deliveryQueryKey, type History, type Leg, type Settlement } from "./api";
+import { ExpectedHistorySection } from "./expected-panel";
 import { DIFFERENCE_LABELS } from "./labels";
 
 interface Event {
@@ -259,20 +260,23 @@ export function HistoryTab({ settlement }: { settlement: Settlement }) {
   if (history.isError) return <ErrorState error={history.error} onRetry={() => void history.refetch()} />;
   const events = timeline(settlement, history.data);
   return (
-    <ol className="space-y-3" aria-label="Historial de la rendición">
-      {events.map((event) => (
-        <li key={event.key} className="rounded-md border border-border bg-surface px-4 py-3 text-sm">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-medium">{event.title}</span>
-            {event.badges}
-            <span className="ml-auto text-xs text-muted-foreground tabular-nums">
-              {formatDateTime(event.at)}
-              {event.by && ` · ${event.by}`}
-            </span>
-          </div>
-          {event.children && <div className="mt-1 space-y-1">{event.children}</div>}
-        </li>
-      ))}
-    </ol>
+    <div className="space-y-4">
+      <ExpectedHistorySection settlement={settlement} />
+      <ol className="space-y-3" aria-label="Historial de la rendición">
+        {events.map((event) => (
+          <li key={event.key} className="rounded-md border border-border bg-surface px-4 py-3 text-sm">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-medium">{event.title}</span>
+              {event.badges}
+              <span className="ml-auto text-xs text-muted-foreground tabular-nums">
+                {formatDateTime(event.at)}
+                {event.by && ` · ${event.by}`}
+              </span>
+            </div>
+            {event.children && <div className="mt-1 space-y-1">{event.children}</div>}
+          </li>
+        ))}
+      </ol>
+    </div>
   );
 }

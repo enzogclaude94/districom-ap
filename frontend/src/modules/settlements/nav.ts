@@ -1,4 +1,4 @@
-import { ClipboardList, Fuel, Home, Landmark, SlidersHorizontal, Users } from "lucide-react";
+import { ClipboardList, Fuel, Home, Landmark, PlugZap, SlidersHorizontal, Users } from "lucide-react";
 
 import type { NavSection } from "@/lib/modules";
 import { PendingAlertBadge } from "@/modules/settlements/pending/alerts";
@@ -35,6 +35,13 @@ export const SETTLEMENTS_NAV: NavSection[] = [
       { label: "Liquidaciones internas", href: "/rendiciones/empleados/liquidaciones" },
       { label: "Pagos de liquidaciones", href: "/rendiciones/empleados/pagos" },
     ],
+  },
+  // Protected area (R9-1): Store Sys codes of the employees, also only with an explicit grant.
+  {
+    label: "Integración Store Sys",
+    icon: PlugZap,
+    area: "settlements.store_sys_import",
+    href: "/rendiciones/integracion-store-sys",
   },
   { label: "Configuración del módulo", icon: SlidersHorizontal, href: "/rendiciones/configuracion" },
 ];

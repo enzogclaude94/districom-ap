@@ -19,7 +19,6 @@ const pedro: Employee = {
   hire_date: "2025-03-01",
   phone: null,
   external_axum_id: null,
-  external_store_id: null,
   functions: [
     {
       id: 3,

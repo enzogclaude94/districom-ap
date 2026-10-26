@@ -39,11 +39,13 @@ interface Row {
   reason: string;
 }
 
-function Line({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) {
+function Line({ label, value, strong = false }: { label: string; value: string | null; strong?: boolean }) {
   return (
     <div className={cn("flex justify-between gap-4 py-1", strong && "border-t border-border pt-2 font-semibold")}>
       <dt>{label}</dt>
-      <dd className="tabular-nums">{formatMoney(value)}</dd>
+      <dd className={cn("tabular-nums", value === null && "text-warning")}>
+        {value === null ? "Sin cargar" : formatMoney(value)}
+      </dd>
     </div>
   );
 }
@@ -54,7 +56,7 @@ function Amounts({ preview, outlet }: { preview: ClosingPreview; outlet: boolean
     // A boca (R7-4): expected, what justifies it line by line, and the difference.
     return (
       <dl className="rounded-md border border-border px-3 py-2 text-sm" aria-label="Importes del cierre">
-        <Line label="Esperado (Store Sys)" value={s.expected} strong />
+        <Line label="Esperado (Store Sys)" value={s.expected_missing ? null : s.expected} strong />
         <p className="pt-2 text-xs font-medium text-muted-foreground">Justificado</p>
         <Line label="Entregas parciales" value={s.remitted ?? "0.00"} />
         <Line label="Efectivo final" value={s.cash_total} />
@@ -71,7 +73,7 @@ function Amounts({ preview, outlet }: { preview: ClosingPreview; outlet: boolean
   }
   return (
     <dl className="rounded-md border border-border px-3 py-2 text-sm" aria-label="Importes del cierre">
-      <Line label="Esperado" value={s.expected} />
+      <Line label="Esperado" value={s.expected_missing ? null : s.expected} />
       {outlet && <Line label="Entregas parciales" value={s.remitted ?? "0.00"} />}
       {s.cash_by_box.map((box) => (
         <Line key={box.account_id} label={`Efectivo en ${box.account_name}`} value={box.total} />
@@ -134,7 +136,7 @@ export function CloseDialog({
   const outlet = settlement.type === "OUTLET";
   const zero = Boolean(data?.administrative_zero);
   const balanced = data?.difference_kind === "BALANCED";
-  const toAllocate = data ? toCents(data.amount_to_allocate) : 0;
+  const toAllocate = data ? toCents(data.amount_to_allocate ?? "0.00") : 0;
   const assigned = rows.reduce(
     (sum, row) => sum + (parseAmount(row.amount) ? toCents(parseAmount(row.amount)!) : 0),
     0,
@@ -311,7 +313,7 @@ function Allocations({
     <section aria-labelledby={`${id}-title`} className="space-y-3">
       <div className="space-y-1">
         <h3 id={`${id}-title`} className="font-medium">
-          {shortage ? "Faltante" : "Sobrante"} de {formatMoney(abs(preview.difference))}: ¿quién lo absorbe?
+          {shortage ? "Faltante" : "Sobrante"} de {formatMoney(abs(preview.difference ?? "0.00"))}: ¿quién lo absorbe?
         </h3>
         <p className="text-sm text-muted-foreground">
           {shortage
@@ -414,7 +416,7 @@ function Allocations({
       <dl className="grid grid-cols-3 gap-2 rounded-md border border-border px-3 py-2 text-sm" aria-label="Asignación">
         <div>
           <dt className="text-muted-foreground">Diferencia total</dt>
-          <dd className="font-medium tabular-nums">{formatMoney(abs(preview.difference))}</dd>
+          <dd className="font-medium tabular-nums">{formatMoney(abs(preview.difference ?? "0.00"))}</dd>
         </div>
         <div>
           <dt className="text-muted-foreground">Asignado</dt>

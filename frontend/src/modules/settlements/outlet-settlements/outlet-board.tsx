@@ -17,7 +17,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { authApi, currentUserQueryKey, moduleRole, roleAtLeast } from "@/lib/api/auth";
 import { cn } from "@/lib/cn";
 import { formatDate, formatMoney, todayIso } from "@/lib/format";
-import { differenceText, differenceTone, settlementTitle } from "@/modules/settlements/delivery/labels";
+import {
+  EXPECTED_UPDATE_BADGE,
+  differenceText,
+  differenceTone,
+  settlementTitle,
+} from "@/modules/settlements/delivery/labels";
 
 import {
   outletSettlementApi,
@@ -240,6 +245,11 @@ function Figures({ settlement: s }: { settlement: OutletBoardSettlement }) {
           </span>
         ) : (
           formatMoney(s.expected_amount)
+        )}
+        {s.expected_update_pending && (
+          <Badge tone="warning" className="ml-1" data-testid="expected-update-pending">
+            {EXPECTED_UPDATE_BADGE}
+          </Badge>
         )}
       </Figure>
       <Figure label="Entregas parciales">{formatMoney(s.remitted)}</Figure>

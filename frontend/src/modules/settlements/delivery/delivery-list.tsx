@@ -23,6 +23,7 @@ import { formatDate, formatMoney } from "@/lib/format";
 import { deliveryApi, deliveryQueryKey, type FinancialState, type SettlementFilters } from "./api";
 import { selectClass } from "./form";
 import {
+  EXPECTED_UPDATE_BADGE,
   FINANCIAL_STATE_LABELS,
   FINANCIAL_STATE_TONES,
   differenceText,
@@ -183,7 +184,11 @@ export function DeliveryList() {
                       )}
                     </TableCell>
                     <TableCell className="text-right whitespace-nowrap tabular-nums">
-                      {formatMoney(item.expected_amount)}
+                      {item.expected_amount ? (
+                        formatMoney(item.expected_amount)
+                      ) : (
+                        <span className="text-warning">Sin cargar</span>
+                      )}
                     </TableCell>
                     <TableCell className="text-right whitespace-nowrap tabular-nums">
                       {formatMoney(item.justified)}
@@ -192,9 +197,16 @@ export function DeliveryList() {
                       <Badge tone={differenceTone(item.difference)}>{differenceText(item.difference)}</Badge>
                     </TableCell>
                     <TableCell>
-                      <Badge tone={FINANCIAL_STATE_TONES[item.financial_state]}>
-                        {FINANCIAL_STATE_LABELS[item.financial_state]}
-                      </Badge>
+                      <div className="flex flex-wrap gap-1">
+                        <Badge tone={FINANCIAL_STATE_TONES[item.financial_state]}>
+                          {FINANCIAL_STATE_LABELS[item.financial_state]}
+                        </Badge>
+                        {item.expected_update_pending && (
+                          <Badge tone="warning" data-testid="expected-update-pending">
+                            {EXPECTED_UPDATE_BADGE}
+                          </Badge>
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell>
                       <Link

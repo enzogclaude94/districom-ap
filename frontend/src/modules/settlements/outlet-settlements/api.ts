@@ -25,6 +25,8 @@ export interface OutletSettlementItem {
   justified: string;
   /** Null while the settlement is open (R7-3: no difference until the close) or the expected amount is not loaded. */
   difference: string | null;
+  /** A Store Sys update waits for a decision (R9-1). */
+  expected_update_pending?: boolean;
 }
 
 export interface OutletSettlementPage {
@@ -67,6 +69,8 @@ export interface OutletBoardSettlement extends OutletSettlementRef {
   /** Only once closed. */
   difference: string | null;
   difference_kind: "SHORTAGE" | "SURPLUS" | "BALANCED" | null;
+  /** A Store Sys update waits for a decision (R9-1). */
+  expected_update_pending?: boolean;
 }
 
 export interface OutletBoardRow {
