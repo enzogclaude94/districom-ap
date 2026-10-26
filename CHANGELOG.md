@@ -4,6 +4,9 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Changed — R8 DONE
+- **R8 DONE** (2026-10-26: R8‑1 a R8‑5; `0025`–`0029` congeladas). **R8‑5** aprobada por Enzo el 2026-10-19 con sus 11 desvíos; PR #43 mergeado `144b2bb` con la suite backend completa en verde sobre el head final (1505 passed) y CI 4/4 en el PR y en `main`. Las deudas conocidas (pago con cheque, filtros en «Pagos de liquidaciones», comprobante imprimible, asistente de corrección de una liquidación pagada, tope de descuento) quedan fuera de R8. R9 espera la aprobación de Enzo.
+
 ### Added — Empleados: pago de la liquidación interna (R8‑5)
 - **Pago de liquidación interna** (`0029`, documentos `employee_payouts` y `employee_payout_items`, operación `EMPLOYEE_PAYOUT`: caja o banco −ítem · cuenta interna +total). En la liquidación cerrada, bloque «Pago» con Neto, Pagado, Pendiente de pago y estado derivado («Sin pagar», «Pagada parcialmente», «Pagada»), «Registrar pago» e historia; también una `NO_ACCRUAL` con neto > 0.
 - **Formulario:** fecha (desde el fin del período hasta hoy; antes es un adelanto), uno o más medios (efectivo de una caja activa, transferencia de un banco activo), importes (por defecto el pendiente completo, solo hacia abajo) y referencia; vista previa del backend con Liquidación, Ya pagado, Este pago, Quedará pendiente y las patas. Pagos parciales; nunca más que el neto pendiente del cierre vigente (el saldo de la cuenta interna no es el límite). Fondos como en adelantos y pagos.
