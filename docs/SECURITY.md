@@ -19,6 +19,7 @@ Línea base de Fase 0 (detalle en `ARCHITECTURE.md §8` y ADR 004).
 | Redirecciones | Login solo redirige a rutas relativas del mismo sitio |
 | Datos de empleados | Administración solo para administradores de plataforma; el teléfono (PII) no se registra en auditoría ni en logs |
 | Finanzas de empleados (R8, ADR 010) | Área protegida `settlements.employee_finance` con permiso explícito que el admin de plataforma no hereda; sin el área, 404 sin detalles y Cajas oculta cuentas `EMPLOYEE` y las técnicas de R8 y redacta operaciones R8; lo que mueve Caja o Banco (adelantos, préstamos, pagos de liquidación) exige además operator de Rendiciones, y revertir un pago, admin del área; logs sin identidad de empleado junto a importes |
+| Integración Store Sys (R9‑1, ADR 011) | Área protegida `settlements.store_sys_import` con permiso explícito que el admin de plataforma no hereda; sin el área, 404. Importar el esperado exige operator del área y operator de Rendiciones; cambiar el código Store Sys de un empleado, solo admin del área, con motivo para corregirlo o quitarlo y auditado (antes, después, quién, cuándo); `EmployeeOut` de plataforma ya no expone el código. El contrato no recibe credenciales ni API keys (no hay conexión con Store Sys); los registros rechazados se loguean solo con su `sqlstate`, sin importes ni identidades |
 
 ## Pendiente (fases siguientes)
 - Archivos subidos (Fase 1): límite de tamaño, extensión + MIME + firma, nombre sanitizado, sin macros ni fórmulas.
