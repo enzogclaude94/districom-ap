@@ -29,6 +29,8 @@ export type MovementOrigin =
   | "LOAN_REVERSAL"
   | "PAYROLL"
   | "PAYROLL_CORRECTION"
+  | "PAYOUT"
+  | "PAYOUT_REVERSAL"
   | "OTHER";
 export type DocumentKind =
   | "DELIVERY_SETTLEMENT"
@@ -36,7 +38,8 @@ export type DocumentKind =
   | "PENDING_COLLECTION"
   | "EMPLOYEE_MOVEMENT"
   | "EMPLOYEE_LOAN"
-  | "EMPLOYEE_PAYROLL";
+  | "EMPLOYEE_PAYROLL"
+  | "EMPLOYEE_PAYOUT";
 
 export interface CompensationTerm {
   id: number;
@@ -241,6 +244,8 @@ export interface PayrollRow {
   totals: PayrollTotals;
   totals_from_draft: boolean;
   in_correction: boolean;
+  /** Derived from the payouts in effect of the close in effect (R8-5); null unless CLOSED. */
+  payment_status: PaymentStatus | null;
 }
 
 export interface PayrollLine {
@@ -311,6 +316,72 @@ export interface PayrollClosing extends PayrollTotals {
   applications: PayrollApplication[];
 }
 
+/** «Sin pagar», «Pagada parcialmente», «Pagada» (R8-5): derived, never stored. */
+export type PaymentStatus = "UNPAID" | "PARTIALLY_PAID" | "PAID";
+export type PayoutMethod = "CASH" | "TRANSFER";
+
+export interface PayrollPayment {
+  net: string;
+  paid: string;
+  pending: string;
+  status: PaymentStatus;
+}
+
+export interface PayoutItem {
+  method: PayoutMethod;
+  account_id: number;
+  account_name: string;
+  amount: string;
+}
+
+export interface Payout {
+  id: number;
+  payroll_id: number;
+  payroll_closing_id: number;
+  payroll_version: number;
+  payroll_period: string;
+  employee_id: number;
+  employee_name: string;
+  business_date: string;
+  amount: string;
+  reference: string | null;
+  items: PayoutItem[];
+  operation_id: number;
+  in_effect: boolean;
+  reversal_operation_id: number | null;
+  reversed_at: string | null;
+  reversed_by_name: string | null;
+  reversal_reason: string | null;
+  created_at: string;
+  created_by_name: string;
+}
+
+export interface PayoutTerms {
+  payroll_closing_id: number;
+  business_date: string;
+  items: { method: PayoutMethod; account_id: number; amount: string }[];
+  reference: string | null;
+}
+
+/** «Liquidación», «Ya pagado», «Este pago», «Quedará pendiente», the internal account and the legs. */
+export interface PayoutPreview {
+  net: string;
+  paid: string;
+  amount: string;
+  pending_after: string;
+  balance_before: string;
+  balance_after: string;
+  legs: MovementLeg[];
+}
+
+/** The employee's payrolls and payouts, never mixed with the internal account's balance. */
+export interface EmployeePaySummary {
+  pending_payrolls: string;
+  pending_payroll_count: number;
+  last_payroll: PayrollRow | null;
+  recent_payouts: Payout[];
+}
+
 export interface Payroll extends PayrollRow {
   notes: string | null;
   created_at: string;
@@ -332,6 +403,10 @@ export interface Payroll extends PayrollRow {
     reopened_at: string;
     reopened_by_name: string;
   }[];
+  /** CLOSED only: what is paid of the close in effect (R8-5). */
+  payment: PayrollPayment | null;
+  /** Every payout of the payroll, reversed ones too, newest first. */
+  payouts: Payout[];
 }
 
 export interface Page<T> {
@@ -399,6 +474,14 @@ export const employeeFinanceApi = {
   /** A write of R8-4: each answers the payroll as it stands (draft and preview included). */
   writePayroll: (method: "POST" | "PUT" | "PATCH" | "DELETE", path: string, body?: Record<string, unknown>) =>
     apiFetch<Payroll>(`${BASE}${path}`, { method, body: body === undefined ? undefined : JSON.stringify(body) }),
+  previewPayout: (payrollId: number, body: PayoutTerms) =>
+    post<PayoutPreview>(`/payrolls/${payrollId}/payouts/preview`, body),
+  /** A write of R8-5 (pay, reverse): each answers the payout as it stands. */
+  writePayout: (path: string, body: Record<string, unknown>) => post<Payout>(path, body),
+  payout: (payoutId: number) => apiFetch<Payout>(`${BASE}/payouts/${payoutId}`),
+  payouts: (params: { employee_id?: number; limit: number; offset: number }) =>
+    apiFetch<Page<Payout>>(`${BASE}/payouts${query(params)}`),
+  paySummary: (employeeId: number) => apiFetch<EmployeePaySummary>(`${BASE}/employees/${employeeId}/pay-summary`),
 };
 
 export const employeeFinanceQueryKey = ["settlements", "employee-finance"] as const;

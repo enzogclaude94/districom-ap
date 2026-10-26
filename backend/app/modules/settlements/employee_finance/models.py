@@ -1,4 +1,4 @@
-"""Models of Rendiciones > Empleados (R8, ADR 010): salary terms, movements, loans and internal payrolls.
+"""Models of Rendiciones > Empleados (R8, ADR 010): salary terms, movements, loans, internal payrolls and payouts.
 
 Salary terms of an employee (R8-1, ADR 010).
 
@@ -563,3 +563,80 @@ class EmployeePayrollReopening(IdMixin, Base):
     reason: Mapped[str] = mapped_column(Text)
     reopened_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"))
     reopened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class EmployeePayout(IdMixin, Base):
+    """A payment of a closed internal payroll to its employee (R8-5, ADR 010, Enzo's R8-5 decisions).
+
+    It pays the net of ONE close of the payroll: the close in effect when it was registered (`payroll_closing_id`),
+    never a version that was superseded, since a payroll with payouts in effect does not reopen. The document of its
+    own operation (`EMPLOYEE_PAYOUT`, source `employee_payout:<id>`): each item leaves its cash box or bank, the
+    internal account +amount once. Dated on or after the payroll's period end and never in the future. Its state is
+    derived: in effect, or reversed (whole, with a reason, on its own date). Σ payouts in effect of a close <= its net;
+    the internal account's balance is never the limit. The database checks every rule (migration 0029).
+    """
+
+    __tablename__ = "employee_payouts"
+    __table_args__ = (
+        CheckConstraint("amount > 0", name="amount_positive"),
+        CheckConstraint("reference IS NULL OR length(btrim(reference)) > 0", name="reference_not_blank"),
+        CheckConstraint(
+            "(reversal_operation_id IS NULL) = (reversed_by IS NULL) AND (reversed_by IS NULL) = (reversed_at IS NULL) "
+            "AND (reversed_at IS NULL) = (reversal_reason IS NULL)",
+            name="reversal_fields",
+        ),
+        CheckConstraint(
+            "reversal_reason IS NULL OR length(btrim(reversal_reason)) > 0", name="reversal_reason_not_blank"
+        ),
+        CheckConstraint("request_fingerprint ~ '^[0-9a-f]{64}$'", name="fingerprint_format"),
+        {"schema": SCHEMA},
+    )
+
+    payroll_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey(f"{SCHEMA}.employee_payrolls.id", ondelete="RESTRICT"), index=True
+    )
+    # The close whose net it pays: the payroll's close in effect when the payout was registered.
+    payroll_closing_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey(f"{SCHEMA}.employee_payroll_closings.id", ondelete="RESTRICT"), index=True
+    )
+    employee_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("employees.id", ondelete="RESTRICT"), index=True)
+    employee_account_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey(f"{SCHEMA}.accounts.id", ondelete="RESTRICT")
+    )
+    business_date: Mapped[date] = mapped_column(Date)
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2))
+    reference: Mapped[str | None] = mapped_column(String(100))
+    operation_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("settlements.financial_operations.id", ondelete="RESTRICT"), unique=True
+    )
+    reversal_operation_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("settlements.financial_operations.id", ondelete="RESTRICT"), unique=True
+    )
+    reversed_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"))
+    reversed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reversal_reason: Mapped[str | None] = mapped_column(Text)
+    client_request_id: Mapped[UUID] = mapped_column(Uuid, unique=True)
+    request_fingerprint: Mapped[str] = mapped_column(String(64))
+    created_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class EmployeePayoutItem(IdMixin, Base):
+    """One means of a payout (R8-5): CASH from an active cash box, or TRANSFER from an active bank. Never a cheque nor
+    any other account. Written with its payout, before its operation, and never changed; the items add up to exactly
+    the payout's amount, one per account."""
+
+    __tablename__ = "employee_payout_items"
+    __table_args__ = (
+        UniqueConstraint("payout_id", "account_id"),
+        CheckConstraint("method IN ('CASH', 'TRANSFER')", name="method"),
+        CheckConstraint("amount > 0", name="amount_positive"),
+        {"schema": SCHEMA},
+    )
+
+    payout_id: Mapped[int] = mapped_column(BigInteger, ForeignKey(f"{SCHEMA}.employee_payouts.id", ondelete="RESTRICT"))
+    method: Mapped[str] = mapped_column(String(10))
+    account_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey(f"{SCHEMA}.accounts.id", ondelete="RESTRICT"), index=True
+    )
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2))

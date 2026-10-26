@@ -6,14 +6,16 @@ or ending a salary term takes admin of the area. R8-2: a consumption takes opera
 adjustment and any reversal take admin of the area. R8-3: giving or reversing a loan takes admin of the area plus
 operator in Rendiciones (it moves a cash box or the bank); deferring an installment takes admin of the area. Each
 movement and loan is the document of its own ledger operation (`movements.py`, `loans.py`); writes are idempotent
-by `client_request_id` (201 created, 200 a repeated request).
+by `client_request_id` (201 created, 200 a repeated request). R8-4: payrolls (`payrolls.py`). R8-5: paying a closed
+payroll takes operator of the area plus operator in Rendiciones; reversing a payout takes admin of the area plus
+operator in Rendiciones (`payouts.py`).
 """
 
 from typing import Annotated
 
 from fastapi import APIRouter, Query, Response
 
-from app.modules.settlements.employee_finance import compensation, loans, movements, payrolls, views
+from app.modules.settlements.employee_finance import compensation, loans, movements, payouts, payrolls, views
 from app.modules.settlements.employee_finance import schemas as s
 from app.modules.settlements.employee_finance.access import AreaAdmin, AreaOperator, AreaViewer
 from app.platform.auth.deps import DbSession
@@ -324,3 +326,57 @@ def reopen_payroll(
 def cancel_payroll(payroll_id: int, body: s.PayrollCancelIn, db: DbSession, user: AreaAdmin) -> s.PayrollOut:
     payrolls.cancel(db, user, payroll_id, body.reason)
     return views.payroll(db, payroll_id)
+
+
+# --- payouts (R8-5) ---------------------------------------------------------------------------------------------
+
+PAYOUT_RESPONSES: dict[int | str, dict[str, str]] = {
+    200: {"description": "Repetición de una solicitud ya registrada: devuelve el pago como quedó."},
+    201: {"description": "Registrado."},
+}
+
+
+@router.post("/payrolls/{payroll_id}/payouts/preview", response_model=s.PayoutPreviewOut)
+def preview_payout(payroll_id: int, body: s.PayoutPreviewIn, db: DbSession, user: AreaOperator) -> s.PayoutPreviewOut:
+    """Validate a payout of the payroll's close in effect and show what it leaves pending and its legs."""
+    return views.preview_payout(db, user, payroll_id, body)
+
+
+@router.post("/payrolls/{payroll_id}/payouts", response_model=s.PayoutOut, status_code=201, responses=PAYOUT_RESPONSES)
+def create_payout(
+    payroll_id: int, body: s.PayoutIn, db: DbSession, user: AreaOperator, response: Response
+) -> s.PayoutOut:
+    result = payouts.create(db, user, views.payout_command(payroll_id, body), body.client_request_id)
+    response.status_code = 201 if result.created else 200
+    return views.payout(db, result.id)
+
+
+@router.get("/payouts", response_model=s.PayoutPage)
+def list_payouts(
+    db: DbSession,
+    _: AreaViewer,
+    employee_id: int | None = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> s.PayoutPage:
+    return views.payouts(db, employee_id, limit, offset)
+
+
+@router.get("/payouts/{payout_id}", response_model=s.PayoutOut)
+def get_payout(payout_id: int, db: DbSession, _: AreaViewer) -> s.PayoutOut:
+    return views.payout(db, payout_id)
+
+
+@router.post("/payouts/{payout_id}/reverse", response_model=s.PayoutOut, responses=PAYOUT_RESPONSES)
+def reverse_payout(
+    payout_id: int, body: s.PayoutReversalIn, db: DbSession, user: AreaAdmin, response: Response
+) -> s.PayoutOut:
+    result = payouts.reverse(db, user, payout_id, body.reason, body.client_request_id)
+    response.status_code = 201 if result.created else 200
+    return views.payout(db, result.id)
+
+
+@router.get("/employees/{employee_id}/pay-summary", response_model=s.EmployeePaySummary)
+def get_pay_summary(employee_id: int, db: DbSession, _: AreaViewer) -> s.EmployeePaySummary:
+    """Last payroll, what the closed payrolls still owe and the latest payouts, apart from the account's balance."""
+    return views.pay_summary(db, employee_id)

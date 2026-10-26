@@ -4,6 +4,16 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Added — Empleados: pago de la liquidación interna (R8‑5)
+- **Pago de liquidación interna** (`0029`, documentos `employee_payouts` y `employee_payout_items`, operación `EMPLOYEE_PAYOUT`: caja o banco −ítem · cuenta interna +total). En la liquidación cerrada, bloque «Pago» con Neto, Pagado, Pendiente de pago y estado derivado («Sin pagar», «Pagada parcialmente», «Pagada»), «Registrar pago» e historia; también una `NO_ACCRUAL` con neto > 0.
+- **Formulario:** fecha (desde el fin del período hasta hoy; antes es un adelanto), uno o más medios (efectivo de una caja activa, transferencia de un banco activo), importes (por defecto el pendiente completo, solo hacia abajo) y referencia; vista previa del backend con Liquidación, Ya pagado, Este pago, Quedará pendiente y las patas. Pagos parciales; nunca más que el neto pendiente del cierre vigente (el saldo de la cuenta interna no es el límite). Fondos como en adelantos y pagos.
+- **Reverso** del pago entero (admin del área + operator de Rendiciones, motivo) en su fecha original; el pago revertido queda en la historia. Una liquidación con pagos vigentes no se reabre: «Esta liquidación tiene pagos vigentes. Revertí los pagos antes de reabrirla o registrá la corrección económica en una liquidación posterior.»
+- **Pantallas:** Empleados › «Pagos de liquidaciones» (lista y detalle) y, en la ficha, «Liquidaciones y pagos»: el saldo de la cuenta interna («Debe a la empresa…») separado de lo pendiente de pago de las liquidaciones. En Cajas, «Pago de liquidación interna» con enlace (sin el área, «Movimiento de empleado (reservado)»), y etiquetas para `PAYROLL_CLOSE` y la cuenta técnica de sueldos, que R8‑4 había dejado sin nombre.
+- **Base y concurrencia:** pagos inmutables y sin `DELETE`, 23 invariantes en la base, 11 casos de concurrencia; idempotencia del alta y del reverso.
+
+### Changed — R8‑4 DONE
+- **R8‑4 DONE** (aprobada por Enzo el 2026-10-19 con sus 10 desvíos; PR #42 mergeado `adf8a4e`; `0028` congelada). En `main`, Backend y Frontend en verde; E2E y Docker no llegaron a correr por un bloqueo de facturación de GitHub Actions (la cabeza del PR, `e0930db`, pasó los cuatro jobs). **R8‑5 autorizada** (pago de la liquidación, `0029`): una `NO_ACCRUAL` con neto > 0 se paga; fecha entre el fin del período y hoy; el límite es el neto pendiente del cierre vigente, no el saldo de la cuenta interna.
+
 ### Added — Empleados: liquidación interna y aplicaciones (R8‑4)
 - **Liquidación interna** (`0028`; Empleados › «Liquidaciones internas», y «Nueva liquidación» desde la ficha), siempre «no es el recibo de sueldo legal»: `REGULAR` (no se superpone con otra del mismo empleado) o `EXTRAORDINARY` (puede), período inclusivo, fecha de pago informativa. Lista con empleado, período, tipo, estado, haberes, descuentos, créditos y neto.
 - **Haberes:** Sueldo, Bono, Incentivo y Otro haber (admin del área). El sueldo se propone de la condición salarial solo en una `REGULAR` de mes completo con una sola condición; si no, aviso y carga manual con nota. Bono e incentivo son manuales (no se lee Inteligencia Comercial); «Otro haber» exige descripción.

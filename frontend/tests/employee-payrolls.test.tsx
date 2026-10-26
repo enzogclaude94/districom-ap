@@ -125,6 +125,9 @@ const PAYROLL = {
   closing: null,
   closings: [],
   reopenings: [],
+  payment_status: null,
+  payment: null,
+  payouts: [],
 };
 
 afterEach(() => vi.restoreAllMocks());

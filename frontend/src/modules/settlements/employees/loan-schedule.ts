@@ -40,3 +40,6 @@ export function sumAmounts(typed: string[]): string | null {
 }
 
 export const sameAmount = (a: string, b: string) => cents(a) === cents(b);
+
+/** Whether API amount `a` is above `b`, exactly (in cents). */
+export const moreThan = (a: string, b: string) => cents(a) > cents(b);

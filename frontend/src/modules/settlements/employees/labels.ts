@@ -9,6 +9,8 @@ import type {
   PayrollKind,
   PayrollLineKind,
   PayrollStatus,
+  PaymentStatus,
+  PayoutMethod,
   BalanceReading,
   Direction,
   InstallmentStatus,
@@ -49,6 +51,8 @@ export const ORIGIN_LABELS: Record<MovementOrigin, string> = {
   LOAN_REVERSAL: "Reverso de préstamo",
   PAYROLL: "Liquidación interna (haberes)",
   PAYROLL_CORRECTION: "Corrección de liquidación (reverso)",
+  PAYOUT: "Pago de liquidación interna",
+  PAYOUT_REVERSAL: "Reverso de pago de liquidación",
   OTHER: "Otro movimiento",
 };
 
@@ -68,6 +72,23 @@ export const loanTitle = (loanId: number) => `Préstamo n.º ${loanId}`;
 export const payrollsHref = "/rendiciones/empleados/liquidaciones";
 export const payrollHref = (payrollId: number) => `${payrollsHref}/${payrollId}`;
 export const payrollTitle = (payrollId: number) => `Liquidación interna n.º ${payrollId}`;
+
+export const payoutsHref = "/rendiciones/empleados/pagos";
+export const payoutHref = (payoutId: number) => `${payoutsHref}/${payoutId}`;
+export const payoutTitle = (payoutId: number) => `Pago de liquidación n.º ${payoutId}`;
+
+/** Derived from the payouts in effect of the close in effect (R8-5). */
+export const PAYMENT_STATUS_LABELS: Record<PaymentStatus, string> = {
+  UNPAID: "Sin pagar",
+  PARTIALLY_PAID: "Pagada parcialmente",
+  PAID: "Pagada",
+};
+export const PAYMENT_STATUS_TONES: Record<PaymentStatus, NonNullable<BadgeProps["tone"]>> = {
+  UNPAID: "warning",
+  PARTIALLY_PAID: "info",
+  PAID: "success",
+};
+export const PAYOUT_METHOD_LABELS: Record<PayoutMethod, string> = { CASH: "Efectivo", TRANSFER: "Transferencia" };
 
 /** An internal payroll, never the legal payslip (ADR 010). */
 export const PAYROLL_NOTICE = "Liquidación interna: no es el recibo de sueldo legal.";
@@ -139,6 +160,7 @@ export function documentOf(movement: AccountMovement): { label: string; href: st
   if (kind === "EMPLOYEE_MOVEMENT") return { label: `Movimiento n.º ${id}`, href: employeeMovementHref(id) };
   if (kind === "EMPLOYEE_LOAN") return { label: `Ver préstamo n.º ${id}`, href: employeeLoanHref(id) };
   if (kind === "EMPLOYEE_PAYROLL") return { label: payrollTitle(id), href: payrollHref(id) };
+  if (kind === "EMPLOYEE_PAYOUT") return { label: payoutTitle(id), href: payoutHref(id) };
   if (kind === "PENDING_COLLECTION") return { label: pendingTitle(id), href: pendingHref(id) };
   const title = number !== null ? settlementTitle(number) : `Rendición #${id}`;
   if (kind === "OUTLET_SETTLEMENT") return { label: `${title} (boca)`, href: `/rendiciones/boca/${id}` };
