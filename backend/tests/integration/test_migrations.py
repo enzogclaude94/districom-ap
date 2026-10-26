@@ -80,6 +80,7 @@ SETTLEMENTS_TABLES = {
         "employee_payouts",
         "employee_payout_items",
     ),
+    "expected_amount_events",
 }
 
 # Added by 0024 (R7-3).

@@ -49,7 +49,6 @@ def _employee_out(employee: Employee, functions: list[EmployeeFunction]) -> Empl
         hire_date=employee.hire_date,
         phone=employee.phone,
         external_axum_id=employee.external_axum_id,
-        external_store_id=employee.external_store_id,
         functions=[_function_out(row, today) for row in functions],
     )
 

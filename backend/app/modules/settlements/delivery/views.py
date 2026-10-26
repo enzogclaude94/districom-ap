@@ -26,6 +26,7 @@ from app.modules.settlements.delivery.models import (
     SettlementClosing,
     SettlementDifference,
 )
+from app.modules.settlements.expected import service as expected
 from app.modules.settlements.ledger import service as ledger
 from app.modules.settlements.ledger.accounts import employees_of_accounts
 from app.modules.settlements.pending import service as pending_service
@@ -38,7 +39,7 @@ from app.platform.vehicles.models import Vehicle
 
 def settlement(db: Session, settlement_id: int) -> s.SettlementOut:
     row = service.get(db, settlement_id)
-    if row.employee_id is None or row.expected_amount is None:  # never for DELIVERY (identity_by_type)
+    if row.employee_id is None:  # never for DELIVERY (identity_by_type)
         raise service.not_found()
     employee = db.get(Employee, row.employee_id)
     return s.SettlementOut(
@@ -91,6 +92,9 @@ def board(db: Session, row: Settlement) -> dict[str, Any]:
         "business_date": row.business_date,
         "sequence_number": row.sequence_number,
         "expected_source": row.expected_source,
+        "expected_event_id": row.expected_event_id,
+        "expected_origin": expected.origin(db, row),
+        "expected_pending": expected.pending_out(db, row),
         "external_reference": row.external_reference,
         "notes": row.notes,
         "status": row.status,
@@ -204,15 +208,16 @@ def closing_preview(db: Session, settlement_id: int) -> s.ClosingPreviewOut:
     accounts = {a.account_id: a for a in ledger.account_balances(db, include_inactive=True)}
     in_effect = closing.closing_in_effect(db, row)
     portfolio = ledger.system_account_id(db, "cheque_portfolio")
+    missing = plan.totals.expected_missing  # nothing to compare against: no difference is invented (R9-1)
     return s.ClosingPreviewOut(
         settlement_id=row.id,
         version=row.version,
         status=row.status,
         financial_state=closing.financial_state(row),
         summary=summary_out(plan.totals, {a.account_id: a.name for a in accounts.values()}),
-        difference=plan.difference,
-        difference_kind=plan.totals.difference_kind,
-        amount_to_allocate=abs(plan.difference),
+        difference=None if missing else plan.difference,
+        difference_kind=None if missing else plan.totals.difference_kind,
+        amount_to_allocate=None if missing else abs(plan.difference),
         blockers=preview.blockers,
         administrative_zero=plan.administrative_zero,
         preview_token=preview.token,
@@ -308,6 +313,7 @@ def _closing(
 def items(db: Session, rows: Iterable[tuple[Settlement, str]]) -> list[s.SettlementItem]:
     rows = list(rows)
     totals = summary.totals(db, [row.id for row, _ in rows])
+    pending = expected.pending_settlements(db, [row.id for row, _ in rows])
     return [
         s.SettlementItem(
             id=row.id,
@@ -316,14 +322,15 @@ def items(db: Session, rows: Iterable[tuple[Settlement, str]]) -> list[s.Settlem
             employee_id=row.employee_id or 0,  # the delivery list: always its driver
             employee_name=name,
             sequence_number=row.sequence_number,
-            expected_amount=row.expected_amount or 0,  # DELIVERY: always > 0
+            expected_amount=row.expected_amount,
             external_reference=row.external_reference,
             status=row.status,
             version=row.version,
             financial_state=closing.financial_state(row),
             created_at=row.created_at,
             justified=totals[row.id].justified,
-            difference=totals[row.id].difference,
+            difference=None if totals[row.id].expected_missing else totals[row.id].difference,
+            expected_update_pending=row.id in pending,
         )
         for row, name in rows
     ]
@@ -377,6 +384,7 @@ def fuel_out(
 def summary_out(totals: summary.Totals, accounts: dict[int, str]) -> s.Summary:
     return s.Summary(
         expected=totals.expected,
+        expected_missing=totals.expected_missing,
         cash_counted=totals.cash_counted,
         cash_additions=totals.cash_additions,
         cash_total=totals.cash_total,
@@ -400,8 +408,8 @@ def summary_out(totals: summary.Totals, accounts: dict[int, str]) -> s.Summary:
         expenses=totals.expenses,
         remitted=totals.remitted,
         justified=totals.justified,
-        difference=totals.difference,
-        difference_kind=totals.difference_kind,
+        difference=None if totals.expected_missing else totals.difference,
+        difference_kind=None if totals.expected_missing else totals.difference_kind,
     )
 
 

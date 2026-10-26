@@ -5,8 +5,9 @@ lives in `cash/router.py`, delivery settlements (R2) in `delivery/router.py` and
 (R3) in `pending/router.py`, payments to third parties (R6) in `payments/router.py`,
 responsables of the bocas de expendio (R7-1) in `outlets/router.py`, their settlements (R7-2) in
 `outlet_settlements/router.py`; Empleados (R8, protected area `settlements.employee_finance`,
-which uses `require_area_access` instead) in `employee_finance/router.py`; later phases add
-their own routers (ROADMAP.md).
+which uses `require_area_access` instead) in `employee_finance/router.py`; the expected amount and its
+Store Sys updates (R9-1) in `expected/router.py`, and Integración Store Sys (protected area
+`settlements.store_sys_import`) in `store_sys/router.py`; later phases add their own routers (ROADMAP.md).
 """
 
 from typing import Annotated
@@ -18,12 +19,14 @@ from app.modules.settlements.cash.router import router as cash_router
 from app.modules.settlements.cheques.router import router as cheques_router
 from app.modules.settlements.delivery.router import router as delivery_router
 from app.modules.settlements.employee_finance.router import router as employee_finance_router
+from app.modules.settlements.expected.router import router as expected_router
 from app.modules.settlements.expenses.router import router as expenses_router
 from app.modules.settlements.fuel_history.router import router as fuel_history_router
 from app.modules.settlements.outlet_settlements.router import router as outlet_settlements_router
 from app.modules.settlements.outlets.router import router as outlets_router
 from app.modules.settlements.payments.router import router as payments_router
 from app.modules.settlements.pending.router import router as pending_router
+from app.modules.settlements.store_sys.router import router as store_sys_router
 from app.platform.auth.access import module_role, require_module_access
 from app.platform.auth.models import User
 
@@ -55,3 +58,5 @@ router.include_router(payments_router)
 router.include_router(outlets_router)
 router.include_router(outlet_settlements_router)
 router.include_router(employee_finance_router)
+router.include_router(expected_router)
+router.include_router(store_sys_router)

@@ -97,7 +97,10 @@ def test_expected_amount_by_type(db: Session, centro: int, driver) -> None:  # t
     pedro = driver("Pedro Gómez")
     assert "expected_amount_by_type" in _insert(db, outlet_id=centro, expected_amount=-1)
     assert "expected_amount_by_type" in _insert(db, type="DELIVERY", employee_id=pedro, expected_amount=0)
-    assert "expected_amount_by_type" in _insert(db, type="DELIVERY", employee_id=pedro, expected_amount=None)
+    assert "expected_amount_by_type" in _insert(db, type="DELIVERY", employee_id=pedro, expected_amount=-1)
+    # R9-1 (adjustment 1): a delivery opens without its expected amount; one given is always set by its event.
+    assert "expected_event_required" in _insert(db, type="DELIVERY", employee_id=pedro, expected_amount=5)
+    assert "expected_event_required" in _insert(db, outlet_id=centro, expected_amount=5)
 
 
 def test_a_closed_boca_settlement_has_its_expected_amount(r: Roles, db: Session, centro: int) -> None:
@@ -119,7 +122,7 @@ def test_sequence_is_unique_per_boca_and_day_and_apart_from_deliveries(
     db.execute(
         text(
             "INSERT INTO settlements.settlements (type, business_date, employee_id, sequence_number, "
-            "expected_amount, client_request_id, request_fingerprint, created_by) SELECT 'DELIVERY', :d, :e, 1, 1, "
+            "expected_amount, client_request_id, request_fingerprint, created_by) SELECT 'DELIVERY', :d, :e, 1, NULL, "
             ":k, :f, id FROM users ORDER BY id LIMIT 1"
         ),
         {"d": yesterday(), "e": pedro, "k": uuid4(), "f": FINGERPRINT},

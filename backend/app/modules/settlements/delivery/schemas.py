@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.modules.settlements.cash.schemas import Amount, Money, Reason
 from app.modules.settlements.cheques.schemas import ChequeOut
+from app.modules.settlements.expected.schemas import ExpectedOriginOut, ExpectedPendingOut
 from app.modules.settlements.pending.schemas import PendingOut
 
 Text500 = Annotated[str, Field(max_length=500)]
@@ -32,7 +33,8 @@ class SettlementIn(StrictIn):
     client_request_id: UUID
     business_date: date
     employee_id: int
-    expected_amount: Amount
+    # Unknown while Store Sys has not given it (Enzo's R9-1 adjustment 1): load it later, before closing.
+    expected_amount: Amount | None = None
     external_reference: str | None = Field(default=None, max_length=100)
     notes: Text500 | None = None
 
@@ -41,6 +43,8 @@ class SettlementPatch(StrictIn):
     """Fields of an OPEN settlement that can be corrected. Driver, date and number never change."""
 
     expected_amount: Amount | None = None
+    # Why the expected amount changes: required to correct one that came from Store Sys (R9-1).
+    expected_reason: Reason | None = None
     external_reference: str | None = Field(default=None, max_length=100)
     notes: Text500 | None = None
 
@@ -61,7 +65,9 @@ class CashByBox(BaseModel):
 class Summary(BaseModel):
     """The fixed board of a settlement, computed by the backend only."""
 
+    # 0 while the expected amount is not loaded yet (`expected_missing`): «Esperado: Sin cargar» (R9-1).
     expected: Money
+    expected_missing: bool = False
     cash_counted: Money
     cash_additions: Money
     cash_total: Money
@@ -78,9 +84,10 @@ class Summary(BaseModel):
     # Cash a boca already handed over to a cash box, in effect (R7-3); always 0 for a delivery settlement.
     remitted: Money = Decimal("0.00")
     justified: Money
-    # justified - expected: negative is a shortage, positive a surplus.
-    difference: Money
-    difference_kind: Literal["SHORTAGE", "SURPLUS", "BALANCED"]
+    # justified - expected: negative is a shortage, positive a surplus. Null without an expected amount: there is
+    # nothing to compare against yet.
+    difference: Money | None
+    difference_kind: Literal["SHORTAGE", "SURPLUS", "BALANCED"] | None
 
 
 class SettlementItem(BaseModel):
@@ -90,14 +97,18 @@ class SettlementItem(BaseModel):
     employee_id: int
     employee_name: str
     sequence_number: int
-    expected_amount: Money
+    # Null while it is not loaded (R9-1): «Sin cargar».
+    expected_amount: Money | None
     external_reference: str | None
     status: str
     version: int
     financial_state: FinancialState
     created_at: datetime
     justified: Money
-    difference: Money
+    # Null without an expected amount.
+    difference: Money | None
+    # A Store Sys update waits for a decision (the board's mark, R9-1).
+    expected_update_pending: bool = False
 
 
 class SettlementPage(BaseModel):
@@ -343,9 +354,10 @@ class ClosingPreviewOut(BaseModel):
     status: str
     financial_state: FinancialState
     summary: Summary
-    difference: Money
-    difference_kind: Literal["SHORTAGE", "SURPLUS", "BALANCED"]
-    amount_to_allocate: Money
+    # Null without an expected amount: the close is blocked and nothing is invented (R9-1).
+    difference: Money | None
+    difference_kind: Literal["SHORTAGE", "SURPLUS", "BALANCED"] | None
+    amount_to_allocate: Money | None
     blockers: list[Blocker]
     # An OUTLET settlement of $0 without movements: the close is administrative, without a ledger operation.
     administrative_zero: bool = False
@@ -434,8 +446,14 @@ class SettlementOut(BaseModel):
     employee_id: int
     employee_name: str
     sequence_number: int
-    expected_amount: Money
+    # Null while it is not loaded (R9-1): «Esperado: Sin cargar».
+    expected_amount: Money | None
     expected_source: str
+    expected_event_id: int | None = None
+    # Where the amount in effect comes from; null while it is not loaded.
+    expected_origin: ExpectedOriginOut | None = None
+    # A Store Sys update waiting to be accepted or kept.
+    expected_pending: ExpectedPendingOut | None = None
     external_reference: str | None
     notes: str | None
     status: str

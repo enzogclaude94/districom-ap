@@ -11,6 +11,7 @@ from app.modules.settlements.delivery import closing, service, summary
 from app.modules.settlements.delivery import schemas as ds
 from app.modules.settlements.delivery import views as delivery_views
 from app.modules.settlements.delivery.models import Settlement
+from app.modules.settlements.expected import service as expected
 from app.modules.settlements.ledger import service as ledger
 from app.modules.settlements.ledger.accounts import advances_account_of
 from app.modules.settlements.outlet_settlements import remittances
@@ -60,6 +61,7 @@ def closing_preview(db: Session, settlement_id: int) -> s.OutletClosingPreviewOu
 def items(db: Session, rows: Iterable[tuple[Settlement, Outlet]]) -> list[s.OutletSettlementItem]:
     rows = list(rows)
     totals = summary.totals(db, [row.id for row, _ in rows])
+    pending = expected.pending_settlements(db, [row.id for row, _ in rows])
     return [
         s.OutletSettlementItem(
             id=row.id,
@@ -78,6 +80,7 @@ def items(db: Session, rows: Iterable[tuple[Settlement, Outlet]]) -> list[s.Outl
             justified=totals[row.id].justified,
             # No difference while it is OPEN (R7-3): only a close gives one.
             difference=None if totals[row.id].expected_missing or row.status == "OPEN" else totals[row.id].difference,
+            expected_update_pending=row.id in pending,
         )
         for row, outlet in rows
     ]
@@ -158,6 +161,7 @@ def _summary(board: ds.Summary, row: Settlement, *, closing: bool = False) -> s.
     """The boca's board. While OPEN it says how far the justified total is from the expected amount, never a
     difference (Enzo's R7-3 point 15); the close preview and a CLOSED settlement show the difference."""
     values = dict(board)
+    values.pop("expected_missing")
     missing = row.expected_amount is None
     remaining = above = None
     if not missing:
@@ -186,6 +190,7 @@ def board(db: Session, business_date: date) -> s.OutletBoardOut:
     """Rendiciones > Bocas: one row per boca, each settlement with its own figures (never added together)."""
     rows = outlet_settlements.of_day(db, business_date)
     totals = summary.totals(db, [row.id for row in rows])
+    pending = expected.pending_settlements(db, [row.id for row in rows])
     by_outlet: dict[int, list[Settlement]] = {}
     for row in rows:
         by_outlet.setdefault(row.outlet_id or 0, []).append(row)
@@ -205,7 +210,7 @@ def board(db: Session, business_date: date) -> s.OutletBoardOut:
                 outlet_code=outlet.code,
                 outlet_name=outlet.name,
                 outlet_active=outlet.active,
-                settlements=[_board_settlement(row, totals[row.id]) for row in settlements],
+                settlements=[_board_settlement(row, totals[row.id], row.id in pending) for row in settlements],
                 current_id=current.id if current is not None else None,
             )
         )
@@ -220,7 +225,7 @@ def _current(settlements: list[Settlement]) -> Settlement | None:
     return settlements[-1] if settlements else None
 
 
-def _board_settlement(row: Settlement, t: summary.Totals) -> s.OutletBoardSettlement:
+def _board_settlement(row: Settlement, t: summary.Totals, update_pending: bool) -> s.OutletBoardSettlement:
     remaining = above = None
     if row.expected_amount is not None:
         gap = t.expected - t.justified
@@ -229,6 +234,7 @@ def _board_settlement(row: Settlement, t: summary.Totals) -> s.OutletBoardSettle
     return s.OutletBoardSettlement(
         **_ref(row).model_dump(),
         expected_amount=row.expected_amount,
+        expected_update_pending=update_pending,
         remitted=t.remitted,
         cash_total=t.cash_total,
         transfers_verified=t.transfers["VERIFIED"],

@@ -65,7 +65,8 @@ class EmployeeOut(BaseModel):
     hire_date: date | None
     phone: str | None
     external_axum_id: str | None
-    external_store_id: str | None
+    # The Store Sys code (`external_store_id`) is not here: reading and changing it belongs to Rendiciones >
+    # Integración Store Sys (ADR 011), whose area the platform admin does not inherit.
     functions: list[EmployeeFunctionOut]
 
 

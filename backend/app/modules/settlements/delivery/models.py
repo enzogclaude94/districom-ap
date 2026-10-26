@@ -41,7 +41,7 @@ from app.db.base import Base, IdMixin, TimestampMixin
 SCHEMA = "settlements"
 
 SETTLEMENT_TYPES = ("DELIVERY", "OUTLET")  # OUTLET: rendición de boca de expendio (R7-2, ADR 009)
-EXPECTED_SOURCES = ("MANUAL",)  # STORE_SYS arrives when the integration exists
+EXPECTED_SOURCES = ("MANUAL", "STORE_SYS")  # STORE_SYS: the canonical contract of R9-1 (ADR 011)
 SETTLEMENT_STATUSES = ("OPEN", "CLOSED")
 TRANSFER_STATUSES = ("DECLARED", "VERIFIED", "REJECTED")
 DIFFERENCE_KINDS = ("SHORTAGE", "SURPLUS")
@@ -82,9 +82,10 @@ class Settlement(IdMixin, TimestampMixin, Base):
             "(type = 'OUTLET' AND outlet_id IS NOT NULL AND employee_id IS NULL)",
             name="identity_by_type",
         ),
-        # DELIVERY: always known and positive. OUTLET: may be unknown (NULL) or 0 while it is loaded (D2).
+        # DELIVERY: unknown (NULL) while it is loaded or positive (Enzo's R9-1 adjustment 1). OUTLET: unknown (NULL)
+        # or 0 too (D2). Either way it is required to close.
         CheckConstraint(
-            "(type = 'DELIVERY' AND expected_amount IS NOT NULL AND expected_amount > 0) OR "
+            "(type = 'DELIVERY' AND (expected_amount IS NULL OR expected_amount > 0)) OR "
             "(type = 'OUTLET' AND (expected_amount IS NULL OR expected_amount >= 0))",
             name="expected_amount_by_type",
         ),
@@ -142,9 +143,21 @@ class Settlement(IdMixin, TimestampMixin, Base):
     # OUTLET: the boca de expendio (platform). NULL for DELIVERY.
     outlet_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("outlets.id", ondelete="RESTRICT"), index=True)
     sequence_number: Mapped[int] = mapped_column(Integer)
-    # NULL only for an OUTLET settlement whose Store Sys amount is not loaded yet; required to close it.
+    # NULL while the Store Sys amount is not loaded yet (any type since R9-1); required to close it.
     expected_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     expected_source: Mapped[str] = mapped_column(String(20), server_default="MANUAL")
+    # The event of `expected_amount_events` that set the amount in effect (R9-1). NULL for an amount loaded before
+    # R9-1 («Manual · anterior a integración Store Sys»), never backfilled, and for one never loaded.
+    expected_event_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey(
+            "settlements.expected_amount_events.id",
+            ondelete="RESTRICT",
+            use_alter=True,
+            name="fk_settlements_expected_event_id_expected_amount_events",
+        ),
+    )
+    # A free text reference typed by the user (R2/R7); never the Store Sys key, which lives in the events.
     external_reference: Mapped[str | None] = mapped_column(String(100))
     notes: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(20), server_default="OPEN")
@@ -404,6 +417,7 @@ class SettlementClosing(IdMixin, Base):
         CheckConstraint(f"kind IN ({_in(CLOSING_KINDS)})", name="kind"),
         CheckConstraint("(kind = 'FINANCIAL') = (operation_id IS NOT NULL)", name="operation_by_kind"),
         CheckConstraint("kind = 'FINANCIAL' OR snapshot IS NOT NULL", name="administrative_snapshot"),
+        CheckConstraint(f"expected_source IN ({_in(EXPECTED_SOURCES)})", name="expected_source"),
         UniqueConstraint("settlement_id", "settlement_version", name="uq_settlement_closings_version"),
         {"schema": SCHEMA},
     )
@@ -424,6 +438,15 @@ class SettlementClosing(IdMixin, Base):
     # What an administrative zero close certified (all its totals at $0); NULL for a financial close, whose
     # document is its ledger operation.
     snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    # The expected amount this close was made against (R9-1): its amount, origin, event and, from Store Sys, its key.
+    # NULL on closes made before R9-1, never backfilled; the database checks they are the settlement's at insert.
+    expected_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    expected_source: Mapped[str | None] = mapped_column(String(20))
+    expected_event_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("settlements.expected_amount_events.id", ondelete="RESTRICT")
+    )
+    expected_reference: Mapped[str | None] = mapped_column(String(100))
+    expected_revision: Mapped[int | None] = mapped_column(Integer)
     closed_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"))
     closed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

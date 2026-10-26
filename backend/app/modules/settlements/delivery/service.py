@@ -30,6 +30,7 @@ from app.core.errors import AppError
 from app.modules.settlements.delivery import denominations, idempotency
 from app.modules.settlements.delivery import schemas as s
 from app.modules.settlements.delivery.models import CashCountLine, Settlement
+from app.modules.settlements.expected import service as expected
 from app.platform.audit.service import record_change
 from app.platform.auth.models import User
 from app.platform.parties.models import Employee, EmployeeFunction
@@ -181,7 +182,7 @@ def create(db: Session, actor: User, body: s.SettlementIn) -> Created:
             "type": DELIVERY,
             "business_date": body.business_date.isoformat(),
             "employee_id": body.employee_id,
-            "expected_amount": money(body.expected_amount),
+            "expected_amount": money(body.expected_amount) if body.expected_amount is not None else None,
             "external_reference": reference,
             "notes": notes,
         },
@@ -211,8 +212,6 @@ def create(db: Session, actor: User, body: s.SettlementIn) -> Created:
         business_date=body.business_date,
         employee_id=body.employee_id,
         sequence_number=(last or 0) + 1,
-        expected_amount=body.expected_amount,
-        expected_source="MANUAL",
         external_reference=reference,
         notes=notes,
         client_request_id=body.client_request_id,
@@ -232,6 +231,8 @@ def create(db: Session, actor: User, body: s.SettlementIn) -> Created:
             idempotency.check_replay(winner.request_fingerprint, fingerprint, "settlement_id", winner.id)
             return Created(winner.id, created=False)
         raise
+    # A delivery may open without its expected amount (Enzo's R9-1 adjustment 1); one given is its first event.
+    expected.set_manual(db, actor, settlement, body.expected_amount, None)
 
     record_change(
         db,
@@ -252,10 +253,8 @@ def update(db: Session, actor: User, settlement_id: int, body: s.SettlementPatch
     before = snapshot(settlement)
     fields = body.model_fields_set
     if "expected_amount" in fields:
-        # A boca may not know its Store Sys amount yet (Enzo's D2); a delivery always does.
-        if body.expected_amount is None and settlement.type == DELIVERY:
-            raise AppError(422, "invalid_amount", "El importe esperado es obligatorio.")
-        settlement.expected_amount = body.expected_amount
+        # Every change is an event (Enzo's R9-1 adjustment 5); a boca's may be cleared (D2), a delivery's not.
+        expected.set_manual(db, actor, settlement, body.expected_amount, body.expected_reason)
     if "external_reference" in fields:
         settlement.external_reference = (body.external_reference or "").strip() or None
     if "notes" in fields:

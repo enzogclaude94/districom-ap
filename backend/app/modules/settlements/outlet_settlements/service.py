@@ -21,6 +21,7 @@ from app.core.clock import business_today
 from app.core.errors import AppError
 from app.modules.settlements.delivery import idempotency, service
 from app.modules.settlements.delivery.models import Settlement
+from app.modules.settlements.expected import service as expected
 from app.modules.settlements.outlet_settlements import schemas as s
 from app.modules.settlements.outlets.models import OutletResponsibility
 from app.modules.settlements.outlets.service import in_effect_on
@@ -81,8 +82,6 @@ def create(db: Session, actor: User, body: s.OutletSettlementIn) -> service.Crea
         business_date=body.business_date,
         outlet_id=body.outlet_id,
         sequence_number=(last or 0) + 1,
-        expected_amount=body.expected_amount,
-        expected_source="MANUAL",
         external_reference=reference,
         notes=notes,
         client_request_id=body.client_request_id,
@@ -102,6 +101,7 @@ def create(db: Session, actor: User, body: s.OutletSettlementIn) -> service.Crea
             idempotency.check_replay(winner.request_fingerprint, fingerprint, "settlement_id", winner.id)
             return service.Created(winner.id, created=False)
         raise
+    expected.set_manual(db, actor, settlement, body.expected_amount, None)  # its first event, when given
 
     record_change(
         db,

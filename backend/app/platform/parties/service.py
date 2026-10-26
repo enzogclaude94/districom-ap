@@ -145,6 +145,51 @@ def update_employee(db: Session, employee_id: int, data: EmployeeIn, *, user_id:
     return employee
 
 
+def set_external_store_id(
+    db: Session, employee_id: int, code: str | None, reason: str | None, *, user_id: int, event_type: str
+) -> Employee:
+    """Load, correct or remove the employee's Store Sys code (`external_store_id`), audited with the previous and the
+    new value; correcting or removing a code takes a reason. The caller authorizes (the module that owns the
+    integration, ADR 011); the code is unique among employees. Nothing is deleted: the history is the audit trail."""
+    employee = db.scalars(select(Employee).where(Employee.id == employee_id).with_for_update()).one_or_none()
+    if employee is None:
+        raise AppError(404, "employee_not_found", "El empleado no existe.")
+    code = (code or "").strip() or None
+    reason = (reason or "").strip() or None
+    previous = employee.external_store_id
+    if code == previous:
+        db.commit()
+        return employee
+    if previous is not None and reason is None:
+        raise AppError(422, "reason_required", "Indicá el motivo para corregir o quitar el código Store Sys.")
+    if code is not None:
+        taken = db.scalar(select(Employee).where(Employee.external_store_id == code, Employee.id != employee_id))
+        if taken is not None:
+            raise AppError(
+                409,
+                "external_code_taken",
+                f"El código Store Sys ya es de {taken.full_name}.",
+                {"employee_id": taken.id},
+            )
+    employee.external_store_id = code
+    record_change(
+        db,
+        event_type,
+        action="update",
+        user_id=user_id,
+        entity_type="employee",
+        entity_id=employee.id,
+        before={"external_store_id": previous},
+        after={"external_store_id": code, "reason": reason},
+    )
+    try:
+        db.commit()
+    except IntegrityError as exc:  # a concurrent load of the same code won
+        db.rollback()
+        raise AppError(409, "external_code_taken", "El código Store Sys ya es de otro empleado.") from exc
+    return employee
+
+
 def deactivate_employee(db: Session, employee_id: int, end_date: date | None, *, user_id: int) -> Employee:
     """Logical deletion: the employee becomes inactive and their open functions end on `end_date`."""
     employee = get_employee(db, employee_id)
