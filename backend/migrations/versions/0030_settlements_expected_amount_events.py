@@ -269,15 +269,15 @@ DROP TRIGGER trg_expected_amount_events_check ON settlements.expected_amount_eve
 DROP FUNCTION settlements.check_expected_amount_event();
 """
 
-# Downgrade only while nothing of R9-1 exists: no event, no Store Sys origin, no delivery without its expected amount.
+# Downgrade only while 0029 can hold the data: no Store Sys record or origin, no delivery without its expected amount.
 DOWNGRADE_GUARD = """
 DO $$
 BEGIN
-    IF EXISTS (SELECT 1 FROM settlements.expected_amount_events)
+    IF EXISTS (SELECT 1 FROM settlements.expected_amount_events WHERE source <> 'MANUAL')
         OR EXISTS (SELECT 1 FROM settlements.settlements WHERE expected_source <> 'MANUAL')
         OR EXISTS (SELECT 1 FROM settlements.settlements WHERE type = 'DELIVERY' AND expected_amount IS NULL)
     THEN
-        RAISE EXCEPTION 'downgrade refused: expected amount events, Store Sys amounts or deliveries without an '
+        RAISE EXCEPTION 'downgrade refused: Store Sys records, Store Sys amounts or deliveries without an '
             'expected amount exist' USING ERRCODE = 'restrict_violation';
     END IF;
 END
@@ -456,7 +456,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Downgrade schema. Refused while any event, Store Sys amount or delivery without its expected amount exists."""
+    """Downgrade schema. Refused while any Store Sys record or amount, or a delivery without its expected amount,
+    exists: 0029 cannot hold them. Manual events go away with their table (each one is also in `audit_events`), so
+    R2-R8 data created at this head still goes down, as the older migration tests do."""
     op.execute(DOWNGRADE_GUARD)
     op.execute(DROP_TRIGGERS)
     op.execute(OLD_FROZEN)
