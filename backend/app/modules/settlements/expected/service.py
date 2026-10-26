@@ -540,7 +540,7 @@ def _names(db: Session, ids: set[int]) -> dict[int, str]:
     if not ids:
         return {}
     rows = db.execute(select(User.id, User.full_name).where(User.id.in_(ids)))
-    return {user_id: name for user_id, name in rows}
+    return dict(rows.tuples().all())
 
 
 def origin(db: Session, settlement: Settlement) -> s.ExpectedOriginOut | None:
