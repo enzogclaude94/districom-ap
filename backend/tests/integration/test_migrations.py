@@ -83,6 +83,8 @@ SETTLEMENTS_TABLES = {
     "expected_amount_events",
 }
 
+# Added by 0030 (R9-1).
+EXPECTED_AMOUNT_TABLES = {"expected_amount_events"}
 # Added by 0024 (R7-3).
 REMITTANCE_TABLES = {"outlet_remittances", "settlement_closing_remittances"}
 # Added by 0025 (R8-1), 0026 (R8-2), 0027 (R8-3), 0028 (R8-4) and 0029 (R8-5).
@@ -295,6 +297,7 @@ def test_third_parties_and_payments_migrations_go_down_and_up() -> None:
         - {"payments", "payment_items", "outlet_responsibilities"}
         - REMITTANCE_TABLES
         - EMPLOYEE_FINANCE_TABLES
+        - EXPECTED_AMOUNT_TABLES
     )
     assert "third_parties" in _tables(url)
     engine = create_engine(url)
@@ -325,7 +328,11 @@ def test_outlets_and_responsibilities_migrations_go_down_and_up() -> None:
     command.downgrade(cfg, "0021")
     assert (
         _settlements_tables(url)
-        == SETTLEMENTS_TABLES - {"outlet_responsibilities"} - REMITTANCE_TABLES - EMPLOYEE_FINANCE_TABLES
+        == SETTLEMENTS_TABLES
+        - {"outlet_responsibilities"}
+        - REMITTANCE_TABLES
+        - EMPLOYEE_FINANCE_TABLES
+        - EXPECTED_AMOUNT_TABLES
     )
     assert "outlets" in _tables(url)
     engine = create_engine(url)
@@ -335,7 +342,11 @@ def test_outlets_and_responsibilities_migrations_go_down_and_up() -> None:
         assert _tables(url) >= EXPECTED_TABLES - {"outlets"}
         assert (
             _settlements_tables(url)
-            == SETTLEMENTS_TABLES - {"outlet_responsibilities"} - REMITTANCE_TABLES - EMPLOYEE_FINANCE_TABLES
+            == SETTLEMENTS_TABLES
+            - {"outlet_responsibilities"}
+            - REMITTANCE_TABLES
+            - EMPLOYEE_FINANCE_TABLES
+            - EXPECTED_AMOUNT_TABLES
         )
         with engine.connect() as conn:
             leftovers = conn.execute(
