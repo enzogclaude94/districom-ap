@@ -20,6 +20,7 @@ export const SETTLEMENTS_NAV: NavSection[] = [
     icon: Landmark,
     items: [
       { label: "Cajas", href: "/rendiciones/cajas" },
+      { label: "Cierre del día", href: "/rendiciones/cierre-del-dia" },
       { label: "Cartera de cheques", href: "/rendiciones/cheques" },
       { label: "Pagos", href: "/rendiciones/pagos" },
     ],

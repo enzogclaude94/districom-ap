@@ -67,7 +67,9 @@ export const EXPECTED_UPDATE_BADGE = "Store Sys pendiente";
 export const LEGACY_ORIGIN = "Manual · anterior a integración Store Sys";
 
 /** "Store Sys · Ref. LIQ-4512 rev. 2", "Manual" or, loaded before the integration, its own words (R9-1). */
-export function expectedOriginText(origin: ExpectedOrigin): string {
+export function expectedOriginText(
+  origin: Pick<ExpectedOrigin, "source" | "legacy" | "external_reference" | "revision">,
+): string {
   if (origin.legacy) return LEGACY_ORIGIN;
   if (origin.source === "MANUAL") return "Manual";
   return `Store Sys · Ref. ${origin.external_reference} rev. ${origin.revision}`;

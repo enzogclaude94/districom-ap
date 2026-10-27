@@ -162,7 +162,7 @@ export function AppShell({ modules, children }: AppShellProps) {
     <div className="flex min-h-screen">
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-40 w-(--sidebar-width) overflow-y-auto border-r border-border bg-surface transition-transform md:sticky md:top-0 md:h-screen md:translate-x-0",
+          "fixed inset-y-0 left-0 z-40 w-(--sidebar-width) overflow-y-auto border-r border-border bg-surface transition-transform md:sticky md:top-0 md:h-screen md:translate-x-0 print:hidden",
           menuOpen ? "translate-x-0" : "-translate-x-full",
         )}
       >
@@ -187,7 +187,7 @@ export function AppShell({ modules, children }: AppShellProps) {
       )}
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-border bg-surface/95 px-4 backdrop-blur md:px-8">
+        <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-border bg-surface/95 px-4 backdrop-blur md:px-8 print:hidden">
           <Button
             variant="ghost"
             size="icon"
@@ -219,7 +219,7 @@ export function AppShell({ modules, children }: AppShellProps) {
             </Button>
           </div>
         </header>
-        <main className="mx-auto w-full max-w-7xl flex-1 space-y-6 p-4 md:p-8">
+        <main className="mx-auto w-full max-w-7xl flex-1 space-y-6 p-4 md:p-8 print:max-w-none print:p-0">
           {blockedModule ? (
             <EmptyState
               icon={Lock}
