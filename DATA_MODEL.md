@@ -823,3 +823,7 @@ Ningún cambio de schema: R7‑4 solo agrega lecturas y pantallas sobre §13.7, 
 - **Identidades:** reparto por `public.employees.external_store_id` (reutilizado, sin migración de plataforma; lo escribe solo el admin del área `settlements.store_sys_import`, auditado); boca por `public.outlets.code`. No existe `outlets.external_store_id`.
 
 **Clientes (ADR 007, C3):** hasta que exista `public.customers`, las tablas de Rendiciones guardan el nombre del cliente en texto y un `customer_id` opcional; no hay catálogo de clientes propio.
+
+### 13.10 Cierre del día (R9‑2 · sin migración, ADR 012)
+
+No agrega tablas ni columnas. `daily_close/` lee el ledger por `financial_operations.business_date` (`ledger.day_flows`, `account_balances(on=)`, `cheques_held(on=)`), las rendiciones de la fecha con su cierre vigente (`settlement_closings`, `settlement_differences`) y los documentos de cheques del día. Nada se guarda: ni cierre diario, ni arqueo, ni snapshot.
