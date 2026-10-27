@@ -31,6 +31,7 @@ Lo que existía antes de R9‑1 y se verificó en el código y la base (`0007`, 
 - `settlements.expected_amount_events`: **todo** cambio del esperado es un evento, manual o de Store Sys: el alta con importe, el `PATCH` de reparto y de boca, cada registro de Store Sys y su decisión. Sin `DELETE`; un evento se decide una sola vez.
 - **Outcomes (únicamente):** `MANUAL`, `APPLIED`, `MATCHED`, `PENDING_CONFIRMATION`, `CONFIRMED`, `KEPT`, `REJECTED_CLOSED`, `SUPERSEDED`. No existe `UNCHANGED`: un reintento devuelve el mismo evento, sin crear otro.
 - `settlements.expected_event_id` apunta al evento que fijó el esperado vigente. **Sin backfill:** las rendiciones anteriores a R9‑1 quedan con `NULL` y se leen «Manual · anterior a integración Store Sys».
+- **Downgrade nunca lossy** (ajuste de Enzo antes del merge): `0030 → 0029` se rechaza si existe cualquier fila de `expected_amount_events`, manual o de Store Sys, además de cualquier origen Store Sys o reparto sin esperado. `audit_events` no reemplaza esta historia.
 - La base verifica: el importe y el origen cambian solo con un evento nuevo; el evento vigente coincide con el importe; el `previous_*` de un evento es el vigente; nunca un evento que fija el importe sobre una rendición cerrada.
 
 ### 2.3 Autoridad

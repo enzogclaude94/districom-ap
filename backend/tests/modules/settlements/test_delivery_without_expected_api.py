@@ -102,9 +102,13 @@ def test_4_a_manual_amount_fills_it_and_it_closes(r: Roles, driver: Callable[...
 def test_5_the_close_is_blocked_without_it(r: Roles, driver: Callable[..., int], ids: dict[str, int]) -> None:
     sid = open_delivery(r.operator, driver("Pedro Gómez"))
     count_cash(r.operator, sid, ids["main_cash"], 1)
-    assert [b["code"] for b in preview(r.operator, sid)["blockers"]] == ["expected_amount_required"]
+    blockers = preview(r.operator, sid)["blockers"]
+    assert [b["code"] for b in blockers] == ["expected_amount_required"]
+    # Neutral: Store Sys is not required, a manual load closes it too.
+    assert blockers[0]["message"] == "Cargá el importe esperado para cerrar la rendición."
     refused = close(r.operator, sid)
     assert (refused.status_code, refused.json()["code"]) == (422, "expected_amount_required")
+    assert refused.json()["message"] == "Cargá el importe esperado para cerrar la rendición."
     assert delivery(r.operator, sid)["status"] == "OPEN"
 
 

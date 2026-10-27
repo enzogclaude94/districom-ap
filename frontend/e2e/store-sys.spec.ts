@@ -94,7 +94,7 @@ test("a delivery opens without its expected amount, Store Sys fills it and it cl
   await page.reload();
   await page.getByRole("button", { name: "Cerrar rendición" }).click();
   const blocked = page.getByRole("dialog");
-  await expect(blocked.getByText("Cargá el importe esperado de Store Sys para cerrar la rendición.")).toBeVisible();
+  await expect(blocked.getByText("Cargá el importe esperado para cerrar la rendición.")).toBeVisible();
   await expect(blocked.getByRole("button", { name: "Confirmar cierre" })).toBeDisabled();
   await blocked.getByRole("button", { name: "Cancelar" }).click();
 

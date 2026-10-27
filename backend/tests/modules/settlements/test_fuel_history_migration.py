@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from tests.conftest import TRUNCATED_TABLES, alembic_config
 from tests.modules.settlements.fuel_support import BASE, add_fuel, fuel, fuel_category, last_expense, vehicle
+from tests.modules.settlements.migration_support import as_before_r9
 from tests.modules.settlements.test_settlement_close_api import close, create, reopen
 
 SNAPSHOT = (
@@ -46,6 +47,7 @@ def _revision(db: Session) -> str | None:
 def _down(db: Session) -> None:
     db.commit()
     db.close()
+    as_before_r9()  # no R9 data below 0030
     command.downgrade(alembic_config(), "0016")
 
 

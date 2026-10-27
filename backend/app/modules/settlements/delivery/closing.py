@@ -114,7 +114,7 @@ CLOSE_NAMESPACE = UUID("5d0f6c1e-8a43-4a52-9a43-1d2b8d7f0c21")
 ZERO = Decimal("0.00")
 ADMINISTRATIVE_ZERO = "ADMINISTRATIVE_ZERO"
 EXPECTED_REQUIRED = "expected_amount_required"
-EXPECTED_REQUIRED_MESSAGE = "Cargá el importe esperado de Store Sys para cerrar la rendición."
+EXPECTED_REQUIRED_MESSAGE = "Cargá el importe esperado para cerrar la rendición."
 
 # A leg before its account exists: ("account", account_id), ("employee", employee_id) or
 # ("cheque", cheque_id), the latter on "Cartera de cheques" with the cheque named on the leg.
