@@ -13,6 +13,11 @@ TYPE_LABELS = {"DELIVERY": "Reparto", "OUTLET": "Boca"}
 HEADER = ["Sección", "Cuenta o rendición", "Tipo", "Estado", "Concepto", "Operaciones", "Importe"]
 
 
+def text(value: str) -> str:
+    """A cell that starts with a name typed by someone (an account) never starts a formula in a spreadsheet."""
+    return f"'{value}" if value[:1] in ("=", "+", "-", "@", "\t", "\r") else value
+
+
 def amount(value: Decimal | None) -> str:
     return "" if value is None else f"{value:.2f}".replace(".", ",")
 
@@ -27,7 +32,7 @@ def _origin(origin: s.ExpectedOriginOut | None) -> str:
 
 def csv_text(view: s.DailyCloseOut) -> str:
     out = io.StringIO()
-    out.write("﻿")
+    out.write("\ufeff")
     w = csv.writer(out, delimiter=";", lineterminator="\r\n")
     w.writerow(["Cierre del día", view.business_date.isoformat(), "Vista calculada: no firmada ni congelada"])
     w.writerow(["Arqueo físico", "No registrado"])
@@ -36,6 +41,7 @@ def csv_text(view: s.DailyCloseOut) -> str:
     w.writerow([])
     w.writerow(HEADER)
     for a in view.accounts:
+        name = text(a.name)
         kind = KIND_LABELS[a.kind]
         state = "Activa" if a.active else "Inactiva"
         for concept, value in (
@@ -45,11 +51,11 @@ def csv_text(view: s.DailyCloseOut) -> str:
             ("Movimiento neto", a.net),
             ("Saldo final contable", a.closing_balance),
         ):
-            w.writerow(["Saldos", a.name, kind, state, concept, "", amount(value)])
+            w.writerow(["Saldos", name, kind, state, concept, "", amount(value)])
         for c in a.inflow_categories:
-            w.writerow(["Ingresos", a.name, kind, state, c.label, c.operations, amount(c.amount)])
+            w.writerow(["Ingresos", name, kind, state, c.label, c.operations, amount(c.amount)])
         for c in a.outflow_categories:
-            w.writerow(["Egresos", a.name, kind, state, c.label, c.operations, amount(c.amount)])
+            w.writerow(["Egresos", name, kind, state, c.label, c.operations, amount(c.amount)])
     for t in view.totals:
         label = f"Total {'bancos' if t.kind == 'BANK' else 'cajas'}"
         for concept, value in (

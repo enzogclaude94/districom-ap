@@ -583,6 +583,19 @@ def test_17_the_csv_is_the_same_view_for_a_spanish_spreadsheet(
     assert "Adelanto" not in content
 
 
+def test_17_a_name_never_starts_a_formula_in_the_csv(r: Roles, db: Session) -> None:
+    # A second bank, active: removed after the test like every account that is not seeded.
+    db.execute(
+        text(
+            "INSERT INTO settlements.accounts (name, name_key, kind, allow_negative) "
+            "VALUES ('=HYPERLINK(1)', '=hyperlink(1)', 'BANK', true)"
+        )
+    )
+    db.commit()
+    content = r.viewer.get(f"{DAILY}.csv", params={"on": yesterday().isoformat()}).content.decode("utf-8")
+    assert "Saldos;'=HYPERLINK(1);Banco;Activa;Saldo inicial contable;;0,00" in content.splitlines()
+
+
 def test_17_the_csv_needs_access_too(user_as: Callable[..., TestClient]) -> None:
     assert user_as("ajeno").get(f"{DAILY}.csv").status_code == 403
 
