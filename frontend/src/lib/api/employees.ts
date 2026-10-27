@@ -17,7 +17,6 @@ export interface Employee {
   hire_date: string | null;
   phone: string | null;
   external_axum_id: string | null;
-  external_store_id: string | null;
   functions: EmployeeFunction[];
 }
 

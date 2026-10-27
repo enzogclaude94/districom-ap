@@ -647,6 +647,7 @@ def test_the_board_is_computed_by_the_backend(as_role, ids, opened, category) ->
     summary = operator.get(f"{BASE}/deliveries/{opened}").json()["summary"]
     assert summary == {
         "expected": "100000.00",
+        "expected_missing": False,
         "cash_counted": "42000.00",
         "cash_additions": "5000.00",
         "cash_total": "47000.00",

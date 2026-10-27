@@ -46,7 +46,7 @@ DistriCom es una plataforma modular (ADR 006). Este roadmap tiene tres carriles:
 | R6 | Pagos a proveedores y terceros | **DONE** (2026-10-11) | R1 · R4 |
 | R7 | Boca de expendio | **DONE** (2026-10-14; R7‑1 a R7‑4, ADR 009) | R2–R5 |
 | R8 | Cuenta interna y liquidación de empleados | DONE (2026-10-26; arquitectura aprobada 2026-10-15, ADR 010; R8‑1 a R8‑5 DONE; `0025`–`0029` congeladas) | R1 · R2 |
-| R9 | Endurecimiento | PLANNED | todas |
+| R9 | Endurecimiento | IN_PROGRESS (aprobada como etapa 2026-10-26; R9‑1 en revisión) | todas |
 
 Cada fase empieza solo con aprobación explícita de Enzo y termina con un informe y una pausa para revisión.
 
@@ -259,4 +259,14 @@ R7 **DONE** el 2026-10-14: aprobada por Enzo (R7‑1 a R7‑4: maestro de bocas,
 Cada fase frena con su informe y la aprobación de Enzo.
 
 ### R9 — Endurecimiento
-**Alcance:** reportes de cierre diario, contrato para recibir el importe esperado desde Store Sys (sin implementar la integración), performance, E2E del flujo de punta a punta.
+**Alcance:** contrato para recibir el importe esperado desde Store Sys (sin implementar la integración), reporte diario de cierre, E2E del flujo de punta a punta, performance y preparación de producción. Aprobada como etapa por Enzo el 2026-10-26, con este orden:
+
+| Fase | Contenido | Estado |
+|---|---|---|
+| R9‑1 | Contrato de ingreso Store Sys → DistriCom: esperado de una rendición por contrato canónico, eventos del esperado, autoridad con confirmación, reparto abierto sin esperado (`0030`; ADR 011) | IN_REVIEW (implementada; espera la aprobación de Enzo) |
+| R9‑2 | Reporte diario de cierre por caja y banco | PLANNED |
+| R9‑3 | E2E completo de Rendiciones de punta a punta | PLANNED |
+| R9‑4 | Performance | PLANNED |
+| R9‑5 | Hardening operativo y preparación de producción | PLANNED |
+
+Cada fase frena con su informe y la aprobación de Enzo. Sin parser de archivos, carpetas, conexión, cron, RPA ni API keys en R9‑1.

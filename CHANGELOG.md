@@ -4,6 +4,17 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Added — Rendiciones: contrato Store Sys → DistriCom del importe esperado (R9‑1)
+- **Contrato canónico** (`0030`, ADR 011): `POST /api/v1/settlements/imports/store-sys/expected-amounts` recibe de 1 a 200 registros (`external_reference`, `revision`, tipo, fecha, `employee_store_code` u `outlet_code`, número opcional, importe en texto) y responde un resultado por registro. Cada registro es su propia transacción; uno malo nunca tira el lote. No hay parser de archivos, carpeta, conexión, cron ni API key: Store Sys sigue siendo externo.
+- **Eventos del esperado:** todo cambio del esperado, manual o de Store Sys, es un evento de `expected_amount_events` con outcome `MANUAL`, `APPLIED`, `MATCHED`, `PENDING_CONFIRMATION`, `CONFIRMED`, `KEPT`, `REJECTED_CLOSED` o `SUPERSEDED`. La rendición apunta a su evento vigente (`expected_event_id`); las anteriores a R9‑1 quedan sin evento y se leen «Manual · anterior a integración Store Sys» (sin backfill).
+- **Autoridad:** Store Sys sobre vacío o sobre su propia referencia aplica; igual a lo manual coincide; distinto de lo manual, o con la rendición en corrección, queda pendiente hasta que alguien lo acepta o mantiene el cargado con motivo; sobre una cerrada se guarda `REJECTED_CLOSED` sin tocarla. Un pendiente bloquea el cierre y la edición manual del esperado. Corregir a mano un esperado de Store Sys pide motivo.
+- **Revisiones e idempotencia:** una revisión mayor es un evento nuevo; la misma con la misma huella devuelve el mismo evento; con otra huella, `external_reference_conflict`; una menor, `SUPERSEDED`. `settlement_not_found` no guarda nada y se reevalúa al reenviar.
+- **Reparto sin esperado:** una rendición de reparto abre con el esperado vacío («Esperado: Sin cargar», sin diferencia definitiva) y cierra solo con esperado > 0 (`expected_amount_required`); lo completa Store Sys o se carga a mano.
+- **Cierre:** congela el esperado contra el que se cerró (importe, origen, evento, referencia y revisión).
+- **Downgrade de `0030`** rechazado si existe cualquier evento del esperado (manual o de Store Sys), un origen Store Sys o un reparto sin esperado: la historia del esperado nunca se borra. El bloqueo de cierre sin esperado dice «Cargá el importe esperado para cerrar la rendición.» (Store Sys no es obligatorio; antes mencionaba Store Sys).
+- **Área «Integración Store Sys»** (`settlements.store_sys_import`, permiso explícito que el admin de plataforma no hereda): códigos Store Sys de empleados (`employees.external_store_id`), lectura con el área, cambio solo admin con motivo e historia auditada. La API de empleados de plataforma ya no expone el código.
+- **Pantallas:** origen del esperado en el tablero, aviso de actualización de Store Sys con «Aceptar el de Store Sys» / «Mantener el cargado», historia del esperado, indicador «Store Sys pendiente» en las listas y el tablero de bocas, y la página del área.
+
 ### Changed — R8 DONE
 - **R8 DONE** (2026-10-26: R8‑1 a R8‑5; `0025`–`0029` congeladas). **R8‑5** aprobada por Enzo el 2026-10-19 con sus 11 desvíos; PR #43 mergeado `144b2bb` con la suite backend completa en verde sobre el head final (1505 passed) y CI 4/4 en el PR y en `main`. Las deudas conocidas (pago con cheque, filtros en «Pagos de liquidaciones», comprobante imprimible, asistente de corrección de una liquidación pagada, tope de descuento) quedan fuera de R8. R9 espera la aprobación de Enzo.
 

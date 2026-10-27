@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from tests.conftest import alembic_config
 from tests.modules.settlements.direct_support import BASE, account_id, fund, spent
 from tests.modules.settlements.fuel_support import add_fuel, fuel, fuel_category, last_expense, vehicle
+from tests.modules.settlements.migration_support import as_before_r9
 from tests.modules.settlements.test_settlement_close_api import close, create
 
 
@@ -21,6 +22,7 @@ def test_existing_expenses_stay_settlement_expenses(as_role, driver, db: Session
     assert close(as_role("operator"), sid).status_code == 201
     db.commit()
     db.close()
+    as_before_r9()  # no R9 data below 0030
     cfg = alembic_config()
     command.downgrade(cfg, "0015")
     command.upgrade(cfg, "head")
@@ -44,6 +46,7 @@ def test_going_back_with_direct_expenses_is_refused(as_role, db: Session) -> Non
     spent(admin, account_id(admin, "main_cash"), tolls, "100")
     db.commit()
     db.close()
+    as_before_r9()  # no R9 data below 0030
     cfg = alembic_config()
     with pytest.raises(Exception, match="ck_expenses_origin"):
         command.downgrade(cfg, "0015")

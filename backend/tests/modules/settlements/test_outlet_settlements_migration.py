@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from tests.conftest import alembic_config
 from tests.modules.settlements.conftest import Roles
+from tests.modules.settlements.migration_support import as_before_r9
 from tests.modules.settlements.outlet_support import close as close_outlet
 from tests.modules.settlements.outlet_support import create as create_outlet
 from tests.modules.settlements.test_settlement_close_api import close, count, create, reopen
@@ -41,6 +42,7 @@ def test_deliveries_go_down_to_0022_and_up_unchanged(as_role, driver, ids: dict[
     assert reopen(as_role("admin"), closed, 1).status_code == 200
     db.commit()
     db.close()
+    as_before_r9()  # no R9 data below 0030
     cfg = alembic_config()
     command.downgrade(cfg, "0022")
     try:
@@ -80,6 +82,7 @@ def test_downgrade_is_refused_once_a_boca_settlement_exists(
     assert close_outlet(r.operator, sid).status_code == 201
     db.commit()
     db.close()
+    as_before_r9()  # no R9 data below 0030
     with pytest.raises(DBAPIError, match="downgrade of 0023 refused"):
         command.downgrade(alembic_config(), "0022")
     assert db.execute(text("SELECT version_num FROM alembic_version")).scalar_one() != "0022"

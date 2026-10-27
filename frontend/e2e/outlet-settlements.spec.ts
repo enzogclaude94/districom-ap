@@ -66,7 +66,7 @@ test("boca settlement: open without expected, zero close, reopen, cash and finan
   // 3. Without the expected amount it does not close.
   await page.getByRole("button", { name: "Cerrar rendición" }).click();
   const blocked = page.getByRole("dialog");
-  await expect(blocked).toContainText("Cargá el importe esperado de Store Sys para cerrar la rendición.");
+  await expect(blocked).toContainText("Cargá el importe esperado para cerrar la rendición.");
   await expect(blocked.getByRole("button", { name: "Confirmar cierre" })).toBeDisabled();
   await blocked.getByRole("button", { name: "Cancelar" }).click();
 

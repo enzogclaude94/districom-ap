@@ -93,6 +93,7 @@ from app.modules.settlements.delivery.models import (
     SettlementReopening,
     SettlementTransfer,
 )
+from app.modules.settlements.expected import service as expected
 from app.modules.settlements.ledger import service as ledger
 from app.modules.settlements.ledger.accounts import advances_account_of, employee_account_id
 from app.modules.settlements.outlet_settlements import remittances
@@ -113,7 +114,7 @@ CLOSE_NAMESPACE = UUID("5d0f6c1e-8a43-4a52-9a43-1d2b8d7f0c21")
 ZERO = Decimal("0.00")
 ADMINISTRATIVE_ZERO = "ADMINISTRATIVE_ZERO"
 EXPECTED_REQUIRED = "expected_amount_required"
-EXPECTED_REQUIRED_MESSAGE = "Cargá el importe esperado de Store Sys para cerrar la rendición."
+EXPECTED_REQUIRED_MESSAGE = "Cargá el importe esperado para cerrar la rendición."
 
 # A leg before its account exists: ("account", account_id), ("employee", employee_id) or
 # ("cheque", cheque_id), the latter on "Cartera de cheques" with the cheque named on the leg.
@@ -230,6 +231,8 @@ def preview(db: Session, settlement_id: int) -> Preview:
         blockers.append(s.Blocker(code="settlement_already_closed", message="La rendición ya está cerrada."))
     if plan.totals.expected_missing:
         blockers.append(s.Blocker(code=EXPECTED_REQUIRED, message=EXPECTED_REQUIRED_MESSAGE))
+    if expected.pending_of(db, plan.settlement.id) is not None:
+        blockers.append(s.Blocker(code=expected.PENDING_CODE, message=expected.PENDING_MESSAGE))
     if plan.totals.declared_transfers_count:
         blockers.append(
             s.Blocker(
@@ -311,6 +314,10 @@ def preview_token(db: Session, plan: Plan) -> str:
         "employee": settlement.employee_id,
         "outlet": settlement.outlet_id,
         "expected": None if totals.expected_missing else service.money(totals.expected),
+        # R9-1: where the expected comes from and whether a Store Sys update waits; accepting one changes the close.
+        "expected_source": settlement.expected_source,
+        "expected_event": settlement.expected_event_id,
+        "expected_pending": getattr(expected.pending_of(db, sid), "id", None),
         "count": sorted([code, service.money(value), qty, box] for code, value, qty, box in lines),
         "additions": sorted([aid, service.money(amount), box] for aid, amount, box in added),
         "transfers": sorted([tid, service.money(amount), bank, status] for tid, amount, bank, status in sent),
@@ -375,6 +382,7 @@ def close(db: Session, actor: User, settlement_id: int, body: s.CloseIn) -> serv
         )
     if plan.totals.expected_missing:
         raise AppError(422, EXPECTED_REQUIRED, EXPECTED_REQUIRED_MESSAGE, {"settlement_id": settlement.id})
+    expected.require_no_pending(db, settlement)
     if plan.totals.declared_transfers_count:
         raise AppError(
             409,
@@ -468,6 +476,7 @@ def close(db: Session, actor: User, settlement_id: int, body: s.CloseIn) -> serv
         request_fingerprint=fingerprint,
         closed_by=actor.id,
         closed_at=now,
+        **expected.closing_fields(db, settlement),
     )
     db.add(closing_row)
     db.flush()
@@ -549,6 +558,7 @@ def _close_administratively(
         snapshot=snapshot,
         closed_by=actor.id,
         closed_at=now,
+        **expected.closing_fields(db, settlement),
     )
     db.add(closing_row)
     db.flush()

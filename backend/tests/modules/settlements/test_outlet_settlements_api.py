@@ -147,10 +147,10 @@ def test_expected_null_blocks_the_close(r: Roles, centro: int, ids: dict[str, in
     count(r.operator, sid, ("ARS_1000", 5, ids["main_cash"]))
     shown = preview(r.operator, sid)
     assert [b["code"] for b in shown["blockers"]] == ["expected_amount_required"]
-    assert shown["blockers"][0]["message"] == "Cargá el importe esperado de Store Sys para cerrar la rendición."
+    assert shown["blockers"][0]["message"] == "Cargá el importe esperado para cerrar la rendición."
     refused = close(r.operator, sid, employee_part(1, "5000"))
     assert error(refused) == (422, "expected_amount_required")
-    assert refused.json()["message"] == "Cargá el importe esperado de Store Sys para cerrar la rendición."
+    assert refused.json()["message"] == "Cargá el importe esperado para cerrar la rendición."
 
 
 # --- types never cross ----------------------------------------------------------------------------

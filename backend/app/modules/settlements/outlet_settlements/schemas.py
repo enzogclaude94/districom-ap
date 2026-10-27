@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from app.modules.settlements.cash.schemas import Amount, Money, Reason
 from app.modules.settlements.cheques.schemas import ChequeOut
 from app.modules.settlements.delivery import schemas as ds
+from app.modules.settlements.expected.schemas import ExpectedOriginOut, ExpectedPendingOut
 from app.modules.settlements.pending.schemas import PendingOut
 
 # The Store Sys amount of a boca: 0 is a valid amount (a day without sales), unlike a delivery's.
@@ -49,8 +50,8 @@ class OutletSummary(ds.Summary):
     # The Store Sys amount is not loaded yet: `expected` reads 0 and the difference means nothing until it is.
     expected_missing: bool
     # Null while OPEN (never closed or being corrected): there is no difference until the close.
-    difference: Money | None  # type: ignore[assignment]
-    difference_kind: Literal["SHORTAGE", "SURPLUS", "BALANCED"] | None  # type: ignore[assignment]
+    difference: Money | None
+    difference_kind: Literal["SHORTAGE", "SURPLUS", "BALANCED"] | None
     # expected - justified while that is >= 0; null without an expected amount.
     remaining: Money | None = None
     # justified - expected when the justified total already goes above it; null otherwise.
@@ -158,6 +159,8 @@ class OutletSettlementItem(BaseModel):
     justified: Money
     # Null while the settlement is OPEN (no difference until the close, R7-3) or the expected amount is not loaded.
     difference: Money | None
+    # A Store Sys update waits for a decision (R9-1).
+    expected_update_pending: bool = False
 
 
 class OutletSettlementPage(BaseModel):
@@ -177,6 +180,9 @@ class OutletSettlementOut(BaseModel):
     sequence_number: int
     expected_amount: Money | None
     expected_source: str
+    expected_event_id: int | None = None
+    expected_origin: ExpectedOriginOut | None = None
+    expected_pending: ExpectedPendingOut | None = None
     external_reference: str | None
     notes: str | None
     status: str
@@ -245,6 +251,8 @@ class OutletBoardSettlement(OutletSettlementRef):
     """The figures of one settlement on the daily board. Never mixed with another settlement's."""
 
     expected_amount: Money | None
+    # A Store Sys update waits for a decision (R9-1).
+    expected_update_pending: bool = False
     remitted: Money
     cash_total: Money
     transfers_verified: Money

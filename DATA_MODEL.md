@@ -454,7 +454,7 @@ Diseñados desde las queries previstas; se revisan con `EXPLAIN ANALYZE` al impl
 
 Generador reproducible con seed fijo (`scripts/seed_demo_data.py --seed 42`) que **pasa por el pipeline de importación** (genera XLSX/CSV con formato AXUM/STORE SYS simulado), para probar el pipeline real además de poblar datos. Patrones inyectados y verificables (prompt §103): ruta con baja cobertura, preventista con cobertura alta y conversión baja, ruta con baja penetración de energizantes, dormidos, recuperados, mix chico, premium, categorías correlacionadas, estacionalidad semanal, pico de boca viernes 18–20 h. Cada patrón tiene un test que verifica que la métrica correspondiente lo detecta.
 
-## 13. Rendiciones (`settlements`, R1–R8)
+## 13. Rendiciones (`settlements`, R1–R9)
 
 Modelo **conceptual** aprobado (ADR 007, *Informe Inicial — DistriCom Rendiciones*). Cada tabla se diseña en detalle y se crea en su fase: §13.1 existe desde R1‑1 y §13.2 desde R2‑1; el resto es conceptual. Convenciones de §1 (dinero `numeric(14,2)`, fechas de negocio `date`, enums `text + CHECK`).
 
@@ -521,8 +521,8 @@ Decisiones de Enzo R2‑D1 a R2‑D7 y R2‑P1 a R2‑P5 (`ROADMAP.md`). La carg
 | business_date | date | Indexada; nunca futura (servicio) |
 | employee_id | bigint | FK `employees` (RESTRICT). Debe tener `settlements.delivery_driver` vigente ese día y estar activo (servicio) |
 | sequence_number | int | ≥ 1. Rendición 1, 2… del mismo repartidor y día, generada por el sistema |
-| expected_amount | numeric(14,2) | > 0; editable mientras está `OPEN` |
-| expected_source | varchar(20) | CHECK `MANUAL` (`STORE_SYS` cuando exista la integración) |
+| expected_amount | numeric(14,2) | > 0; editable mientras está `OPEN`. Desde `0030` (R9‑1) puede ser nulo al abrir; cerrar lo exige (§13.9) |
+| expected_source | varchar(20) | CHECK `MANUAL` / `STORE_SYS` (`STORE_SYS` desde `0030`, §13.9) |
 | external_reference / notes | varchar(100) / text, null | |
 | status | varchar(20) | CHECK `OPEN` / `CLOSED`. Estado de **edición** |
 | version | int, default 1 | Sube con cada reapertura (R2‑2) |
@@ -813,5 +813,13 @@ Ningún cambio de schema: R7‑4 solo agrega lecturas y pantallas sobre §13.7, 
 **Pago de la liquidación (`0029`, R8‑5).** `employee_payouts`: `id`, `payroll_id`, `payroll_closing_id` (el cierre vigente al crearlo), `employee_id`, `employee_account_id`, `business_date` (`period_end ≤ fecha ≤ hoy`), `amount > 0`, `reference`, `operation_id` (se fija una vez), `reversal_operation_id`/`reversed_by`/`reversed_at`/`reversal_reason` (todo o nada), `client_request_id` (único), `request_fingerprint`, `created_by`, `created_at`. `employee_payout_items`: `payout_id`, `method` (`CASH`/`TRANSFER`), `account_id` (`CASH_BOX` activa para `CASH`, `BANK` activo para `TRANSFER`), `amount > 0`, único (`payout_id`, `account_id`). Operación `EMPLOYEE_PAYOUT` (cada caja o banco −ítem · `EMPLOYEE` +total) con fuente `employee_payout:<id>` y la fecha del pago; índice único de una operación por pago. Pagado, pendiente y estado («Sin pagar», «Pagada parcialmente», «Pagada») son derivados de los pagos vigentes del cierre vigente; nada se guarda. Triggers: alta (`check_employee_payout`), ítems solo antes de publicar (`check_employee_payout_item`), inmutabilidad y `forbid_delete`, `check_payroll_not_paid` (una liquidación con pagos vigentes no sale de `CLOSED`, `payroll_has_payouts`), `check_employee_leg` con `EMPLOYEE_PAYOUT`, y el diferido `verify_employee_payout` (Σ ítems = importe, operación y patas exactas, reverso exacto, cierre vigente, Σ pagos vigentes ≤ neto). El downgrade se niega si hay pagos.
 
 **Decidido, sin implementar (R8‑5):** `employee_payouts` + ítems. Ver ADR 010.
+
+### 13.9 Importe esperado y contrato Store Sys (R9‑1 · migración `0030`, ADR 011)
+
+- **`expected_amount_events`**: `id`, `settlement_id` (FK), `settlement_version`, `source` (`MANUAL` / `STORE_SYS`), `outcome` (`MANUAL`, `APPLIED`, `MATCHED`, `PENDING_CONFIRMATION`, `CONFIRMED`, `KEPT`, `REJECTED_CLOSED`, `SUPERSEDED`), `expected_amount` (≥ 0; nulo solo en una boca que se vacía), `previous_amount` / `previous_source` / `previous_event_id` (lo vigente al escribirlo), `external_reference` / `revision` (≥ 1) / `request_fingerprint` (64 hex) / `reported_at` solo en `STORE_SYS`, `reason`, `received_by` / `received_at`, `decided_by` / `decided_at` / `decision_reason` (solo al decidir un pendiente), `supersedes_event_id` (único). CHECKs `outcome_by_source`, `fields_by_source`, `decision_fields`, `fingerprint_format`. Índices únicos `uq_expected_amount_events_store_key` (`source`, `external_reference`, `revision`) parcial a `STORE_SYS` y `uq_expected_amount_events_one_pending` (`settlement_id`) parcial a pendientes.
+- **`settlements.expected_event_id`** (FK al evento vigente; nulo en las rendiciones anteriores a `0030`, sin backfill: «Manual · anterior a integración Store Sys»). `ck_settlements_expected_amount_by_type`: `DELIVERY` nulo o `> 0`; `OUTLET` nulo o `>= 0`. `check_closed_settlement_update` suma `expected_event_id` a lo que una rendición cerrada no cambia.
+- **`settlement_closings`** suma `expected_amount`, `expected_source` (CHECK), `expected_event_id` (FK), `expected_reference`, `expected_revision`: el esperado contra el que se cerró.
+- **Triggers:** `trg_expected_amount_events_check` (se decide una vez, `previous_*` y versión = lo vigente, `REJECTED_CLOSED` solo en `CLOSED`, el resto solo en `OPEN`, nace sin decidir, `supersedes` válido); `trg_expected_amount_events_no_delete` (`forbid_delete`); diferido `trg_expected_amount_events_superseded`; `trg_settlements_expected_change` (importe u origen solo con un evento nuevo, el evento nunca vuelve a nulo, no pasa a `CLOSED` con un pendiente: `expected_update_pending`); constraint diferido `trg_settlements_expected_event` (`expected_event_required`, `expected_event_mismatch`); `trg_settlement_closings_expected` (congela o verifica el esperado del cierre). El downgrade se niega si hay **cualquier** evento (manual o Store Sys), algún origen `STORE_SYS` o un reparto sin esperado: `expected_amount_events` es la historia funcional del esperado y un downgrade nunca la borra (`audit_events` no la reemplaza).
+- **Identidades:** reparto por `public.employees.external_store_id` (reutilizado, sin migración de plataforma; lo escribe solo el admin del área `settlements.store_sys_import`, auditado); boca por `public.outlets.code`. No existe `outlets.external_store_id`.
 
 **Clientes (ADR 007, C3):** hasta que exista `public.customers`, las tablas de Rendiciones guardan el nombre del cliente en texto y un `customer_id` opcional; no hay catálogo de clientes propio.

@@ -13,6 +13,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 from tests.conftest import alembic_config
+from tests.modules.settlements.migration_support import as_before_r9
 from tests.modules.settlements.test_settlement_close_api import close, count, create, employee
 
 OBJECTS = (
@@ -51,6 +52,7 @@ def test_internal_accounts_of_r2_go_down_to_0025_and_up_unchanged(
     assert close(operator, sid, employee(pedro, "20000")).status_code == 201
     db.commit()
     db.close()
+    as_before_r9()  # no R9 data below 0030
     cfg = alembic_config()
     command.downgrade(cfg, "0025")
     assert db.execute(text(OBJECTS)).scalar_one() == 0
@@ -80,6 +82,7 @@ def test_an_internal_account_moved_by_another_type_stops_the_upgrade(
     assert close(operator, sid, employee(pedro, "20000")).status_code == 201
     db.commit()
     db.close()
+    as_before_r9()  # no R9 data below 0030
     cfg = alembic_config()
     command.downgrade(cfg, "0025")
     # Before 0026 nothing in the database stopped it: an ADJUSTMENT written by hand on the internal account.

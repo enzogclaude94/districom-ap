@@ -40,6 +40,7 @@ import {
 } from "./api";
 import { CloseDialog } from "./close-dialog";
 import { CountDialog } from "./count-dialog";
+import { ExpectedOriginNote, ExpectedPendingBanner } from "./expected-panel";
 import { formatQuantity } from "./fuel";
 import { HistoryTab } from "./history-tab";
 import {
@@ -72,6 +73,7 @@ export const BEING_CORRECTED_ZERO_BANNER =
 export const OUTLET_BEING_CORRECTED_BANNER =
   "Esta rendición está en corrección. El cierre anterior continúa siendo el vigente hasta que confirmes un nuevo cierre.";
 export { COUNT_EXAMPLE, COUNT_HELP } from "./labels";
+export const DIFFERENCE_WITHOUT_EXPECTED = "Se calcula cuando se cargue el esperado";
 export const ZERO_CLOSE_TEXT = "Cerrada en $0, sin movimientos financieros.";
 
 const isOutlet = (settlement: Settlement) => settlement.type === "OUTLET";
@@ -104,7 +106,13 @@ function Board({ settlement }: { settlement: Settlement }) {
         label={isOutlet(settlement) ? "Esperado (Store Sys)" : "Esperado"}
         value={missing ? <span data-testid="expected-missing">Sin cargar</span> : formatMoney(s.expected)}
         tone={missing ? "text-warning" : undefined}
-        note={missing && <span className="text-warning">Cargalo antes de cerrar</span>}
+        note={
+          missing ? (
+            <span className="text-warning">Cargalo antes de cerrar</span>
+          ) : (
+            <ExpectedOriginNote settlement={settlement} />
+          )
+        }
       />
       {isOutlet(settlement) && (
         <Stat
@@ -129,7 +137,14 @@ function Board({ settlement }: { settlement: Settlement }) {
       <Stat label="Gastos" value={formatMoney(s.expenses)} />
       {!isOutlet(settlement) && <Stat label="Pendiente" value={formatMoney(s.pending)} />}
       <Stat label="Justificado" value={formatMoney(s.justified)} />
-      {s.difference === null ? (
+      {!isOutlet(settlement) && missing ? (
+        // A delivery without its expected amount has no difference yet (R9-1): nothing is invented.
+        <Stat
+          label="Diferencia"
+          value={<span data-testid="board-difference">—</span>}
+          note={<span className="text-muted-foreground">{DIFFERENCE_WITHOUT_EXPECTED}</span>}
+        />
+      ) : s.difference === null ? (
         <Remaining summary={s} missing={missing} />
       ) : (
         <Stat
@@ -166,7 +181,13 @@ function OutletSummary({ settlement }: { settlement: Settlement }) {
           label="Esperado (Store Sys)"
           value={missing ? <span data-testid="expected-missing">Sin cargar</span> : formatMoney(s.expected)}
           tone={missing ? "text-warning" : undefined}
-          note={missing && <span className="text-warning">Cargalo antes de cerrar</span>}
+          note={
+            missing ? (
+              <span className="text-warning">Cargalo antes de cerrar</span>
+            ) : (
+              <ExpectedOriginNote settlement={settlement} />
+            )
+          }
         />
         <Stat
           label="Ya entregado"
@@ -893,6 +914,8 @@ export function SettlementDetail({
           </div>
         </div>
       )}
+
+      <ExpectedPendingBanner settlement={settlement} canOperate={canOperate} isAdmin={isAdmin} />
 
       {closedNotice && (
         <div

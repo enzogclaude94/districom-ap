@@ -21,6 +21,7 @@ import { formatDate, formatMoney } from "@/lib/format";
 import type { FinancialState } from "@/modules/settlements/delivery/api";
 import { selectClass } from "@/modules/settlements/delivery/form";
 import {
+  EXPECTED_UPDATE_BADGE,
   FINANCIAL_STATE_LABELS,
   FINANCIAL_STATE_TONES,
   differenceText,
@@ -196,6 +197,11 @@ export function OutletSettlementList({ initialOutletId }: { initialOutletId?: nu
                       <Badge tone={FINANCIAL_STATE_TONES[item.financial_state]}>
                         {FINANCIAL_STATE_LABELS[item.financial_state]}
                       </Badge>
+                      {item.expected_update_pending && (
+                        <Badge tone="warning" className="ml-1" data-testid="expected-update-pending">
+                          {EXPECTED_UPDATE_BADGE}
+                        </Badge>
+                      )}
                       {item.administrative_zero && (
                         <span className="block text-xs text-muted-foreground">Cierre en cero</span>
                       )}

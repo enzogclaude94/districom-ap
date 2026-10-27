@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from tests.conftest import alembic_config
 from tests.modules.settlements.fuel_support import BASE, add_fuel, fuel, fuel_category, last_expense, vehicle
+from tests.modules.settlements.migration_support import as_before_r9
 from tests.modules.settlements.test_settlement_close_api import close, create, reopen
 
 
@@ -15,6 +16,7 @@ def _cycle(db: Session, *at_0014: str) -> None:
     """Back to 0014 (the data stays, fuel_loads and the codes go), run `at_0014`, and upgrade again."""
     db.commit()
     db.close()
+    as_before_r9()  # no R9 data below 0030
     cfg = alembic_config()
     command.downgrade(cfg, "0014")
     with db.get_bind().begin() as conn:  # type: ignore[union-attr]

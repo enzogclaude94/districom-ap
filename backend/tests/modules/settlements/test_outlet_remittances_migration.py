@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from tests.conftest import alembic_config
 from tests.modules.settlements.conftest import Roles
+from tests.modules.settlements.migration_support import as_before_r9
 from tests.modules.settlements.outlet_support import OUT, close, count, create, reopen
 from tests.modules.settlements.remittance_support import remit, reverse
 
@@ -41,6 +42,7 @@ def test_boca_settlements_go_down_to_0023_and_up_unchanged(
     still_open = create(r.operator, centro, None, confirm_additional=True)
     db.commit()
     db.close()
+    as_before_r9()  # no R9 data below 0030
     cfg = alembic_config()
     command.downgrade(cfg, "0023")
     try:
@@ -83,6 +85,7 @@ def test_downgrade_is_refused_once_a_remittance_exists(
         reverse(r.admin, sid, rid)
     db.commit()
     db.close()
+    as_before_r9()  # no R9 data below 0030
     with pytest.raises(DBAPIError, match="downgrade of 0024 refused"):
         command.downgrade(alembic_config(), "0023")
     assert db.execute(text("SELECT version_num FROM alembic_version")).scalar_one() != "0023"
