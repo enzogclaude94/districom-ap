@@ -7,7 +7,8 @@ responsables of the bocas de expendio (R7-1) in `outlets/router.py`, their settl
 `outlet_settlements/router.py`; Empleados (R8, protected area `settlements.employee_finance`,
 which uses `require_area_access` instead) in `employee_finance/router.py`; the expected amount and its
 Store Sys updates (R9-1) in `expected/router.py`, and Integración Store Sys (protected area
-`settlements.store_sys_import`) in `store_sys/router.py`; later phases add their own routers (ROADMAP.md).
+`settlements.store_sys_import`) in `store_sys/router.py`; «Cierre del día» (R9-2, read-only) in
+`daily_close/router.py`; later phases add their own routers (ROADMAP.md).
 """
 
 from typing import Annotated
@@ -17,6 +18,7 @@ from pydantic import BaseModel
 
 from app.modules.settlements.cash.router import router as cash_router
 from app.modules.settlements.cheques.router import router as cheques_router
+from app.modules.settlements.daily_close.router import router as daily_close_router
 from app.modules.settlements.delivery.router import router as delivery_router
 from app.modules.settlements.employee_finance.router import router as employee_finance_router
 from app.modules.settlements.expected.router import router as expected_router
@@ -60,3 +62,4 @@ router.include_router(outlet_settlements_router)
 router.include_router(employee_finance_router)
 router.include_router(expected_router)
 router.include_router(store_sys_router)
+router.include_router(daily_close_router)
