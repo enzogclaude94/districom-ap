@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import case, literal, select
+from sqlalchemy import case, func, literal, select
 from sqlalchemy.orm import Session
 
 from app.core.clock import business_today
@@ -357,6 +357,51 @@ def summary(db: Session) -> s.PortfolioSummaryOut:
         in_transit_count=len(in_transit),
         in_transit_amount=sum(in_transit.values(), start=service.ZERO),
     )
+
+
+@dataclass(frozen=True)
+class DayTotal:
+    count: int
+    amount: Decimal
+
+
+@dataclass(frozen=True)
+class DayDocuments:
+    deposited: DayTotal
+    credited: DayTotal
+    rejected: DayTotal
+    returned: DayTotal
+
+
+def day_documents(db: Session, on: date) -> DayDocuments:
+    """Cheques deposited, credited, rejected and given back with business date `on`, by the documents in effect (R9-2).
+    A reversal carries the original business date, so a reversed document has no effect on its day either."""
+
+    def total(rows: Sequence[tuple[int, Decimal | None]]) -> DayTotal:
+        count, amount = rows[0]
+        return DayTotal(count, amount or service.ZERO)
+
+    deposited = db.execute(
+        select(func.count(ChequeDepositItem.id), func.sum(ChequeDepositItem.amount))
+        .join(ChequeDeposit, ChequeDeposit.id == ChequeDepositItem.deposit_id)
+        .where(ChequeDeposit.business_date == on, ChequeDeposit.reversed_at.is_(None))
+    ).tuples()
+    credited = db.execute(
+        select(func.count(ChequeCreditItem.id), func.sum(ChequeCreditItem.amount))
+        .join(ChequeCredit, ChequeCredit.id == ChequeCreditItem.credit_id)
+        .where(ChequeCredit.business_date == on, ChequeCredit.reversed_at.is_(None))
+    ).tuples()
+    rejected = db.execute(
+        select(func.count(ChequeRejection.id), func.sum(Cheque.amount))
+        .join(Cheque, Cheque.id == ChequeRejection.cheque_id)
+        .where(ChequeRejection.business_date == on, ChequeRejection.reversed_at.is_(None))
+    ).tuples()
+    returned = db.execute(
+        select(func.count(ChequeReturn.id), func.sum(Cheque.amount))
+        .join(Cheque, Cheque.id == ChequeReturn.cheque_id)
+        .where(ChequeReturn.business_date == on, ChequeReturn.reversed_at.is_(None))
+    ).tuples()
+    return DayDocuments(total(deposited.all()), total(credited.all()), total(rejected.all()), total(returned.all()))
 
 
 def _name(users: dict[int, str], user_id: int | None) -> str | None:
