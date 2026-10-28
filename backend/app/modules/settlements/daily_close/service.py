@@ -17,7 +17,7 @@
 from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -96,19 +96,24 @@ def daily_close(db: Session, on: date, *, can_read_employee_finance: bool) -> s.
     for flow in flows:
         days[flow.account_id].add(keys[flow.operation_id], flow.operation_id, flow.amount)
 
-    opening = {b.account_id: b for b in ledger.account_balances(db, on=on - timedelta(days=1), include_inactive=True)}
     final = {b.account_id: b for b in ledger.account_balances(db, on=on, include_inactive=True)}
+    # The opening balance is the closing one minus what the day moved: the same number as summing the ledger up to
+    # the day before, without a second pass over it (R9-4).
+    moved: dict[int, Decimal] = defaultdict(Decimal)
+    for flow in flows:
+        moved[flow.account_id] += flow.amount
+    opening = {account_id: b.balance - moved[account_id] for account_id, b in final.items()}
     # An account with nothing on the day shows only if it already existed then and is active today: one created
     # later did not exist yet, and one inactive today has no record of when it stopped being used.
     existing = ledger.accounts_existing_on(db, on, KINDS)
     accounts = [
-        _account(balance, opening[account_id].balance, days.get(account_id, _AccountDay()))
+        _account(balance, opening[account_id], days.get(account_id, _AccountDay()))
         for account_id, balance in final.items()
         if balance.kind in KINDS
         and (
             (balance.active and account_id in existing)
             or balance.balance != 0
-            or opening[account_id].balance != 0
+            or opening[account_id] != 0
             or account_id in days
         )
     ]
