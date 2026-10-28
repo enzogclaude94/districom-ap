@@ -23,7 +23,7 @@ import hashlib
 import json
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -677,16 +677,26 @@ def account_balances(db: Session, *, on: date | None = None, include_inactive: b
     return [_with_balance(a, sums.get(a.id, Decimal(0))) for a in db.scalars(query)]
 
 
+# How far back the balances of a day are computed from today's (see `_balances`).
+RECENT_BALANCE_DAYS = 31
+
+
 def _balances(db: Session, *, on: date | None = None, account_id: int | None = None) -> dict[int, Decimal]:
     """The sum of the entries of each account (or of one), up to the end of business date `on` when given.
 
-    Up to `on` is computed as the whole sum minus what is dated after `on`: an entry's business date is its
-    operation's and never changes (the ledger is append-only), so both are the same number, but the second reads
-    only the operations after `on` through their date index instead of joining every entry to its operation
-    (R9-4: the Cierre del día and the balances of a recent day touch a few days, not the whole year)."""
+    An entry's business date is its operation's and never changes (the ledger is append-only), so the balance up to
+    a recent `on` is computed as the whole sum minus what is dated after it: that reads only the operations of the
+    last days through their date index instead of joining every entry to its operation (R9-4: the Cierre del día and
+    the balances of a recent day). For an older day the plain sum up to `on` joins fewer rows, so it stays. Both
+    give the same number."""
     whole = select(LedgerEntry.account_id, func.sum(LedgerEntry.amount)).group_by(LedgerEntry.account_id)
     if account_id is not None:
         whole = whole.where(LedgerEntry.account_id == account_id)
+    if on is not None and on < business_today() - timedelta(days=RECENT_BALANCE_DAYS):
+        upto = whole.join(FinancialOperation, FinancialOperation.id == LedgerEntry.operation_id).where(
+            FinancialOperation.business_date <= on
+        )
+        return {a: Decimal(amount) for a, amount in db.execute(upto).tuples()}
     sums: dict[int, Decimal] = {a: Decimal(amount) for a, amount in db.execute(whole).tuples()}
     if on is not None:
         later = (

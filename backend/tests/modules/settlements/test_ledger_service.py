@@ -670,9 +670,24 @@ def test_balances_at_any_date_and_lowest_balance_match_a_plain_sum(db: Session, 
         "OPENING_BALANCE",
         (funded["main_cash"], "1000"),
         (funded["opening_balance"], "-1000"),
-        business_date=days_ago(12),
+        business_date=days_ago(50),
     )
-    moves = [(10, "-300"), (9, "200"), (7, "-650"), (7, "100"), (4, "-250"), (2, "400"), (1, "-400"), (0, "-20")]
+    # Days older than RECENT_BALANCE_DAYS (31) are summed up to the date; recent ones from today's balance.
+    moves = [
+        (45, "-100"),
+        (40, "100"),
+        (32, "-50"),
+        (31, "50"),
+        (30, "-10"),
+        (10, "-290"),
+        (9, "200"),
+        (7, "-650"),
+        (7, "100"),
+        (4, "-250"),
+        (2, "400"),
+        (1, "-400"),
+        (0, "-20"),
+    ]
     for ago, amount in moves:
         post(
             "CASH_TRANSFER",
@@ -694,7 +709,7 @@ def test_balances_at_any_date_and_lowest_balance_match_a_plain_sum(db: Session, 
         return Decimal(total)
 
     db.expire_all()
-    for ago in range(14, -1, -1):
+    for ago in range(52, -1, -1):
         day = days_ago(ago)
         by_id = {b.account_id: b.balance for b in account_balances(db, on=day, include_inactive=True)}
         for account_id, balance in by_id.items():
