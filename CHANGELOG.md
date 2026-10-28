@@ -4,6 +4,12 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Changed — R9‑4: performance con evidencia (sin migración)
+- **Medición reproducible** (`backend/perf/`, `docs/PERFORMANCE.md`): generador de un año de Rendiciones por la API de la app en una base separada (realista: 24,6k operaciones y 84k asientos; stress: 96k y 332k) y benchmark HTTP local con mediana, p95, máximo, queries por request y `EXPLAIN (ANALYZE, BUFFERS)`. Nunca corre en CI.
+- **Saldos sin recorrer el libro entero:** quince pantallas sumaban todos los saldos solo para mostrar el nombre de una cuenta; ahora leen las cuentas (`ledger.accounts()`). El saldo de una cuenta suma solo esa cuenta; el saldo a una fecha del último mes es el total menos lo fechado después (mismo número). El control de fondos de un débito lee solo los días posteriores a su fecha. El Cierre del día calcula la apertura como el cierre menos lo que movió el día.
+- **N+1:** cheques y pendientes en vigor de una página, y pagos de cada liquidación (lista y resumen de pago), en una consulta por página.
+- **Resultado en stress (p95):** Cierre del día 297 → 179 ms, movimientos de la caja con más historia 165 → 58 ms, ficha de boca 229 → 92 ms, resumen de pago del empleado 156 → 52 ms, pago en efectivo 423 → 231 ms. Montos, orden, filtros, paginación y privacidad sin cambios; un test nuevo compara el saldo de cada día y el saldo mínimo con una suma simple de asientos.
+
 ### Changed — R9‑3 DONE
 - **R9‑3 DONE** (aprobada por Enzo el 2026-10-28 con sus 8 desvíos). PR #49 mergeado `e680ff7` con CI 4/4; sin código productivo ni migración. R9‑4 (performance) en curso.
 
