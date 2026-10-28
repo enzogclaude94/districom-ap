@@ -1,6 +1,6 @@
 # ADR 012 — Cierre del día de Cajas y Bancos (vista calculada)
 
-- Estado: Propuesto · 2026-10-27 (decisiones 1–3 de Enzo para R9‑2; se acepta con la aprobación de R9‑2)
+- Estado: Aceptado · 2026-10-28 (decisiones 1–3 de Enzo para R9‑2, aceptado con la aprobación de R9‑2 y su ajuste de visibilidad de cuentas)
 - Amplía: ADR 007 (módulo Rendiciones), ADR 008 (integridad del ledger), ADR 010 (áreas protegidas) y ADR 011 (contrato Store Sys). No los reemplaza.
 - Alcance: un reporte de **solo lectura** por fecha de negocio. Sin migración, sin tablas nuevas, sin escribir en el ledger.
 
