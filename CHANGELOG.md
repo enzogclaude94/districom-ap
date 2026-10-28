@@ -4,6 +4,9 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Changed — R9‑3 DONE
+- **R9‑3 DONE** (aprobada por Enzo el 2026-10-28 con sus 8 desvíos). PR #49 mergeado `e680ff7` con CI 4/4; sin código productivo ni migración. R9‑4 (performance) en curso.
+
 ### Added — R9‑3: E2E de Rendiciones de punta a punta
 - Un spec E2E (`rendiciones-end-to-end.spec.ts`, escritorio y móvil) recorre R1 a R9‑2 como un solo sistema en siete fechas de negocio: saldos iniciales, reparto con Store Sys, cheque, combustible, pendiente y faltante; boca con entregas a cuenta; cobro del pendiente; depósito y acreditación del mismo cheque; pago a tercero; liquidación y pago al empleado; y la corrección de la boca con una revisión de Store Sys en espera. Verifica el ledger, Cajas y el «Cierre del día» de cada fecha, la privacidad sin el área de Empleados y la trazabilidad de punta a punta. Sin código productivo nuevo ni migración.
 
