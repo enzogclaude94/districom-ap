@@ -494,11 +494,55 @@ def store_sys(b: Bench, c: dict[str, Any], repeats: int) -> list[dict[str, Any]]
     return out
 
 
+def writes(b: Bench, c: dict[str, Any], repeats: int) -> list[dict[str, Any]]:
+    """HTTP local, a payment in cash out of Caja principal: a debit of the busiest box, which checks that no day from
+    its date on goes negative (in the app and in the database trigger). Dated today and 90 days back."""
+    http = b.http["area"]
+    out = []
+    for label, day in (
+        ("today", c["last_day"] + timedelta(days=1)),
+        ("90 days back", c["last_day"] - timedelta(days=90)),
+    ):
+        times, counts, sql = [], [], []
+        for n in range(repeats):
+            body = {
+                "client_request_id": str(uuid.uuid4()),
+                "business_date": day.isoformat(),
+                "third_party_id": c["third_party"],
+                "concept": "MERCHANDISE",
+                "reference": f"BENCH-{label}-{n}",
+                "items": [{"method": "CASH", "account_id": c["main"], "amount": "10.00"}],
+            }
+            with b.recorder.record() as recorded:
+                started = time.perf_counter()
+                response = http.post(f"{S}/payments", json=body)
+                times.append((time.perf_counter() - started) * 1000)
+            assert response.status_code in (200, 201), response.text[:300]
+            counts.append(len(recorded))
+            sql.append(sum(e for _, _, e in recorded) * 1000)
+        row = {
+            "case": f"payment in cash, {label}",
+            "runs": repeats,
+            "median_ms": round(statistics.median(times), 1),
+            "p95_ms": round(percentile(times, 0.95), 1),
+            "max_ms": round(max(times), 1),
+            "queries": round(statistics.median(counts)),
+            "sql_ms": round(statistics.median(sql), 1),
+        }
+        out.append(row)
+        print(
+            f"write {row['case']:32} p50={row['median_ms']:7.1f} p95={row['p95_ms']:7.1f} q={row['queries']}",
+            flush=True,
+        )
+    return out
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--runs", type=int, default=30)
     parser.add_argument("--explain-top", type=int, default=2, help="slowest statements of each read to EXPLAIN")
     parser.add_argument("--store-sys-repeats", type=int, default=5, help="0 skips the import (it writes)")
+    parser.add_argument("--writes", type=int, default=20, help="payments to time per case; 0 skips them (they write)")
     parser.add_argument("--only", default="", help="regex over 'group name' to run a subset of the reads")
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
@@ -522,6 +566,7 @@ def main() -> None:
     b.measure = Bench.measure.__get__(b)  # type: ignore[method-assign]
     service = daily_close_parts(b, c) if not args.only else {}
     imports = store_sys(b, c, args.store_sys_repeats) if args.store_sys_repeats else []
+    payments = writes(b, c, args.writes) if args.writes else []
     b.save(
         {
             "database": url.rsplit("/", 1)[-1],
@@ -531,6 +576,7 @@ def main() -> None:
             "volume": c["volume"],
             "service": service,
             "store_sys": imports,
+            "writes": payments,
             "today": date.today(),
         }
     )
