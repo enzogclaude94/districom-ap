@@ -4,6 +4,9 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Changed — R9‑2 DONE
+- **R9‑2 DONE** (aprobada por Enzo el 2026-10-28 con un ajuste previo al merge: una caja o banco creado después del día no aparece en ese cierre; `created_at` decide solo la existencia de la cuenta, en el calendario de negocio). PR #47 mergeado `a8c79b9` con la suite backend completa en verde (1606 passed) y CI 4/4; sin migración. ADR 012 aceptado. R9‑3 en curso.
+
 ### Added — Rendiciones: cierre del día de cajas y bancos (R9‑2)
 - **«Cierre del día»** (Rendiciones › Tesorería, `/rendiciones/cierre-del-dia`, ADR 012): por caja y banco, saldo inicial contable, ingresos y egresos del día agrupados por operación, movimiento neto y saldo final contable de una **fecha de negocio** (nunca la fecha de carga). Vista calculada: no se firma, no se congela y no guarda nada; se recalcula en cada lectura (`GET /api/v1/settlements/daily-close?on=`). Sin migración.
 - **Reconciliación:** el saldo final se suma aparte del ledger y se compara con inicial + neto; si no coincide se muestra «Error de invariante del ledger», nunca una diferencia de arqueo. «Arqueo físico: No registrado» aclara que no hay arqueo, extracto ni conciliación bancaria.
