@@ -101,6 +101,7 @@ backend/app/
 │       ├── delivery/      [R2] rendiciones de reparto: alta, conteo, agregados, transferencias, gastos, tablero, denominaciones, cierre y reapertura
 │       └── pending/ cheques/ payments/ outlets/ employee_finance/   [R3–R8]
 │           expected/ store_sys/                                    [R9‑1]
+│           daily_close/   vista calculada «Cierre del día», solo lectura [R9‑2]
 └── api/v1/router.py       raíz de composición: monta routers de plataforma y de cada módulo
 ```
 

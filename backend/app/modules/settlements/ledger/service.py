@@ -33,6 +33,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, aliased
 
 from app.core.clock import business_today
+from app.core.config import get_settings
 from app.core.errors import AppError
 from app.modules.settlements.ledger.models import (
     CHEQUE_KINDS,
@@ -932,17 +933,92 @@ def document_operation_ids(db: Session, type: str, source_type: str, source_ids:
     return {sid: oid for sid, oid in rows if sid is not None}
 
 
-def cheques_held(db: Session, kind: str) -> dict[int, Decimal]:
+def cheques_held(db: Session, kind: str, *, on: date | None = None) -> dict[int, Decimal]:
     """Cheques whose legs leave a positive balance in an account of `kind` (CHEQUE_PORTFOLIO or
-    CHEQUES_IN_TRANSIT): what the portfolio or the deposited cheques are made of, cheque by cheque."""
-    rows = db.execute(
+    CHEQUES_IN_TRANSIT): what the portfolio or the deposited cheques are made of, cheque by cheque. With `on`,
+    at the end of that business date (R9-2)."""
+    query = (
         select(LedgerEntry.cheque_id, func.sum(LedgerEntry.amount))
         .join(Account, Account.id == LedgerEntry.account_id)
         .where(Account.kind == kind, LedgerEntry.cheque_id.is_not(None))
         .group_by(LedgerEntry.cheque_id)
         .having(func.sum(LedgerEntry.amount) > 0)
     )
-    return {cid: amount for cid, amount in rows if cid is not None}
+    if on is not None:
+        query = query.join(FinancialOperation, FinancialOperation.id == LedgerEntry.operation_id).where(
+            FinancialOperation.business_date <= on
+        )
+    return {cid: amount for cid, amount in db.execute(query) if cid is not None}
+
+
+# --- one business day (R9-2) ---------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class DayFlow:
+    """What one operation dated on the day did to one account: the net of its legs there. A reversal carries the
+    type and the source document of the operation it reverses, so it can be shown next to it, never netted away."""
+
+    account_id: int
+    operation_id: int
+    operation_type: str
+    reversed_type: str | None
+    source_type: str | None
+    source_id: int | None
+    amount: Decimal
+
+
+def day_flows(db: Session, on: date, kinds: Sequence[str]) -> list[DayFlow]:
+    """Every operation whose business date is `on` (never its created_at), netted per account of these kinds."""
+    original = aliased(FinancialOperation)
+    rows = db.execute(
+        select(
+            LedgerEntry.account_id,
+            FinancialOperation.id,
+            FinancialOperation.type,
+            original.type,
+            func.coalesce(FinancialOperation.source_type, original.source_type),
+            func.coalesce(FinancialOperation.source_id, original.source_id),
+            func.sum(LedgerEntry.amount),
+        )
+        .join(FinancialOperation, FinancialOperation.id == LedgerEntry.operation_id)
+        .join(Account, Account.id == LedgerEntry.account_id)
+        .outerjoin(original, original.id == FinancialOperation.reverses_operation_id)
+        .where(FinancialOperation.business_date == on, Account.kind.in_(list(kinds)))
+        .group_by(
+            LedgerEntry.account_id,
+            FinancialOperation.id,
+            FinancialOperation.type,
+            original.type,
+            original.source_type,
+            original.source_id,
+        )
+        .order_by(FinancialOperation.id, LedgerEntry.account_id)
+    )
+    return [
+        DayFlow(account_id, op_id, op_type, reversed_type, source_type, source_id, Decimal(amount))
+        for account_id, op_id, op_type, reversed_type, source_type, source_id, amount in rows
+    ]
+
+
+def accounts_existing_on(db: Session, on: date, kinds: Sequence[str]) -> set[int]:
+    """Accounts of these kinds that already existed on business date `on`: created on or before it in the business
+    calendar. `created_at` decides only that an account existed (R9-2), never a balance nor a movement."""
+    created_on = func.date(func.timezone(get_settings().business_timezone, Account.created_at))
+    return set(db.scalars(select(Account.id).where(Account.kind.in_(list(kinds)), created_on <= on)))
+
+
+def operation_kind_totals(db: Session, operation_ids: Sequence[int], kinds: Sequence[str]) -> dict[int, Decimal]:
+    """Net of each operation's legs on accounts of these kinds (what a close took out of its collections)."""
+    if not operation_ids:
+        return {}
+    rows = db.execute(
+        select(LedgerEntry.operation_id, func.sum(LedgerEntry.amount))
+        .join(Account, Account.id == LedgerEntry.account_id)
+        .where(LedgerEntry.operation_id.in_(list(operation_ids)), Account.kind.in_(list(kinds)))
+        .group_by(LedgerEntry.operation_id)
+    )
+    return {op_id: Decimal(amount) for op_id, amount in rows}
 
 
 # --- internal accounts of employees (R8-1, ADR 010) ------------------------------------------------
