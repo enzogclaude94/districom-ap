@@ -46,7 +46,7 @@ DistriCom es una plataforma modular (ADR 006). Este roadmap tiene tres carriles:
 | R6 | Pagos a proveedores y terceros | **DONE** (2026-10-11) | R1 · R4 |
 | R7 | Boca de expendio | **DONE** (2026-10-14; R7‑1 a R7‑4, ADR 009) | R2–R5 |
 | R8 | Cuenta interna y liquidación de empleados | DONE (2026-10-26; arquitectura aprobada 2026-10-15, ADR 010; R8‑1 a R8‑5 DONE; `0025`–`0029` congeladas) | R1 · R2 |
-| R9 | Endurecimiento | IN_PROGRESS (aprobada como etapa 2026-10-26; R9‑1 y R9‑2 DONE, R9‑3 en curso) | todas |
+| R9 | Endurecimiento | IN_PROGRESS (aprobada como etapa 2026-10-26; R9‑1, R9‑2 y R9‑3 DONE, R9‑4 en curso) | todas |
 
 Cada fase empieza solo con aprobación explícita de Enzo y termina con un informe y una pausa para revisión.
 
@@ -265,8 +265,8 @@ Cada fase frena con su informe y la aprobación de Enzo.
 |---|---|---|
 | R9‑1 | Contrato de ingreso Store Sys → DistriCom: esperado de una rendición por contrato canónico, eventos del esperado, autoridad con confirmación, reparto abierto sin esperado (`0030`; ADR 011) | DONE (aprobada por Enzo el 2026-10-27 con dos ajustes previos al merge; PR #45 mergeado `61b9f77` con CI 4/4 y la suite completa en verde; `0030` congelada) |
 | R9‑2 | Reporte diario de cierre por caja y banco: vista calculada por `business_date`, sin arqueo ni conciliación, preferentemente sin migración | DONE (aprobada por Enzo el 2026-10-28 con un ajuste previo al merge: una cuenta creada después del día no aparece; PR #47 mergeado `a8c79b9`, sin migración, ADR 012 aceptado) |
-| R9‑3 | E2E completo de Rendiciones de punta a punta | IN_PROGRESS (autorizada por Enzo el 2026-10-28; sin funcionalidad nueva ni migración; spec de punta a punta implementado, PR en revisión de Enzo) |
-| R9‑4 | Performance | PLANNED |
+| R9‑3 | E2E completo de Rendiciones de punta a punta | DONE (aprobada por Enzo el 2026-10-28 con sus 8 desvíos; PR #49 mergeado `e680ff7`, sin código productivo ni migración) |
+| R9‑4 | Performance | IN_PROGRESS (autorizada por Enzo el 2026-10-28: baseline, EXPLAIN y medición antes de cualquier cambio; sin saldos materializados sin aprobación) |
 | R9‑5 | Hardening operativo y preparación de producción | PLANNED |
 
 Cada fase frena con su informe y la aprobación de Enzo. Sin parser de archivos, carpetas, conexión, cron, RPA ni API keys en R9‑1.
