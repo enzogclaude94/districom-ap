@@ -33,6 +33,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, aliased
 
 from app.core.clock import business_today
+from app.core.config import get_settings
 from app.core.errors import AppError
 from app.modules.settlements.ledger.models import (
     CHEQUE_KINDS,
@@ -998,6 +999,13 @@ def day_flows(db: Session, on: date, kinds: Sequence[str]) -> list[DayFlow]:
         DayFlow(account_id, op_id, op_type, reversed_type, source_type, source_id, Decimal(amount))
         for account_id, op_id, op_type, reversed_type, source_type, source_id, amount in rows
     ]
+
+
+def accounts_existing_on(db: Session, on: date, kinds: Sequence[str]) -> set[int]:
+    """Accounts of these kinds that already existed on business date `on`: created on or before it in the business
+    calendar. `created_at` decides only that an account existed (R9-2), never a balance nor a movement."""
+    created_on = func.date(func.timezone(get_settings().business_timezone, Account.created_at))
+    return set(db.scalars(select(Account.id).where(Account.kind.in_(list(kinds)), created_on <= on)))
 
 
 def operation_kind_totals(db: Session, operation_ids: Sequence[int], kinds: Sequence[str]) -> dict[int, Decimal]:

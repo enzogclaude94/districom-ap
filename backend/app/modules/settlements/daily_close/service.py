@@ -98,11 +98,19 @@ def daily_close(db: Session, on: date, *, can_read_employee_finance: bool) -> s.
 
     opening = {b.account_id: b for b in ledger.account_balances(db, on=on - timedelta(days=1), include_inactive=True)}
     final = {b.account_id: b for b in ledger.account_balances(db, on=on, include_inactive=True)}
+    # An account with nothing on the day shows only if it already existed then and is active today: one created
+    # later did not exist yet, and one inactive today has no record of when it stopped being used.
+    existing = ledger.accounts_existing_on(db, on, KINDS)
     accounts = [
         _account(balance, opening[account_id].balance, days.get(account_id, _AccountDay()))
         for account_id, balance in final.items()
         if balance.kind in KINDS
-        and (balance.active or balance.balance != 0 or opening[account_id].balance != 0 or account_id in days)
+        and (
+            (balance.active and account_id in existing)
+            or balance.balance != 0
+            or opening[account_id].balance != 0
+            or account_id in days
+        )
     ]
     accounts.sort(key=lambda a: (KINDS.index(a.kind), a.name.lower(), a.account_id))
     return s.DailyCloseOut(

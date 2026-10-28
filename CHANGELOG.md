@@ -12,7 +12,7 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 - **Rendiciones del día:** totales (sin cerrar, cerradas, en corrección, sin esperado, Store Sys pendiente) y, por cierre vigente, esperado, justificado, diferencia y origen del esperado; una rendición en corrección muestra el cierre vigente en Cajas, nunca su borrador.
 - **Cartera de cheques al final del día:** cartera y depositados sin acreditar según el ledger hasta la fecha; depositados, acreditados, rechazados y devueltos en el día.
 - **Exportación:** CSV (`;`, coma decimal, BOM) y vista imprimible del navegador (sin el menú ni los controles); sin PDF. Se ve en el teléfono sin scroll lateral.
-- Cuentas inactivas hoy aparecen los días en que tuvieron saldo o movimiento.
+- **Cuentas del día:** una caja o banco aparece si tuvo saldo o movimiento ese día, o si está activa y ya existía (su fecha de alta en el calendario de negocio, no en UTC). Una cuenta creada después no aparece en días anteriores con todo en cero; una inactiva hoy aparece, «Hoy inactiva», donde tuvo saldo o movimiento. La fecha de alta no decide ningún importe.
 
 ### Changed — R9‑1 DONE
 - **R9‑1 DONE** (aprobada por Enzo el 2026-10-27 con dos ajustes previos al merge: el downgrade de `0030` se rechaza con cualquier evento del esperado y el bloqueo de cierre no menciona Store Sys). PR #45 mergeado `61b9f77` con la suite backend completa en verde (1575 passed) y CI 4/4; `0030` congelada. R9‑2 en curso.

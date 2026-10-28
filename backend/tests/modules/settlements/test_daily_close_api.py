@@ -88,6 +88,34 @@ def _closed_delivery(client: TestClient, driver_id: int, expected: str, bills: i
     return sid
 
 
+@pytest.fixture(autouse=True)
+def seeded_long_ago(db: Session) -> None:
+    """The seeded boxes and bank exist since long before every date of these tests (the test database is created
+    today, and an account created after a date does not show on it)."""
+    db.execute(
+        text("UPDATE settlements.accounts SET created_at = '2026-01-01T12:00:00Z' WHERE kind IN ('CASH_BOX', 'BANK')")
+    )
+    db.commit()
+
+
+def _new_bank(db: Session, name: str, created_at: str | None = None) -> int:
+    """A bank account created now, or at that instant (ISO, with its offset)."""
+    account_id = db.scalar(
+        text(
+            "INSERT INTO settlements.accounts (name, name_key, kind, allow_negative) "
+            "VALUES (:name, :key, 'BANK', true) RETURNING id"
+        ),
+        {"name": name, "key": name.lower()},
+    )
+    if created_at is not None:
+        db.execute(
+            text("UPDATE settlements.accounts SET created_at = CAST(:at AS timestamptz) WHERE id = :id"),
+            {"at": created_at, "id": account_id},
+        )
+    db.commit()
+    return int(account_id)  # type: ignore[arg-type]
+
+
 @pytest.fixture
 def juan(driver: Callable[..., int]) -> int:
     return driver("Juan Pérez")
@@ -495,6 +523,53 @@ def test_14_a_corrected_close_shows_the_replaced_one_its_reversal_and_the_new_on
     assert body["settlements"]["items"][0]["financial_state"] == "CLOSED"
 
 
+# --- accounts that did not exist yet (Enzo's adjustment to R9-2) -------------------------------------------
+
+
+def test_an_account_created_before_the_day_shows_even_at_zero(r: Roles, db: Session) -> None:
+    _new_bank(db, "Banco Galicia", f"{days_ago(5).isoformat()}T15:00:00Z")
+    bank = _account(_view(r.viewer, days_ago(3)), "Banco Galicia")
+    assert (bank["opening_balance"], bank["inflows"], bank["closing_balance"]) == ("0.00", "0.00", "0.00")
+
+
+def test_an_account_created_after_the_day_without_movement_does_not_show(r: Roles, db: Session) -> None:
+    _new_bank(db, "Banco Nación")
+    assert "Banco Nación" not in {a["name"] for a in _view(r.viewer, yesterday())["accounts"]}
+    assert "Banco Nación" in {a["name"] for a in _view(r.viewer, today())["accounts"]}
+
+
+def test_existence_is_compared_in_the_business_calendar_not_in_utc(r: Roles, db: Session) -> None:
+    # 02:00 UTC of the 1st is still the 30th in Buenos Aires (UTC-3): the account exists on the 30th.
+    _new_bank(db, "Banco Provincia", "2026-10-01T02:00:00Z")
+    assert "Banco Provincia" in {a["name"] for a in _view(r.viewer, date(2026, 9, 30))["accounts"]}
+    assert "Banco Provincia" not in {a["name"] for a in _view(r.viewer, date(2026, 9, 29))["accounts"]}
+
+
+def test_created_at_never_moves_an_operation_and_balances_come_from_the_ledger(r: Roles, db: Session) -> None:
+    # Created today, with an opening balance dated three days ago: the day is the operation's business date.
+    created = _new_bank(db, "Banco Santander")
+    response = r.admin.post(
+        f"{BASE}/operations/opening-balance",
+        json={
+            "client_request_id": str(uuid4()),
+            "business_date": days_ago(3).isoformat(),
+            "account_id": created,
+            "amount": "25000",
+        },
+    )
+    assert response.status_code == 201, response.text
+    moved = _account(_view(r.viewer, days_ago(3)), "Banco Santander")
+    assert _flows(moved, "inflow") == {"OPENING_BALANCE": (1, "25000.00")}
+    assert (moved["opening_balance"], moved["closing_balance"]) == ("0.00", "25000.00")
+    # Before it was created and without balance: not there. After: its ledger balance, though created only today.
+    assert "Banco Santander" not in {a["name"] for a in _view(r.viewer, days_ago(4))["accounts"]}
+    held = _account(_view(r.viewer, yesterday()), "Banco Santander")
+    assert (held["opening_balance"], held["net"], held["closing_balance"]) == ("25000.00", "0.00", "25000.00")
+    assert r.viewer.get(f"{BASE}/accounts/{created}", params={"on": yesterday().isoformat()}).json()["balance"] == (
+        "25000.00"
+    )
+
+
 # --- [15] an account inactive today --------------------------------------------------------------------
 
 
@@ -511,6 +586,7 @@ def test_15_an_account_inactive_today_shows_on_the_days_it_moved(r: Roles, db: S
     )
     db.execute(text("UPDATE settlements.accounts SET active = false WHERE code = 'change_cash'"))
     db.commit()
+    # It existed on every day below (since 2026-01-01): it shows only where it held or moved something.
     moved = _account(_view(r.viewer, days_ago(2)), "Caja de cambio")
     assert (moved["active"], moved["opening_balance"], moved["outflows"], moved["closing_balance"]) == (
         False,
@@ -584,14 +660,8 @@ def test_17_the_csv_is_the_same_view_for_a_spanish_spreadsheet(
 
 
 def test_17_a_name_never_starts_a_formula_in_the_csv(r: Roles, db: Session) -> None:
-    # A second bank, active: removed after the test like every account that is not seeded.
-    db.execute(
-        text(
-            "INSERT INTO settlements.accounts (name, name_key, kind, allow_negative) "
-            "VALUES ('=HYPERLINK(1)', '=hyperlink(1)', 'BANK', true)"
-        )
-    )
-    db.commit()
+    # A second bank that already existed yesterday: removed after the test like every account that is not seeded.
+    _new_bank(db, "=HYPERLINK(1)", f"{days_ago(5).isoformat()}T15:00:00Z")
     content = r.viewer.get(f"{DAILY}.csv", params={"on": yesterday().isoformat()}).content.decode("utf-8")
     assert "Saldos;'=HYPERLINK(1);Banco;Activa;Saldo inicial contable;;0,00" in content.splitlines()
 
