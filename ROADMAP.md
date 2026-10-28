@@ -265,7 +265,7 @@ Cada fase frena con su informe y la aprobación de Enzo.
 |---|---|---|
 | R9‑1 | Contrato de ingreso Store Sys → DistriCom: esperado de una rendición por contrato canónico, eventos del esperado, autoridad con confirmación, reparto abierto sin esperado (`0030`; ADR 011) | DONE (aprobada por Enzo el 2026-10-27 con dos ajustes previos al merge; PR #45 mergeado `61b9f77` con CI 4/4 y la suite completa en verde; `0030` congelada) |
 | R9‑2 | Reporte diario de cierre por caja y banco: vista calculada por `business_date`, sin arqueo ni conciliación, preferentemente sin migración | DONE (aprobada por Enzo el 2026-10-28 con un ajuste previo al merge: una cuenta creada después del día no aparece; PR #47 mergeado `a8c79b9`, sin migración, ADR 012 aceptado) |
-| R9‑3 | E2E completo de Rendiciones de punta a punta | IN_PROGRESS (autorizada por Enzo el 2026-10-28; sin funcionalidad nueva ni migración) |
+| R9‑3 | E2E completo de Rendiciones de punta a punta | IN_PROGRESS (autorizada por Enzo el 2026-10-28; sin funcionalidad nueva ni migración; spec de punta a punta implementado, PR en revisión de Enzo) |
 | R9‑4 | Performance | PLANNED |
 | R9‑5 | Hardening operativo y preparación de producción | PLANNED |
 
