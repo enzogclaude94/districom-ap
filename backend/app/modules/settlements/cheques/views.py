@@ -47,9 +47,7 @@ def items(db: Session, rows: Sequence[Cheque]) -> list[s.ChequeOut]:
             select(Settlement).where(Settlement.id.in_({c.settlement_id for c in rows if c.settlement_id}))
         )
     }
-    in_effect: set[int] = set()
-    for st in settlements.values():
-        in_effect.update(service.in_effect(db, st.current_close_operation_id))
+    in_effect = service.in_effect_of(db, [st.current_close_operation_id for st in settlements.values()])
     banks = {
         b.id: b
         for b in db.scalars(

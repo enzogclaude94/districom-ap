@@ -420,6 +420,16 @@ def in_effect(db: Session, close_operation_id: int | None) -> dict[int, Decimal]
     return dict(rows.all())
 
 
+def in_effect_of(db: Session, close_operation_ids: Sequence[int | None]) -> set[int]:
+    """The cheques these closes put in the portfolio, in one query (R9-4: a page asked once per settlement)."""
+    ids = [i for i in close_operation_ids if i is not None]
+    if not ids:
+        return set()
+    return set(
+        db.scalars(select(SettlementClosingCheque.cheque_id).where(SettlementClosingCheque.close_operation_id.in_(ids)))
+    )
+
+
 # --- administrative entries (admin) ---------------------------------------------------------------
 
 
@@ -430,7 +440,7 @@ def opening_balance(db: Session, actor: User, body: s.AdministrativeEntryIn) -> 
 
 def owner_contribution(db: Session, actor: User, body: s.OwnerContributionIn) -> service.Created:
     """A partner contributes a cheque: it enters the portfolio against the partner's account."""
-    accounts = {a.account_id: a for a in ledger.account_balances(db)}
+    accounts = {a.account_id: a for a in ledger.accounts(db)}
     owner = accounts.get(body.owner_account_id)
     if owner is None or owner.kind != "OWNER_EQUITY":
         raise AppError(422, "invalid_owner_account", "El aporte tiene que ser de la cuenta de un socio activa.")
