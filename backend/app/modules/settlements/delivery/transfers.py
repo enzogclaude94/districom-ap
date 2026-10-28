@@ -205,7 +205,7 @@ def _get(db: Session, settlement_id: int, transfer_id: int) -> SettlementTransfe
 
 
 def _require_bank(db: Session, account_id: int) -> None:
-    banks = {a.account_id for a in ledger.account_balances(db) if a.kind == "BANK" and a.active}
+    banks = {a.account_id for a in ledger.accounts(db) if a.kind == "BANK" and a.active}
     if account_id not in banks:
         raise AppError(422, "invalid_bank_account", "La cuenta de destino tiene que ser un banco activo.")
 

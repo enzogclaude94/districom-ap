@@ -446,7 +446,7 @@ def _check_category(db: Session, concept: str, category_id: int | None) -> None:
 def _paying_accounts(db: Session, items: list[s.PaymentItemIn]) -> None:
     """Each item's account: CASH an active cash box, TRANSFER an active bank account; each at most once."""
     seen: set[int] = set()
-    balances = {b.account_id: b for b in ledger.account_balances(db, include_inactive=True)}
+    balances = {b.account_id: b for b in ledger.accounts(db, include_inactive=True)}
     for item in items:
         account = balances.get(item.account_id) if item.account_id is not None else None
         if (

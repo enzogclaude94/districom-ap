@@ -167,7 +167,7 @@ def _rows(db: Session, rows: Sequence[Any]) -> list[s.FuelLoadRow]:
     )
     paying = {r.Expense.paid_from_account_id for r in rows if r.Expense.paid_from_account_id}
     accounts = (
-        {a.account_id: a.name for a in ledger.account_balances(db, include_inactive=True) if a.account_id in paying}
+        {a.account_id: a.name for a in ledger.accounts(db, include_inactive=True) if a.account_id in paying}
         if paying
         else {}
     )

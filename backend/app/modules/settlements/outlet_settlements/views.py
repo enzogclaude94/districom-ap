@@ -105,7 +105,7 @@ def remittance_items(db: Session, row: Settlement) -> list[s.RemittanceOut]:
     if not rows:
         return []
     consolidated = remittances.consolidated_ids(db, row.current_close_operation_id)
-    accounts = {a.account_id: a.name for a in ledger.account_balances(db, include_inactive=True)}
+    accounts = {a.account_id: a.name for a in ledger.accounts(db, include_inactive=True)}
     users = dict(
         db.execute(
             select(User.id, User.full_name).where(

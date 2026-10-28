@@ -209,7 +209,7 @@ def outs(db: Session, payments: Sequence[Payment]) -> list[s.PaymentOut]:
         ).all()
     )
     # Names and kinds of the accounts, read through the ledger service (its models are its own).
-    accounts = {a.account_id: a for a in ledger.account_balances(db, include_inactive=True)}
+    accounts = {a.account_id: a for a in ledger.accounts(db, include_inactive=True)}
     by_code = {a.code: a.name for a in accounts.values() if a.code}
     cheques = _cheques(db, [(i.payment_id, i.cheque_id) for rows in items.values() for i in rows if i.cheque_id])
     users = _users(db, {p.created_by for p in payments} | {p.reversed_by for p in payments if p.reversed_by})

@@ -76,7 +76,7 @@ def board(db: Session, row: Settlement) -> dict[str, Any]:
         + [e.voided_by for e in spent if e.voided_by]
         + [u for load in loads.values() for u in (load.created_by, load.updated_by)],
     )
-    accounts = {a.account_id: a.name for a in ledger.account_balances(db, include_inactive=True)}
+    accounts = {a.account_id: a.name for a in ledger.accounts(db, include_inactive=True)}
     categories = {c.id: c for c in db.scalars(select(ExpenseCategory))}
     fuel_vehicles = {
         v.id: v for v in db.scalars(select(Vehicle).where(Vehicle.id.in_({x.vehicle_id for x in loads.values()})))
@@ -205,7 +205,7 @@ def closing_preview(db: Session, settlement_id: int) -> s.ClosingPreviewOut:
     preview = closing.preview(db, settlement_id)
     plan = preview.plan
     row = plan.settlement
-    accounts = {a.account_id: a for a in ledger.account_balances(db, include_inactive=True)}
+    accounts = {a.account_id: a for a in ledger.accounts(db, include_inactive=True)}
     in_effect = closing.closing_in_effect(db, row)
     portfolio = ledger.system_account_id(db, "cheque_portfolio")
     missing = plan.totals.expected_missing  # nothing to compare against: no difference is invented (R9-1)
