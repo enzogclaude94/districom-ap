@@ -14,7 +14,15 @@ age_of() { [ -f "$1" ] && echo $((now - $(cat "$1"))) || echo 999999999; }
 # 1. The app answers through the same door users use.
 if caddy_curl -f "https://$DISTRICOM_HOST/api/v1/health" > /dev/null 2>&1; then ok "app answers over HTTPS"; else bad "app does not answer over HTTPS"; fi
 
-# 2. Disks.
+# 2. Disks. The backup disk first: mounted and prepared, or every local backup goes nowhere (or to the system disk).
+problem="$(backup_disk_problem)"
+if [ -n "$problem" ]; then
+    bad "backup disk: $problem"
+elif [ "${BACKUP_REQUIRE_MOUNTPOINT:-1}" = 0 ]; then
+    warn "backup disk: mount point check disabled (BACKUP_REQUIRE_MOUNTPOINT=0, test environments only)"
+else
+    ok "backup disk mounted at $BACKUP_ROOT"
+fi
 for path in / "$BACKUP_ROOT"; do
     used=$(df -P "$path" | awk 'NR==2 {gsub("%", "", $5); print $5}')
     if [ "$used" -ge 90 ]; then bad "disk $path at ${used}%"; elif [ "$used" -ge 80 ]; then warn "disk $path at ${used}%"; else ok "disk $path at ${used}%"; fi
@@ -71,6 +79,16 @@ print(max(segno(cur) - segno(mx) - 1, 0) if cur and mx else -1)' "$current" "$ma
         fi
     fi
 done
+
+# 4c. WAL dropped by pgBackRest (archive queue full during a long outage): a hole no later check fills.
+gap="$(wal_gap 2> /dev/null || true)"
+if [ -n "$gap" ]; then
+    read -r gap_when gap_segment gap_repos <<< "$gap"
+    bad "WAL GAP: pgBackRest dropped WAL (newest: $gap_segment) at $(date -d "@$gap_when" '+%Y-%m-%d %H:%M') (archive queue full); \
+restores past that moment are impossible from: $gap_repos. Take a full backup now: deploy/bin/backup full 'after WAL gap'"
+else
+    ok "no WAL dropped since the last full backup"
+fi
 
 # 5. Backups: the newest one of each repository.
 for repo in $(repos); do

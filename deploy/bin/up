@@ -1,16 +1,14 @@
 #!/usr/bin/env bash
 # First start, or start after a reboot of a stopped stack. Idempotent:
-#   folders of the backup disk → images → database → pgBackRest stanza → migrations → app → first full backup.
+#   backup disk check → images → database → pgBackRest stanza → migrations → app → first full backup.
 #   deploy/bin/up [--no-build]
 # shellcheck source=lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 build=1
 [ "${1:-}" = --no-build ] && build=0
 
-# Backup disk layout. pgbackrest/ and dumps/ belong to the postgres user of the db image (uid 999).
-for dir in pgbackrest dumps files state; do mkdir -p "$BACKUP_ROOT/$dir"; done
-chown 999:999 "$BACKUP_ROOT/pgbackrest" "$BACKUP_ROOT/dumps"
-chmod 750 "$BACKUP_ROOT/pgbackrest" "$BACKUP_ROOT/dumps"
+# Never start writing backups anywhere but the prepared backup disk (deploy/bin/backup-disk-init).
+require_backup_disk
 [ -f "$ROOT/deploy/pgbackrest.env" ] || die "deploy/pgbackrest.env is missing: run deploy/bin/init-env"
 
 [ "$build" -eq 1 ] && dc build

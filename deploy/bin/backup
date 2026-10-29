@@ -7,6 +7,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 type="${1:-diff}"
 note="${2:-scheduled}"
 case "$type" in full | diff | incr) ;; *) die "usage: backup full|diff|incr [annotation]" ;; esac
+require_backup_disk
 status=0
 for repo in $(repos); do
     log "backup $type to repo$repo ($note)"

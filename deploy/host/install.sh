@@ -44,6 +44,8 @@ fi
 run systemctl enable --now tailscaled
 
 step "Host firewall (ufw): SSH and DNS only from the LAN and Tailscale; Tailscale's own UDP port"
+# ufw filters IPv6 too (IPV6=yes): connections Docker's userland proxy accepts on the host arrive here.
+run sed -i 's/^IPV6=.*/IPV6=yes/' /etc/default/ufw
 run ufw default deny incoming
 run ufw default allow outgoing
 run ufw allow from "$lan_subnet" to any port 22 proto tcp
@@ -72,8 +74,15 @@ done
 step "Backup disk"
 backup_root="$(sed -n 's/^BACKUP_ROOT=//p' "$ROOT/.env" 2> /dev/null | tail -n1)"
 backup_root="${backup_root:-/srv/districom-backup}"
-if [ "$dry" -eq 0 ] && ! mountpoint -q "$backup_root"; then
-    echo "WARNING: $backup_root is not a mount point. It must be the separate backup disk (OPERATIONS.md)." >&2
+if mountpoint -q "$backup_root"; then
+    echo "$backup_root is mounted: prepare it with deploy/bin/backup-disk-init"
+elif [ "$dry" -eq 1 ]; then
+    echo "DRY  $backup_root is not a mount point: a real run stops here"
+else
+    echo "ERROR: $backup_root is not a mount point. Format the separate backup disk, add it to /etc/fstab," >&2
+    echo "mount it and run this script again (docs/OPERATIONS.md). The timers are installed but nothing will" >&2
+    echo "back up until deploy/bin/backup-disk-init has prepared that disk." >&2
+    exit 1
 fi
 
 cat << MSG
@@ -81,5 +90,6 @@ cat << MSG
 Done. Next (docs/OPERATIONS.md):
   1. tailscale up --advertise-tags=tag:districom-server --auth-key=<one-time key from the admin console>
      then put the server's 100.x address in .env (TAILSCALE_SERVER_IP) if the split DNS is used.
-  2. deploy/bin/up
+  2. deploy/bin/backup-disk-init
+  3. deploy/bin/up
 MSG

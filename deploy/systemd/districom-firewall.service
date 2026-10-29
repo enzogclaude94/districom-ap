@@ -1,7 +1,7 @@
 [Unit]
 Description=DistriCom: who may reach the ports Docker publishes (DOCKER-USER chain)
-After=docker.service
-Requires=docker.service
+# Before Docker: no container publishes a port while the filter is missing, at boot or when Docker restarts.
+Before=docker.service
 PartOf=docker.service
 
 [Service]

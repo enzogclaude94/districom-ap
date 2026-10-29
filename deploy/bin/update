@@ -10,6 +10,7 @@ run_from_copy "$0" "$@"
 ref="${1:?usage: update <git-ref>}"
 cd "$ROOT"
 
+require_backup_disk
 [ -z "$(git status --porcelain --untracked-files=no)" ] || die "the working tree has local changes: commit or discard them first"
 git fetch --tags origin
 git rev-parse --verify --quiet "$ref^{commit}" > /dev/null || die "unknown ref: $ref"
@@ -32,6 +33,10 @@ dc stop caddy frontend backend
 "$ROOT/deploy/bin/backup" full "pre-update $ref" || die "pre-update backup failed: the app stays stopped; run deploy/bin/rollback"
 pgbr --repo=1 info --output=json | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["backup"][-1]["label"])' > "$STATE_DIR/rollback-backup-label"
 log "update: pre-update backup $(cat "$STATE_DIR/rollback-backup-label")"
+# Fingerprint of the database exactly as in that backup (the app is stopped): rollback --restore-db compares the
+# database of that moment with this one to tell what a restore would discard.
+psql_db -f - < "$ROOT/deploy/sql/verify.sql" > "$STATE_DIR/rollback-fingerprint.txt"
+date +%s > "$STATE_DIR/rollback-backup-time"
 
 dc up -d --no-build db
 wait_healthy db

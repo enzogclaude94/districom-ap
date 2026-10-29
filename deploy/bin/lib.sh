@@ -29,6 +29,29 @@ load_env_file "$ROOT/.env"
 : "${DISTRICOM_HOST:?DISTRICOM_HOST is not set (.env)}"
 export POSTGRES_USER POSTGRES_DB BACKUP_ROOT
 
+# Caddy is published on one IPv4 address only (0.0.0.0 = every IPv4 interface, filtered by deploy/host/firewall.sh).
+# An IPv6 or empty value would also publish on IPv6, where the DOCKER-USER rules for IPv4 do not apply.
+if [ -n "${CADDY_BIND_IP:-}" ] && ! [[ "$CADDY_BIND_IP" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+    die "CADDY_BIND_IP must be an IPv4 address (got '$CADDY_BIND_IP')"
+fi
+
+# The backup disk. It must be mounted and carry the marker written by deploy/bin/backup-disk-init; otherwise a
+# missing disk would leave backups silently on the system disk. Test environments without a disk of their own
+# set BACKUP_REQUIRE_MOUNTPOINT=0 (the marker is still required, and the monitor reports the relaxed check).
+BACKUP_MARKER=".districom-backup-disk"
+backup_disk_problem() {
+    if [ "${BACKUP_REQUIRE_MOUNTPOINT:-1}" != 0 ] && ! mountpoint -q "$BACKUP_ROOT"; then
+        echo "$BACKUP_ROOT is not a mount point: the backup disk is not mounted"
+    elif [ ! -f "$BACKUP_ROOT/$BACKUP_MARKER" ]; then
+        echo "$BACKUP_ROOT has no $BACKUP_MARKER: it is not the prepared backup disk (deploy/bin/backup-disk-init)"
+    fi
+}
+require_backup_disk() {
+    local problem
+    problem="$(backup_disk_problem)"
+    [ -z "$problem" ] || die "$problem. Nothing was done."
+}
+
 # docker compose with the production override. DISTRICOM_COMPOSE_EXTRA adds files (used by deploy/tests only).
 dc() {
     local args=(--project-directory "$ROOT" -f "$ROOT/docker-compose.yml" -f "$ROOT/deploy/docker-compose.prod.yml")
@@ -81,3 +104,24 @@ run_from_copy() {
 # Image tags of a release: `current` runs, `rollback` is what ran before the last update.
 # shellcheck disable=SC2034 # used by update and rollback
 IMAGES=(districom/db districom/backend districom/frontend districom/caddy)
+
+# WAL that pgBackRest dropped because the archive queue was full (archive-push-queue-max, a long outage of a
+# repository). From the first dropped segment on, a restore to a later moment is impossible from the repositories
+# that lacked it, even after `pgbackrest check` passes again; only a full backup taken afterwards in every
+# repository closes the gap. Prints "<epoch of the newest drop> <segment> <repos still without a full backup after it>",
+# or nothing when there is no open gap.
+wal_gap() {
+    local line when segment repo stop open=""
+    line="$(dc exec -T db sh -c 'cat /var/log/pgbackrest/districom-archive-push*.log 2>/dev/null' 2>/dev/null \
+        | grep 'dropped WAL file' | tail -n1 || true)"
+    [ -n "$line" ] || return 0
+    when="$(date -u -d "$(echo "$line" | cut -c1-19)" +%s)"
+    segment="$(echo "$line" | sed -n "s/.*dropped WAL file '\([0-9A-F]*\)'.*/\1/p")"
+    for repo in $(repos); do
+        stop=$(pgbr --repo="$repo" info --output=json 2>/dev/null | python3 -c 'import json,sys
+b=[x for x in json.load(sys.stdin)[0].get("backup", []) if x["type"] == "full"]
+print(b[-1]["timestamp"]["stop"] if b else 0)' 2>/dev/null || echo 0)
+        [ "$stop" -gt "$when" ] || open="$open repo$repo"
+    done
+    [ -z "$open" ] || echo "$when $segment$open"
+}

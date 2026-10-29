@@ -19,6 +19,9 @@ services:
   db:
     ports:
       - "127.0.0.1:55432:5432"
+    environment:
+      # A small archive queue, so a simulated long outage of repo2 overflows it in seconds (T15).
+      PGBACKREST_ARCHIVE_PUSH_QUEUE_MAX: 128MiB
     volumes:
       - ./deploy/tests/.certs:/certs:ro
 

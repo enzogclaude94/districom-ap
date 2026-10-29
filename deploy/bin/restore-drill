@@ -1,16 +1,27 @@
 #!/usr/bin/env bash
 # Restores a backup into a throwaway PostgreSQL (never production) and compares it with production.
-#   deploy/bin/restore-drill [--repo 1|2] [--target-time 'YYYY-MM-DD HH:MM:SS-03'] [--network NAME] [--keep]
+#   deploy/bin/restore-drill [--repo 1|2] [--target-time 'YYYY-MM-DD HH:MM:SS-03' | --set LABEL] [--network NAME] [--keep]
 # --repo 2 does not mount the backup disk at all: it proves that the off-site copy alone is enough (loss of
-# the whole office). --target-time restores to that minute (point in time) and skips the comparison.
+# the whole office). --target-time restores to that minute (point in time) and --set to the end of that backup
+# (e.g. the pre-rollback one, to look at data a rollback discarded); both skip the comparison.
+#
+# The comparison is exact. With production running, the drill blocks writes for a moment (SHARE locks: reads go
+# on, writes wait; LOCK_TIMEOUT bounds the wait for a long transaction), fingerprints production
+# (deploy/sql/verify.sql) and creates a named restore point in that same instant. The copy is restored to exactly
+# that restore point, so both sides describe the same moment. If any WAL between the backup and the restore point
+# is missing (a gap after an archive queue overflow), PostgreSQL cannot reach the point and the drill says
+# INCOMPLETE: it never reports a full recovery that did not happen. The copy is also checked with pg_amcheck
+# (tables and indexes).
+# Results: IDENTICAL (exit 0), RESTORED without comparison (0), DIFFERENT (2), INCOMPLETE (3).
 # Monthly with --repo 1 and quarterly with --repo 2 (docs/OPERATIONS.md); the result is kept in deploy/state/drills.
 # shellcheck source=lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-repo=1 target="" network=bridge keep=0
+repo=1 target="" set="" network=bridge keep=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --repo) repo="$2"; shift 2 ;;
         --target-time) target="$2"; shift 2 ;;
+        --set) set="$2"; shift 2 ;;
         --network) network="$2"; shift 2 ;;
         --keep) keep=1; shift ;;
         *) die "unknown option $1" ;;
@@ -33,54 +44,97 @@ docker volume rm "$volume" > /dev/null 2>&1 || true
 
 run_args=(--network "$network" -v "$volume:/var/lib/postgresql/data" -e PGBACKREST_REPO="$repo" -e PGBACKREST_PG1_USER="$POSTGRES_USER")
 [ -f "$ROOT/deploy/pgbackrest.env" ] && run_args+=(--env-file "$ROOT/deploy/pgbackrest.env")
-[ "$repo" = 1 ] && run_args+=(-v "$BACKUP_ROOT/pgbackrest:/var/lib/pgbackrest:ro")
+if [ "$repo" = 1 ]; then
+    require_backup_disk
+    run_args+=(-v "$BACKUP_ROOT/pgbackrest:/var/lib/pgbackrest:ro")
+fi
 # Extra `docker run` arguments, e.g. a CA file for a private S3 endpoint (deploy/tests).
 # shellcheck disable=SC2206
 [ -n "${DRILL_DOCKER_ARGS:-}" ] && run_args+=(${DRILL_DOCKER_ARGS})
 
-compare=1
-[ -n "$target" ] && compare=0
-if [ "$compare" -eq 1 ]; then
-    if dc ps --status running -q db | grep -q .; then
-        log "drill: production snapshot, then a WAL switch archived in every repository (pgBackRest check)"
-        psql_db -f - < "$ROOT/deploy/sql/verify.sql" > "$out/production.txt"
-        pgbr check
-    else
-        log "drill: production is not running here; only the restored copy is fingerprinted"
-        compare=0
-    fi
+restore_opts=(--stanza=districom --archive-mode=off)
+compare=0
+point=""
+if [ -n "$set" ]; then
+    restore_opts+=("--set=$set" --type=immediate --target-action=promote --target-timeline=current)
+elif [ -n "$target" ]; then
+    restore_opts+=(--type=time "--target=$target" --target-action=promote)
+elif dc ps --status running -q db | grep -q .; then
+    compare=1
+    point="drill-$(date +%Y%m%d%H%M%S)"
+    log "drill: production fingerprint and restore point $point (writes wait meanwhile)"
+    {
+        echo "\\set QUIET on"
+        echo "SET lock_timeout = '${DRILL_LOCK_TIMEOUT:-60s}';"
+        echo "BEGIN;"
+        # Every table of every application schema, in one statement: no write can commit until COMMIT.
+        echo "SELECT format('LOCK TABLE %s IN SHARE MODE', string_agg(format('%I.%I', n.nspname, c.relname), ', '))
+              FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+              WHERE c.relkind = 'r' AND n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname NOT LIKE 'pg\\_%' \\gexec"
+        echo "\\o /dev/null"
+        echo "SELECT pg_create_restore_point('$point');"
+        echo "\\o"
+        cat "$ROOT/deploy/sql/verify.sql"
+        echo "COMMIT;"
+    } | psql_db -f - > "$out/production.txt" || die "could not fingerprint production (lock wait over ${DRILL_LOCK_TIMEOUT:-60s}?)"
+    # Closes the WAL segment holding the restore point and waits until every repository has it.
+    pgbr check
+    restore_opts+=(--type=name "--target=$point" --target-action=promote)
+else
+    log "drill: production is not running here; restoring the latest state without comparison"
 fi
 
-restore_opts=(--stanza=districom --archive-mode=off)
-if [ -n "$target" ]; then
-    restore_opts+=(--type=time "--target=$target" --target-action=promote)
-fi
 started=$(date +%s)
-log "drill: restoring from repo$repo${target:+ to $target}"
+log "drill: restoring from repo$repo${set:+ backup $set}${target:+ to $target}${point:+ to restore point $point}"
 docker run --rm "${run_args[@]}" -u postgres --entrypoint pgbackrest "$image" "${restore_opts[@]}" restore
 docker run -d --name "$name" "${run_args[@]}" -e POSTGRES_PASSWORD=unused "$image" postgres -c archive_mode=off > /dev/null
 
+summary() { echo "$*" >> "$out/summary.txt"; }
+: > "$out/summary.txt"
+restored_to="${set:+backup $set}${target}${point}"
+summary "repo=$repo target=${restored_to:-latest}"
+gap="$(wal_gap 2> /dev/null || true)"
+[ -z "$gap" ] || summary "wal_gap=WAL dropped by pgBackRest at $(date -u -d "@${gap%% *}" '+%Y-%m-%d %H:%M:%SZ') (deploy/bin/monitor)"
+
 waited=0
-until [ "$(docker exec -u postgres "$name" psql -XtAq -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c 'SELECT pg_is_in_recovery()' 2>/dev/null)" = f ]; do
+until [ "$(docker exec -u postgres "$name" psql -XtAq -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c 'SELECT pg_is_in_recovery()' 2> /dev/null)" = f ]; do
+    if [ "$(docker inspect -f '{{.State.Running}}' "$name" 2> /dev/null)" != true ]; then
+        docker logs "$name" > "$out/restored-postgres.log" 2>&1 || true
+        summary "result=INCOMPLETE: PostgreSQL stopped during recovery, the target was not reached (restored-postgres.log)"
+        grep -m1 -E 'recovery ended before|FATAL|PANIC' "$out/restored-postgres.log" >> "$out/summary.txt" || true
+        cat "$out/summary.txt"
+        exit 3
+    fi
     [ "$waited" -lt 900 ] || die "the restored database did not finish recovery in 15 minutes (docker logs $name)"
     sleep 2; waited=$((waited + 2))
 done
 finished=$(date +%s)
+docker logs "$name" > "$out/restored-postgres.log" 2>&1 || true
+summary "restore_seconds=$((finished - started))"
+
 docker exec -i -u postgres "$name" psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f - \
     < "$ROOT/deploy/sql/verify.sql" > "$out/restored.txt"
+summary "restored_tables=$(grep -c '^table ' "$out/restored.txt") restored_rows_total=$(awk '$1=="table" {s+=$3} END {print s+0}' "$out/restored.txt")"
 
-{
-    echo "repo=$repo target=${target:-latest} restore_seconds=$((finished - started))"
-    echo "restored_rows_total=$(awk '$1=="rows" {s+=$3} END {print s+0}' "$out/restored.txt")"
-} > "$out/summary.txt"
-if [ "$compare" -eq 1 ]; then
-    if diff -u "$out/production.txt" "$out/restored.txt" > "$out/diff.txt"; then
-        echo "result=IDENTICAL" >> "$out/summary.txt"
-    else
-        echo "result=DIFFERENT (see diff.txt; writes after the snapshot also show up here)" >> "$out/summary.txt"
-    fi
+# Physical integrity of the copy: heap pages, and every index against its table.
+if docker exec -u postgres "$name" pg_amcheck -U "$POSTGRES_USER" -d "$POSTGRES_DB" --install-missing --heapallindexed \
+    > "$out/amcheck.txt" 2>&1; then
+    summary "amcheck=ok"
 else
-    echo "result=RESTORED (no comparison)" >> "$out/summary.txt"
+    summary "amcheck=FAILED (amcheck.txt)"
+    compare_failed=1
+fi
+
+if [ "$compare" -eq 1 ]; then
+    if diff -u "$out/production.txt" "$out/restored.txt" > "$out/diff.txt" && [ -z "${compare_failed:-}" ]; then
+        summary "result=IDENTICAL: schema, structure and every row of every table, at restore point $point"
+    else
+        summary "result=DIFFERENT: see diff.txt (tables named there differ) and amcheck.txt"
+    fi
+elif [ -n "${compare_failed:-}" ]; then
+    summary "result=DIFFERENT: the restored copy fails pg_amcheck"
+else
+    summary "result=RESTORED (no comparison)"
 fi
 cat "$out/summary.txt"
 log "drill: report in $out"

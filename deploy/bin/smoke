@@ -14,4 +14,6 @@ check "API docs not served" sh -c "[ \"\$(curl -sS --noproxy '*' -o /dev/null -w
 check "HSTS header" sh -c "curl -sS --noproxy '*' -k -D - -o /dev/null --resolve '$DISTRICOM_HOST:443:127.0.0.1' 'https://$DISTRICOM_HOST/api/v1/health' | grep -qi '^strict-transport-security:'"
 check "database at the latest migration" sh -c "[ \"\$('$ROOT/deploy/bin/dc' run --rm --no-deps -T backend alembic current 2>/dev/null | grep -c '(head)')\" -ge 1 ]"
 check "WAL archiving works (pgBackRest check)" pgbr check
+# pgBackRest check passes again after a queue overflow, but the dropped WAL is still missing (deploy/bin/lib.sh).
+check "no WAL dropped since the last full backup" sh -c "[ -z \"\$('$ROOT/deploy/bin/wal-gap')\" ]"
 exit "$fail"

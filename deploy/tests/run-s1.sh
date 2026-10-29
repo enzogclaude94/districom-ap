@@ -22,6 +22,8 @@ fi
 if [ "${1:-}" = clean ]; then
     [ -f "$ROOT/.env" ] && "$ROOT/deploy/bin/dc" --profile dns --profile ops down -v --remove-orphans
     docker rm -f districom-drill > /dev/null 2>&1
+    docker network rm s1-lan s1-outside > /dev/null 2>&1
+    mountpoint -q "$TEST_ROOT/backup" && umount "$TEST_ROOT/backup"
     rm -rf "$TEST_ROOT" "$CERTS" "$ROOT/.env" "$ROOT/deploy/pgbackrest.env" "$ROOT/deploy/offsite.env"
     exit 0
 fi
@@ -59,6 +61,12 @@ if [ ! -f "$ROOT/.env" ]; then
         -e "s|^LAN_SUBNET=.*|LAN_SUBNET=10.99.0.0/24|" \
         "$ROOT/deploy/production.env.example" > "$ROOT/.env"
     echo "DISTRICOM_TEST_STACK=1" >> "$ROOT/.env"
+    # The backup "disk" of the tests is a tmpfs mounted below; where mounting is not allowed, the mount point
+    # check is relaxed (test environments only; the marker of deploy/bin/backup-disk-init is still required).
+    mkdir -p "$TEST_ROOT/backup"
+    if ! mountpoint -q "$TEST_ROOT/backup" && ! mount -t tmpfs -o size=6g,mode=755 s1-backup-disk "$TEST_ROOT/backup" 2> /dev/null; then
+        echo "BACKUP_REQUIRE_MOUNTPOINT=0" >> "$ROOT/.env"
+    fi
     cat > "$ROOT/deploy/pgbackrest.env" << EOF
 PGBACKREST_REPO1_CIPHER_PASS=$(secret)
 PGBACKREST_REPO2_TYPE=s3
@@ -108,6 +116,21 @@ expect "Caddyfile valid (cloudflare DNS-01)" docker run --rm -e DISTRICOM_HOST=$
 expect "Tailscale policy parses (HuJSON)" python3 -c 'import re,json,sys; s=open(sys.argv[1]).read(); s=re.sub(r"^\s*//.*$","",s,flags=re.M); json.loads(re.sub(r",(\s*[}\]])",r"\1",s))' "$ROOT/deploy/tailscale/policy.hujson"
 expect "host install script (dry run)" "$ROOT/deploy/host/install.sh" --dry-run
 
+# ---------------------------------------------------------------- T1a backup disk guard
+section "T1a Backup disk: nothing runs on a folder that is not the prepared, mounted backup disk"
+nodisk="$TEST_ROOT/no-disk"
+mkdir -p "$nodisk"
+expect "up refuses it and writes nothing there" sh -c "! BACKUP_ROOT='$nodisk' '$ROOT/deploy/bin/up' --no-build && [ -z \"\$(ls -A '$nodisk')\" ]"
+expect "backup refuses it" sh -c "! BACKUP_ROOT='$nodisk' '$ROOT/deploy/bin/backup' full"
+expect "dump refuses it" sh -c "! BACKUP_ROOT='$nodisk' '$ROOT/deploy/bin/dump'"
+expect "files-sync refuses it" sh -c "! BACKUP_ROOT='$nodisk' '$ROOT/deploy/bin/files-sync'"
+expect "restore drill from repo1 refuses it" sh -c "! BACKUP_ROOT='$nodisk' '$ROOT/deploy/bin/restore-drill' --repo 1"
+expect "backup-disk-init refuses a folder that is not a mount point" sh -c "! BACKUP_REQUIRE_MOUNTPOINT=1 BACKUP_ROOT='$nodisk' '$ROOT/deploy/bin/backup-disk-init'"
+mkdir -p "$TEST_ROOT/stale/pgbackrest"
+expect "backup-disk-init refuses backup folders that already exist without a marker" sh -c "! BACKUP_REQUIRE_MOUNTPOINT=0 BACKUP_ROOT='$TEST_ROOT/stale' '$ROOT/deploy/bin/backup-disk-init'"
+if mountpoint -q "$TEST_ROOT/backup"; then disk_kind="a real mount point (tmpfs)"; else disk_kind="mount point check relaxed: this machine cannot mount"; fi
+expect "backup-disk-init prepares the test backup disk ($disk_kind)" "$ROOT/deploy/bin/backup-disk-init"
+
 # ---------------------------------------------------------------- T1 install
 section "T1 First start (deploy/bin/up): images, db, stanza in both repos, migrations, app, first full backup, smoke"
 dc up -d s3test
@@ -127,6 +150,8 @@ expect "frontend port 3000 not reachable from the host" sh -c "! curl -s --nopro
 expect "unknown Host over HTTP gets no answer" sh -c "! curl -s --noproxy "*" --max-time 5 -H 'Host: evil.example' http://127.0.0.1/ -o /dev/null"
 expect "unknown name over HTTPS: TLS refused" sh -c "! curl -sk --noproxy "*" --max-time 5 --resolve evil.example:443:127.0.0.1 https://evil.example/"
 expect "bare IP over HTTPS: TLS refused" sh -c "! curl -sk --noproxy "*" --max-time 5 https://127.0.0.1/"
+expect "caddy is published on IPv4 only ($(docker port "$(dc ps -q caddy)" | tr '\n' ' '))" sh -c "! docker port \"\$('$ROOT/deploy/bin/dc' ps -q caddy)\" | grep -v '^[0-9]*/tcp -> 0\.0\.0\.0:'"
+expect "an IPv6 CADDY_BIND_IP is refused" sh -c "! CADDY_BIND_IP=:: '$ROOT/deploy/bin/dc' config -q"
 cert_cn="$(echo | openssl s_client -connect 127.0.0.1:443 -servername $HOST 2> /dev/null | openssl x509 -noout -ext subjectAltName 2> /dev/null | tr -d ' ' | tail -n1)"
 expect "certificate names $HOST ($cert_cn)" sh -c "echo '$cert_cn' | grep -q 'DNS:$HOST'"
 
@@ -182,6 +207,30 @@ latest_drill="$(find "$STATE_DIR/drills" -maxdepth 1 -name '*-repo2' | sort | ta
 rto="$(sed -n 's/.*restore_seconds=\([0-9]*\).*/\1/p' "$latest_drill/summary.txt")"
 result PASS "measured restore time from off-site with this dataset: ${rto}s (RTO of the data part only)"
 
+# ---------------------------------------------------------------- T7b fingerprint sensitivity
+section "T7b The comparison sees any change in any business table (and only real changes)"
+expect "drill from repo1 kept for the checks below: identical, pg_amcheck ok" "$ROOT/deploy/bin/restore-drill" --repo 1 --keep
+drill_dir="$(find "$STATE_DIR/drills" -maxdepth 1 -name '*-repo1' | sort | tail -n1)"
+expect "summary records pg_amcheck ok and every table compared ($(grep restored_tables "$drill_dir/summary.txt"))" grep -q 'amcheck=ok' "$drill_dir/summary.txt"
+dq() { docker exec -u postgres districom-drill psql -XtAq -U districom -d districom_perf_s1 -c "SET session_replication_role = replica; $1"; }
+drill_fp() { docker exec -i -u postgres districom-drill psql -X -U districom -d districom_perf_s1 -f - < "$ROOT/deploy/sql/verify.sql"; }
+changed_tables() { drill_fp | diff "$drill_dir/production.txt" - | awk '/^[<>]/ {print $2, $3}' | sort -u | tr '\n' ' '; }
+dq "VACUUM FULL settlements.expenses; CLUSTER settlements.ledger_entries USING ledger_entries_pkey" > /dev/null 2>&1
+expect "rewriting tables (VACUUM FULL, CLUSTER) changes nothing" sh -c "[ -z \"$(changed_tables)\" ]"
+dq "UPDATE settlements.expenses SET description = coalesce(description, '') || '.' WHERE id = (SELECT min(id) FROM settlements.expenses)" > /dev/null
+diff1="$(changed_tables)"
+expect "one character of one expense: only settlements.expenses differs ($diff1)" test "$diff1" = "table settlements.expenses "
+dq "DELETE FROM settlements.cheque_events WHERE id = (SELECT max(id) FROM settlements.cheque_events)" > /dev/null
+diff2="$(changed_tables)"
+expect "one cheque event deleted: that table appears too ($diff2)" sh -c "echo '$diff2' | grep -q 'table settlements.cheque_events'"
+dq "UPDATE public.third_parties SET updated_at = updated_at + interval '1 microsecond' WHERE id = (SELECT min(id) FROM public.third_parties)" > /dev/null
+diff3="$(changed_tables)"
+expect "one microsecond in a platform table is seen ($diff3)" sh -c "echo '$diff3' | grep -q 'table public.third_parties'"
+dq "UPDATE settlements.ledger_entries SET amount = amount + 0.01 WHERE id = (SELECT min(id) FROM settlements.ledger_entries)" > /dev/null
+diff4="$(changed_tables)"
+expect "one cent in the ledger: the table and that account's balance differ ($diff4)" sh -c "echo '$diff4' | grep -q 'table settlements.ledger_entries' && echo '$diff4' | grep -q 'balance '"
+docker rm -f districom-drill > /dev/null; docker volume rm districom-drill-data > /dev/null
+
 # ---------------------------------------------------------------- T8 point in time
 section "T8 Point-in-time restore from off-site"
 q "INSERT INTO s1test.markers (label) VALUES ('pitr-before')"
@@ -230,6 +279,7 @@ expect "dump is a valid pg_restore archive" sh -c "ls '$TEST_ROOT'/backup/dumps/
 section "T11 Monitor"
 expect "deploy/bin/monitor reports no FAIL" "$ROOT/deploy/bin/monitor"
 sed 's/^/      /' "$STATE_DIR/monitor.txt" | tee -a "$REPORT"
+expect "monitor fails when the backup disk is not there" sh -c "BACKUP_ROOT='$nodisk' '$ROOT/deploy/bin/monitor' 2> /dev/null | grep -q '^FAIL  backup disk'"
 
 # ---------------------------------------------------------------- T12 update and rollback
 section "T12 Update to a new version with a migration, then rollback restoring the database"
@@ -262,10 +312,24 @@ new_ref="$(git rev-parse HEAD)"
 git checkout --quiet "$start_branch"
 expect "deploy/bin/update to the new version (backup, migration, smoke)" "$ROOT/deploy/bin/update" "$new_ref"
 expect "new migration applied" sh -c "[ \"\$('$ROOT/deploy/bin/dc' exec -T -u postgres db psql -XtAq -U districom -d districom_perf_s1 -c \"SELECT to_regclass('public.s1_update_probe') IS NOT NULL\")\" = t ]"
-expect "deploy/bin/rollback --restore-db" "$ROOT/deploy/bin/rollback" --restore-db
+q "INSERT INTO s1test.markers (label) VALUES ('after-update')"
+"$ROOT/deploy/bin/rollback" --restore-db < /dev/null > "$TEST_ROOT/rollback-report.txt" 2>&1
+rc=$?
+expect "rollback --restore-db alone only reports and stops (exit $rc)" test "$rc" = 3
+expect "the report names the table with data recorded after the update" grep -q 's1test.markers: .* rows at the backup' "$TEST_ROOT/rollback-report.txt"
+expect "nothing changed: still on the new version, its migration in place" sh -c "[ \"\$(git -C '$ROOT' rev-parse HEAD)\" = '$new_ref' ] && [ \"\$('$ROOT/deploy/bin/dc' exec -T -u postgres db psql -XtAq -U districom -d districom_perf_s1 -c \"SELECT to_regclass('public.s1_update_probe') IS NOT NULL\")\" = t ]"
+expect "a wrong confirmation is refused" sh -c "'$ROOT/deploy/bin/rollback' --restore-db --confirm wrong-label < /dev/null; [ \$? = 3 ]"
+label="$(cat "$STATE_DIR/rollback-backup-label")"
+expect "rollback --restore-db --confirm $label" "$ROOT/deploy/bin/rollback" --restore-db --confirm "$label"
 expect "code back at the previous version" test "$(git rev-parse HEAD)" = "$start_ref"
 psql_db -f - < "$ROOT/deploy/sql/verify.sql" > "$TEST_ROOT/after-rollback.txt"
 expect "database identical to before the update (fingerprint)" diff -u "$TEST_ROOT/before-update.txt" "$TEST_ROOT/after-rollback.txt"
+safety="$(cat "$STATE_DIR/rollback-safety-label")"
+"$ROOT/deploy/bin/restore-drill" --repo 1 --set "$safety" --keep > /dev/null 2>&1
+kept="$(docker exec -u postgres districom-drill psql -XtAq -U districom -d districom_perf_s1 -c "SELECT count(*) FROM s1test.markers WHERE label = 'after-update'" 2> /dev/null)"
+expect "what the rollback discarded is still in backup $safety ($kept row)" test "$kept" = 1
+docker rm -f districom-drill > /dev/null; docker volume rm districom-drill-data > /dev/null
+expect "a second database rollback of the same update is refused" sh -c "! '$ROOT/deploy/bin/rollback' --restore-db --confirm '$label' < /dev/null"
 git checkout --quiet "$start_branch"
 git branch -D s1-test-update-throwaway > /dev/null 2>&1
 expect "WAL archiving works on the new timeline after the rollback" dc exec -T -u postgres db pgbackrest --stanza=districom check
@@ -282,13 +346,60 @@ expect "Tailscale interface answers the Tailscale address ($ts_answer)" test "$t
 expect "Tailscale interface answers nothing else (no open resolver)" sh -c "[ -z \"\$(dig +short @127.0.0.4 example.com A)\" ]"
 dc --profile dns stop dns > /dev/null 2>&1
 
-# ---------------------------------------------------------------- T14 firewall rules load
-section "T14 DOCKER-USER firewall rules (load, idempotence, removal; real filtering is an S3 test)"
+# ---------------------------------------------------------------- T14 firewall
+section "T14 Firewall: only the LAN subnet and Tailscale reach Caddy (two simulated networks)"
+expect "a LAN_SUBNET of 0.0.0.0/0 is refused" sh -c "! LAN_SUBNET=0.0.0.0/0 '$ROOT/deploy/host/firewall.sh' apply"
+expect "a public LAN_SUBNET is refused" sh -c "! LAN_SUBNET=8.8.8.0/24 '$ROOT/deploy/host/firewall.sh' apply"
+# Two bridges whose names are not br-*: one is "the LAN" (10.99.0.0/24 = LAN_SUBNET), the other any other network.
+docker network create -o com.docker.network.bridge.name=s1lan0 --subnet 10.99.0.0/24 s1-lan > /dev/null
+docker network create -o com.docker.network.bridge.name=s1out0 --subnet 10.98.0.0/24 s1-outside > /dev/null
+probe() { docker run --rm --network "$1" --entrypoint python districom/backend:current -c "import socket; socket.create_connection(('$2', $3), 4)" > /dev/null 2>&1; }
+caddy_ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$(dc ps -q caddy)")"
+backend_ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$(dc ps -q backend)")"
+"$ROOT/deploy/host/firewall.sh" remove
+expect "control, without the rules: another network DOES reach Caddy (what the rules are for)" probe s1-outside 10.98.0.1 443
 expect "apply" env LAN_SUBNET=10.99.0.0/24 "$ROOT/deploy/host/firewall.sh" apply
 expect "apply twice keeps one jump" sh -c "LAN_SUBNET=10.99.0.0/24 '$ROOT/deploy/host/firewall.sh' apply && [ \$(iptables -S DOCKER-USER | grep -c DISTRICOM-INGRESS) = 1 ]"
 iptables -S DISTRICOM-INGRESS | sed 's/^/      /' | tee -a "$REPORT"
+expect "the IPv6 chain drops every new connection to containers" sh -c "ip6tables -S DISTRICOM-INGRESS | grep -q -- '--ctstate NEW -j DROP'"
+dropped_before="$(iptables -L DISTRICOM-INGRESS -v -x -n | awk '$3 == "DROP" {print $1}')"
+expect "LAN reaches Caddy on 443" probe s1-lan 10.99.0.1 443
+expect "LAN reaches Caddy on 80 (redirect to HTTPS)" probe s1-lan 10.99.0.1 80
+expect "another network does not reach Caddy" sh -c "! docker run --rm --network s1-outside --entrypoint python districom/backend:current -c \"import socket; socket.create_connection(('10.98.0.1', 443), 4)\" > /dev/null 2>&1"
+expect "another network does not reach Caddy through the LAN address either" sh -c "! docker run --rm --network s1-outside --entrypoint python districom/backend:current -c \"import socket; socket.create_connection(('10.99.0.1', 443), 4)\" > /dev/null 2>&1"
+expect "LAN cannot route straight to the backend container ($backend_ip:8000)" sh -c "! docker run --rm --network s1-lan --entrypoint python districom/backend:current -c \"import socket; socket.create_connection(('$backend_ip', 8000), 4)\" > /dev/null 2>&1"
+expect "LAN cannot route straight to Caddy's container address ($caddy_ip:443), only through the published port" sh -c "! docker run --rm --network s1-lan --entrypoint python districom/backend:current -c \"import socket; socket.create_connection(('$caddy_ip', 443), 4)\" > /dev/null 2>&1"
+dropped_after="$(iptables -L DISTRICOM-INGRESS -v -x -n | awk '$3 == "DROP" {print $1}')"
+expect "those attempts were dropped by DISTRICOM-INGRESS ($dropped_before → $dropped_after packets)" test "$dropped_after" -gt "$dropped_before"
 expect "HTTPS still served with the rules loaded" caddy_curl -f -o /dev/null "https://$HOST/api/v1/health"
 expect "remove" "$ROOT/deploy/host/firewall.sh" remove
+docker network rm s1-lan s1-outside > /dev/null
+
+# ---------------------------------------------------------------- T15 archive queue overflow
+section "T15 Long off-site outage that fills the archive queue: dropped WAL is never reported as a full recovery"
+dc stop s3test > /dev/null
+for i in $(seq 1 14); do
+    q "INSERT INTO s1test.markers (label) VALUES ('overflow-$i')"
+    q "SELECT pg_switch_wal()" > /dev/null
+done
+start=$(date +%s)
+until [ -n "$("$ROOT/deploy/bin/wal-gap" 2> /dev/null)" ] || [ $(($(date +%s) - start)) -gt 600 ]; do sleep 10; done
+gap="$("$ROOT/deploy/bin/wal-gap" 2> /dev/null)"
+expect "pgBackRest dropped WAL after the queue (128 MiB in this test) filled ($gap)" test -n "$gap"
+dc start s3test > /dev/null
+sleep 3
+expect "pgBackRest check passes again: on its own it would look healthy" dc exec -T -u postgres db pgbackrest --stanza=districom check
+gap_line="$("$ROOT/deploy/bin/monitor" 2> /dev/null | grep 'WAL GAP')"
+expect "monitor reports the gap as a FAIL ($gap_line)" sh -c "echo '$gap_line' | grep -q '^FAIL  WAL GAP'"
+expect "smoke test fails while the gap is open" sh -c "! '$ROOT/deploy/bin/smoke'"
+"$ROOT/deploy/bin/restore-drill" --repo 2 --network districom_default > "$TEST_ROOT/drill-gap.txt" 2>&1
+rc=$?
+expect "drill from repo2 across the gap: INCOMPLETE, not identical (exit $rc)" sh -c "[ $rc = 3 ] && grep -q 'result=INCOMPLETE' '$TEST_ROOT/drill-gap.txt'"
+expect "the drill names the cause" grep -q 'recovery ended before configured recovery target was reached' "$TEST_ROOT/drill-gap.txt"
+expect "remedy: a full backup in every repository" "$ROOT/deploy/bin/backup" full "after WAL gap"
+expect "the gap is closed for restores after that backup" sh -c "[ -z \"\$('$ROOT/deploy/bin/wal-gap')\" ]"
+expect "drill from repo2 after the remedy: identical" "$ROOT/deploy/bin/restore-drill" --repo 2 --network districom_default
+expect "monitor reports no FAIL again" "$ROOT/deploy/bin/monitor"
 
 # ---------------------------------------------------------------- summary
 printf '\n%s passed, %s failed\n' "$pass" "$failed" | tee -a "$REPORT"
