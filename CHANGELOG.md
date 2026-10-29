@@ -4,6 +4,14 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Changed — R9‑4: migración `0031`, guardas del ledger más rápidas
+- **Aprobada por Enzo el 2026-10-29.** Mismas reglas, sin tocar datos; `downgrade` borra el índice y restaura exactamente las funciones de `0013` y `0024`.
+- `assert_outlet_advances`: compara el cierre vigente con `=` en lugar de `IS NOT DISTINCT FROM`, así usa el índice de `settlement_closing_remittances` (`close_operation_id` es `NOT NULL` y una rendición `CLOSED` siempre tiene cierre vigente: mismo resultado).
+- `check_account_not_negative`: para un débito de los últimos 31 días, saldo al cierre de su día = total − lo posterior, y cada día posterior suma lo suyo; un débito más viejo conserva la pasada única de `0013` (medido: empatan alrededor de 31 días hacia atrás). Mismo saldo mínimo, misma fecha y mismo mensaje.
+- Índice `ix_ledger_entries_account_id_include_amount`: el total de una cuenta es un index‑only scan.
+- **Medido antes/después sobre el mismo dataset stress** (`perf/guards.py`, p95): entrega a cuenta de boca 1.340 → 129 ms, cierre de boca 953 → 171 ms, pago en efectivo hoy 203 → 129 ms, a 90 días 291 → 266 ms, `account_balance` 25,5 → 13,0 ms. Lecturas sin cambios.
+- **R9‑4 sin schema aprobada** (PR #51 mergeado `efc5d06`).
+
 ### Changed — R9‑4: performance con evidencia (sin migración)
 - **Medición reproducible** (`backend/perf/`, `docs/PERFORMANCE.md`): generador de un año de Rendiciones por la API de la app en una base separada (realista: 24,6k operaciones y 84k asientos; stress: 96k y 332k) y benchmark HTTP local con mediana, p95, máximo, queries por request y `EXPLAIN (ANALYZE, BUFFERS)`. Nunca corre en CI.
 - **Saldos sin recorrer el libro entero:** quince pantallas sumaban todos los saldos solo para mostrar el nombre de una cuenta; ahora leen las cuentas (`ledger.accounts()`). El saldo de una cuenta suma solo esa cuenta; el saldo a una fecha del último mes es el total menos lo fechado después (mismo número). El control de fondos de un débito lee solo los días posteriores a su fecha. El Cierre del día calcula la apertura como el cierre menos lo que movió el día.
