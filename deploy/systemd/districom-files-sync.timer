@@ -1,0 +1,9 @@
+[Unit]
+Description=DistriCom: files-sync every 5 minutes (RPO of files outside the database)
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,9 @@
+[Unit]
+Description=DistriCom: pgBackRest %i backup (local and off-site)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=@ROOT@
+ExecStart=@ROOT@/deploy/bin/backup %i
