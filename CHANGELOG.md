@@ -4,6 +4,12 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Changed — CI más rápido (CI‑1, CI‑2, CI‑3, aprobados por Enzo el 2026-10-29)
+- **CI‑1:** E2E y el smoke de Docker Compose dependen solo del job Frontend y corren en paralelo con el Backend. Todos los jobs siguen siendo requeridos y con el mismo nombre.
+- **CI‑2:** la limpieza entre tests es un `TRUNCATE` sin `CASCADE` de una lista exacta (suma cuentas, bocas, responsables, bancos, empleados, sus funciones y combustible de cierre, que antes vaciaba el `CASCADE`). Dos tests mantienen la lista completa y prueban que el reset repone las semillas.
+- **CI‑3:** `ARGON2_PROFILE=test` (solo con `APP_ENV=test`, fijado en `tests/conftest.py`) hashea con Argon2id de costo mínimo; dev y producción conservan los parámetros RFC 9106. Mismo formato de hash y misma verificación.
+- **Medido en local, misma máquina y corridas seguidas:** suite backend 1.164 s → 834–841 s (−28 %); setup 272 → 181 s, test 421 → 281 s, teardown 468 → 368 s. El teardown solo: 329 → 282 ms por test.
+
 ### Changed — R9‑4: performance con evidencia (sin migración)
 - **Medición reproducible** (`backend/perf/`, `docs/PERFORMANCE.md`): generador de un año de Rendiciones por la API de la app en una base separada (realista: 24,6k operaciones y 84k asientos; stress: 96k y 332k) y benchmark HTTP local con mediana, p95, máximo, queries por request y `EXPLAIN (ANALYZE, BUFFERS)`. Nunca corre en CI.
 - **Saldos sin recorrer el libro entero:** quince pantallas sumaban todos los saldos solo para mostrar el nombre de una cuenta; ahora leen las cuentas (`ledger.accounts()`). El saldo de una cuenta suma solo esa cuenta; el saldo a una fecha del último mes es el total menos lo fechado después (mismo número). El control de fondos de un débito lee solo los días posteriores a su fecha. El Cierre del día calcula la apertura como el cierre menos lo que movió el día.
