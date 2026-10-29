@@ -4,7 +4,9 @@ These tests write raw SQL on purpose: application code must never do this (singl
 """
 
 from collections.abc import Iterator
-from datetime import timedelta
+from datetime import date, timedelta
+from decimal import Decimal
+from random import Random
 from uuid import uuid4
 
 import pytest
@@ -240,3 +242,31 @@ def test_retroactive_raw_withdrawal_cannot_leave_a_past_day_negative(conn: Conne
     assert "negative balance" in message
     assert day2.isoformat() in message
     _committed(conn, ("main_cash", "-20000"), ("change_cash", "20000"), business_date=day2)
+
+
+def test_not_negative_trigger_matches_a_plain_end_of_day_check(conn: Connection) -> None:
+    """0031 reads only the days after a debit; it must refuse exactly what a plain check of every end-of-day balance
+    from the debit's date on refuses, and name the same lowest balance and day (the earliest one on a tie)."""
+    rng = Random(31)  # noqa: S311 - a reproducible sequence, never a secret
+    start = today() - timedelta(days=20)
+    booked: list[tuple[date, Decimal]] = []
+    _committed(
+        conn, ("main_cash", "500.00"), ("opening_balance", "-500.00"), type="OPENING_BALANCE", business_date=start
+    )
+    booked.append((start, Decimal("500.00")))
+    refusals = 0
+    for _ in range(120):
+        day = start + timedelta(days=rng.randint(0, 20))
+        amount = Decimal(rng.choice(["-150.00", "-80.50", "-40.00", "-12.25", "25.00", "60.00", "130.75"]))
+        days = sorted({d for d, _ in booked} | {day})
+        balances = [(sum((m for d, m in [*booked, (day, amount)] if d <= when), Decimal(0)), when) for when in days]
+        lowest, lowest_day = min((b, when) for b, when in balances if when >= day)
+        legs = (("main_cash", str(amount)), ("adjustment", str(-amount)))
+        if amount < 0 and lowest < 0:
+            message = _fails_at_commit(conn, *legs, type="ADJUSTMENT", description="x", business_date=day)
+            assert f"negative balance ({lowest} on {lowest_day.isoformat()})" in message
+            refusals += 1
+        else:
+            _committed(conn, *legs, type="ADJUSTMENT", description="x", business_date=day)
+            booked.append((day, amount))
+    assert 10 < refusals < 110

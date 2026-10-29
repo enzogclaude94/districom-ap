@@ -311,6 +311,8 @@ class LedgerEntry(IdMixin, Base):
     __table_args__ = (
         CheckConstraint("amount <> 0", name="amount_not_zero"),
         Index("ix_ledger_entries_account_id_operation_id", "account_id", "operation_id"),
+        # An account's total as an index-only scan (R9-4, 0031): funds checks and the not-negative trigger.
+        Index("ix_ledger_entries_account_id_include_amount", "account_id", postgresql_include=["amount"]),
         {"schema": SCHEMA},
     )
 
