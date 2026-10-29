@@ -10,6 +10,8 @@ os.environ["DATABASE_URL"] = os.environ.get(
 )
 os.environ["SECRET_KEY"] = "test-secret-key-0123456789abcdef0123456789"
 os.environ["APP_ENV"] = "test"
+# The cheapest Argon2 cost, explicitly and only for tests (app/platform/auth/security.py).
+os.environ["ARGON2_PROFILE"] = "test"
 os.environ["COOKIE_SECURE"] = "false"
 os.environ["CORS_ORIGINS"] = ""
 
