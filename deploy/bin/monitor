@@ -56,18 +56,18 @@ def segno(n): return int(n[8:16], 16) * 256 + int(n[16:24], 16)
 cur, mx = sys.argv[1], sys.argv[2]
 print(max(segno(cur) - segno(mx) - 1, 0) if cur and mx else -1)' "$current" "$max")
     since_file="$STATE_DIR/wal-behind-repo$repo"
-    if [ "$behind" -lt 0 ]; then
-        bad "repo$repo: WAL archive state unknown"
-    elif [ "$behind" -eq 0 ]; then
+    if [ "$behind" -eq 0 ]; then
         rm -f "$since_file"
         ok "repo$repo: WAL up to date"
     else
+        # Behind, or unreachable (an Internet cut for repo2): a warning first, a failure after 15 minutes.
         [ -f "$since_file" ] || echo "$now" > "$since_file"
         lag=$((now - $(cat "$since_file")))
+        if [ "$behind" -lt 0 ]; then what="unreachable"; else what="behind by $behind segments"; fi
         if [ "$lag" -gt 900 ]; then
-            bad "repo$repo: WAL behind by $behind segments for $((lag / 60)) min: RPO at risk"
+            bad "repo$repo: WAL $what for $((lag / 60)) min: RPO at risk"
         else
-            warn "repo$repo: WAL behind by $behind segments for $((lag / 60)) min"
+            warn "repo$repo: WAL $what for $((lag / 60)) min"
         fi
     fi
 done

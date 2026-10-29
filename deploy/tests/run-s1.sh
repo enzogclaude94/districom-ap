@@ -208,7 +208,7 @@ expect "app answers during the cut" caddy_curl -f -o /dev/null "https://$HOST/ap
 failed_after="$(q 'SELECT (last_failed_time > coalesce(last_archived_time, last_failed_time - interval '"'1 s'"'))::text FROM pg_stat_archiver')"
 expect "archiver reports the failure" test "$failed_after" = true
 behind="$("$ROOT/deploy/bin/monitor" 2> /dev/null | grep 'repo2: WAL')"
-expect "monitor sees repo2 behind ($behind)" sh -c "echo '$behind' | grep -q 'behind'"
+expect "monitor warns that repo2 is unreachable or behind ($behind)" sh -c "echo '$behind' | grep -Eq '^WARN .*(unreachable|behind)'"
 dc start s3test > /dev/null
 sleep 3
 expect "after the cut, pgBackRest check passes (backlog archived)" dc exec -T -u postgres db pgbackrest --stanza=districom check
