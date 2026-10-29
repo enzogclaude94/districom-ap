@@ -11,9 +11,11 @@ R9-4 (Enzo's approval of 0031): the same rules, measured faster. Nothing about d
   `close_operation_id` is NOT NULL, and a CLOSED settlement always has its `current_close_operation_id`; with a NULL
   neither form matches a row.
 - `check_account_not_negative` keeps 0013's rule (no end-of-day balance from the debit's date on below zero, the
-  bank's CHEQUE_REJECTION aside) but reads only the days after the debit: the balance at the end of the debit's day
-  is the account's total minus what is dated later (an entry's date is its operation's, which never changes), and
-  each later day adds its own sum. The lowest balance, its day and the message are the same as before.
+  bank's CHEQUE_REJECTION aside). For a debit of the last 31 days it reads only the days after it: the balance at
+  the end of the debit's day is the account's total minus what is dated later (an entry's date is its operation's,
+  which never changes), and each later day adds its own sum. An older debit keeps 0013's single pass, which is
+  cheaper when most of the history comes after it (measured: they break even around 31 days back, as the app's
+  balances in R9-4). The lowest balance, its day and the message are the same either way.
 - `ix_ledger_entries_account_id_include_amount`: an account's total is an index-only scan.
 
 The downgrade drops the index and restores 0013's and 0024's functions exactly.
@@ -38,8 +40,6 @@ DECLARE
     since date;
     lowest numeric;
     lowest_day date;
-    total numeric;
-    later numeric;
 BEGIN
     IF NEW.amount > 0 THEN
         RETURN NULL;
@@ -54,21 +54,39 @@ BEGIN
     IF account_kind = 'BANK' AND operation_type = 'CHEQUE_REJECTION' THEN
         RETURN NULL;
     END IF;
-    SELECT coalesce(sum(amount), 0) INTO total FROM settlements.ledger_entries WHERE account_id = NEW.account_id;
-    SELECT coalesce(sum(e.amount), 0) INTO later FROM settlements.ledger_entries e
-        JOIN settlements.financial_operations o ON o.id = e.operation_id
-        WHERE e.account_id = NEW.account_id AND o.business_date > since;
-    SELECT day, balance INTO lowest_day, lowest FROM (
-        SELECT since AS day, total - later AS balance
-        UNION ALL
-        SELECT o.business_date AS day, total - later + sum(sum(e.amount)) OVER (ORDER BY o.business_date) AS balance
-        FROM settlements.ledger_entries e
-        JOIN settlements.financial_operations o ON o.id = e.operation_id
-        WHERE e.account_id = NEW.account_id AND o.business_date > since
-        GROUP BY o.business_date
-    ) daily
-    ORDER BY balance, day
-    LIMIT 1;
+    IF since >= current_date - 31 THEN
+        -- A recent debit: the balance at the end of its day is the total minus what is dated later, and each later
+        -- day adds its own sum. Only the later days are joined with their operations.
+        WITH later AS (
+            SELECT o.business_date AS day, sum(e.amount) AS moved
+            FROM settlements.ledger_entries e
+            JOIN settlements.financial_operations o ON o.id = e.operation_id
+            WHERE e.account_id = NEW.account_id AND o.business_date > since
+            GROUP BY o.business_date
+        ), closing AS (
+            SELECT (SELECT coalesce(sum(amount), 0) FROM settlements.ledger_entries WHERE account_id = NEW.account_id)
+                - (SELECT coalesce(sum(moved), 0) FROM later) AS balance
+        )
+        SELECT day, balance INTO lowest_day, lowest FROM (
+            SELECT since AS day, closing.balance FROM closing
+            UNION ALL
+            SELECT later.day, closing.balance + sum(later.moved) OVER (ORDER BY later.day) FROM later, closing
+        ) daily
+        ORDER BY balance, day
+        LIMIT 1;
+    ELSE
+        -- An older debit has most of the history after it: one pass over the whole history is cheaper (0013's query).
+        SELECT day, balance INTO lowest_day, lowest FROM (
+            SELECT o.business_date AS day, sum(sum(e.amount)) OVER (ORDER BY o.business_date) AS balance
+            FROM settlements.ledger_entries e
+            JOIN settlements.financial_operations o ON o.id = e.operation_id
+            WHERE e.account_id = NEW.account_id
+            GROUP BY o.business_date
+        ) daily
+        WHERE day >= since
+        ORDER BY balance, day
+        LIMIT 1;
+    END IF;
     IF lowest < 0 THEN
         RAISE EXCEPTION 'account % cannot have a negative balance (% on %)', NEW.account_id, lowest, lowest_day
             USING ERRCODE = 'check_violation';
