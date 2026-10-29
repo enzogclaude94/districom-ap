@@ -20,6 +20,12 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 - Host: `deploy/host/install.sh` (Ubuntu 24.04, Docker, Tailscale, ufw, timers) y `firewall.sh` (cadena `DOCKER-USER`: 80/443 solo desde la LAN y Tailscale). Timers de systemd. Política de Tailscale versionada con mínimo privilegio y sin Funnel. Split DNS opcional (CoreDNS).
 - Pruebas: `deploy/tests/run-s1.sh` sobre un stack descartable con datos ficticios.
 - Docs: ADR 013, `docs/OPERATIONS.md`, `docs/SERVER_REQUIREMENTS.md`, ARCHITECTURE §10, SECURITY, README y el carril «Servidor» del ROADMAP.
+- **Revisión de Enzo (2026-10-29), antes del merge:**
+  - **Disco de backup:** `deploy/bin/backup-disk-init` lo marca una vez; `up`, `backup`, `dump`, `files-sync`, `update`, `rollback --restore-db` y el simulacro desde `repo1` se niegan sin un disco montado y marcado, y el monitor falla. `install.sh` se detiene sin el disco. Las pruebas usan un tmpfs montado (o `BACKUP_REQUIRE_MOUNTPOINT=0`).
+  - **Red:** `LAN_SUBNET` solo privada, `LAN_INTERFACE` opcional, reglas solo para puertos publicados (nada directo a un contenedor), cadena IPv6, firewall aplicado antes de Docker, `CADDY_BIND_IP` solo IPv4, `ufw` con IPv6.
+  - **Restauraciones:** `verify.sql` hashea cada fila de cada tabla de todos los schemas más la estructura; el simulacro compara en un punto de restauración con nombre, corre `pg_amcheck` y devuelve INCOMPLETE si no llega.
+  - **Reversión:** `rollback --restore-db` informa qué se perdería, exige la etiqueta del backup y guarda lo descartado en un backup *pre-rollback*.
+  - **Cola de WAL:** el WAL descartado por `archive-push-queue-max` se detecta (monitor y smoke en FAIL) hasta un backup completo nuevo; `deploy/bin/wal-gap`.
 
 ### Changed — CI más rápido (CI‑1, CI‑2, CI‑3, aprobados por Enzo el 2026-10-29)
 - **CI‑1:** E2E y el smoke de Docker Compose dependen solo del job Frontend y corren en paralelo con el Backend. Todos los jobs siguen siendo requeridos y con el mismo nombre.

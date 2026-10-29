@@ -55,7 +55,7 @@ Cada fase empieza solo con aprobación explícita de Enzo y termina con un infor
 | Etapa | Nombre | Estado | Depende de |
 |---|---|---|---|
 | S0 | Arquitectura del servidor central, multiusuario y con acceso remoto | **DONE** (informe S0 v2 aprobado por Enzo el 2026-10-29 con las decisiones D1–D9) | — |
-| S1 | Infraestructura de despliegue (Caddy, Tailscale, pgBackRest, scripts, runbook), sin despliegue productivo | IN_PROGRESS (autorizada por Enzo el 2026-10-29; un PR solo de infraestructura) | S0 |
+| S1 | Infraestructura de despliegue (Caddy, Tailscale, pgBackRest, scripts, runbook), sin despliegue productivo | IN_PROGRESS (autorizada por Enzo el 2026-10-29; PR #54 en revisión final, sin merge) | S0 |
 | S2 | Plataforma: administración de usuarios, contraseñas y sesiones; IP real y modo de acceso; verificación de `Origin` | PLANNED | S1 |
 | S3 | Piloto en el equipo real: dominio, Tailscale, bucket externo, pruebas LAN y remotas, simulacro de pérdida total | PLANNED (requiere hardware, dominio y contrataciones aprobadas) | S1 · S2 |
 | S4 | Producción de Rendiciones en paralelo con el método actual | PLANNED | S3 |
