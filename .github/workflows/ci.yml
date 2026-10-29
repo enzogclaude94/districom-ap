@@ -70,7 +70,8 @@ jobs:
 
   e2e:
     name: E2E (critical flows)
-    needs: [backend, frontend]
+    # Only the frontend gate: E2E overlaps the backend job (Enzo, CI-1). Every job stays required.
+    needs: [frontend]
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -139,7 +140,8 @@ jobs:
 
   compose:
     name: Docker Compose smoke test
-    needs: [backend, frontend]
+    # Overlaps the backend job too (CI-1).
+    needs: [frontend]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

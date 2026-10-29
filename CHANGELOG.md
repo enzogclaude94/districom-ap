@@ -4,8 +4,14 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Changed — CI más rápido (CI‑1, CI‑2, CI‑3, aprobados por Enzo el 2026-10-29)
+- **CI‑1:** E2E y el smoke de Docker Compose dependen solo del job Frontend y corren en paralelo con el Backend. Todos los jobs siguen siendo requeridos y con el mismo nombre.
+- **CI‑2:** la limpieza entre tests es un `TRUNCATE` sin `CASCADE` de una lista exacta (suma cuentas, bocas, responsables, bancos, empleados, sus funciones y combustible de cierre, que antes vaciaba el `CASCADE`). Dos tests mantienen la lista completa y prueban que el reset repone las semillas.
+- **CI‑3:** `ARGON2_PROFILE=test` (solo con `APP_ENV=test`, fijado en `tests/conftest.py`) hashea con Argon2id de costo mínimo; dev y producción conservan los parámetros RFC 9106. Mismo formato de hash y misma verificación.
+- **Medido en local, misma máquina y corridas seguidas:** suite backend 1.164 s → 834–841 s (−28 %); setup 272 → 181 s, test 421 → 281 s, teardown 468 → 368 s. El teardown solo: 329 → 282 ms por test.
+
 ### Changed — R9‑4: migración `0031`, guardas del ledger más rápidas
-- **Aprobada por Enzo el 2026-10-29.** Mismas reglas, sin tocar datos; `downgrade` borra el índice y restaura exactamente las funciones de `0013` y `0024`.
+- **Aprobada por Enzo el 2026-10-29; PR #52 mergeado `68297c7`, `0031` congelada.** Mismas reglas, sin tocar datos; `downgrade` borra el índice y restaura exactamente las funciones de `0013` y `0024`.
 - `assert_outlet_advances`: compara el cierre vigente con `=` en lugar de `IS NOT DISTINCT FROM`, así usa el índice de `settlement_closing_remittances` (`close_operation_id` es `NOT NULL` y una rendición `CLOSED` siempre tiene cierre vigente: mismo resultado).
 - `check_account_not_negative`: para un débito de los últimos 31 días, saldo al cierre de su día = total − lo posterior, y cada día posterior suma lo suyo; un débito más viejo conserva la pasada única de `0013` (medido: empatan alrededor de 31 días hacia atrás). Mismo saldo mínimo, misma fecha y mismo mensaje.
 - Índice `ix_ledger_entries_account_id_include_amount`: el total de una cuenta es un index‑only scan.
