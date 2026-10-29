@@ -298,8 +298,8 @@ Son procesos del módulo comercial. Se ejecutan como comandos CLI (`python -m ap
 
 ## 10. Despliegue y backups
 
-- Producción V1: un host con Docker Compose (db, backend, frontend) detrás de un reverse proxy con TLS (Caddy).
-- Backups: `pg_dump` diario comprimido, retención 14 diarios + 8 semanales, copia fuera del host; **prueba de restore mensual** documentada en README (script `scripts/backup.sh` / `scripts/restore.sh`).
+- Producción (ADR 013): servidor propio en la distribuidora con Docker Compose, `docker-compose.yml` + `deploy/docker-compose.prod.yml`. **Caddy** es la única puerta (HTTPS, un solo nombre para la LAN y para el acceso remoto por **Tailscale**; `/api/*` directo al backend, que confía en `X-Forwarded-For` solo desde Caddy). Backend, frontend y base sin puertos publicados. Migraciones como paso explícito de `deploy/bin/update`, después de un backup.
+- Backups (ADR 013): **pgBackRest** con WAL continuo (`archive_timeout` 60 s) a un disco de backup (`repo1`) y a un bucket S3 compatible fuera del local (`repo2`), ambos cifrados. Completo semanal + diferencial diario; archivos fuera de la base (importaciones) cada 5 min. Simulacros de restauración con `deploy/bin/restore-drill` (mensual desde el disco, trimestral solo desde fuera del local). Operación en `docs/OPERATIONS.md`. Los `scripts/backup.sh` / `restore.sh` quedan para desarrollo.
 
 ## 11. Performance
 

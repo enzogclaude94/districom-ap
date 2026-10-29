@@ -4,6 +4,23 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Added — S1: infraestructura del servidor propio (ADR 013)
+- **Sin despliegue productivo ni cambios de código de la app**: `docker-compose.yml`, Dockerfiles, workflows, reglas de negocio y migraciones intactos. Todo lo nuevo está en `deploy/` y en docs.
+- `deploy/docker-compose.prod.yml`:
+  - **Caddy** es la única puerta: HTTPS, un nombre para la LAN y para Tailscale, `/api/*` directo al backend, `/api/docs` no servido, otros `Host` sin respuesta, HSTS.
+  - Backend, frontend y base sin puertos publicados.
+  - El backend confía en `X-Forwarded-For` solo desde Caddy, así que las sesiones registran la IP real.
+  - El backend no migra al arrancar.
+  - Volumen `uploads` para las importaciones de Comercial.
+- **PostgreSQL 17 + pgBackRest** (`deploy/postgres`): WAL continuo (`archive_timeout` 60 s) a un disco de backup y a un bucket S3 compatible fuera del local, cifrados. Completo semanal y diferencial diario. **files-sync** copia archivos y dumps cada 5 min, cifrados con rclone crypt.
+- Scripts en `deploy/bin`:
+  - `init-env`, `up`, `migrate`, `backup`, `dump`, `files-sync`, `smoke` y `monitor` (HTTPS, discos, RAID, WAL, backups, certificado, Tailscale; alerta configurable);
+  - `restore-drill` (restauración descartable comparada con producción por huella de la base, desde el disco o **solo desde fuera del local**, y PITR);
+  - `update` (backup etiquetado → migración → smoke) y `rollback [--restore-db]`.
+- Host: `deploy/host/install.sh` (Ubuntu 24.04, Docker, Tailscale, ufw, timers) y `firewall.sh` (cadena `DOCKER-USER`: 80/443 solo desde la LAN y Tailscale). Timers de systemd. Política de Tailscale versionada con mínimo privilegio y sin Funnel. Split DNS opcional (CoreDNS).
+- Pruebas: `deploy/tests/run-s1.sh` sobre un stack descartable con datos ficticios.
+- Docs: ADR 013, `docs/OPERATIONS.md`, `docs/SERVER_REQUIREMENTS.md`, ARCHITECTURE §10, SECURITY, README y el carril «Servidor» del ROADMAP.
+
 ### Changed — R9‑4: migración `0031`, guardas del ledger más rápidas
 - **Aprobada por Enzo el 2026-10-29.** Mismas reglas, sin tocar datos; `downgrade` borra el índice y restaura exactamente las funciones de `0013` y `0024`.
 - `assert_outlet_advances`: compara el cierre vigente con `=` en lugar de `IS NOT DISTINCT FROM`, así usa el índice de `settlement_closing_remittances` (`close_operation_id` es `NOT NULL` y una rendición `CLOSED` siempre tiene cierre vigente: mismo resultado).

@@ -36,13 +36,12 @@
 		max_size {$CADDY_MAX_BODY:30MB}
 	}
 
-	# The API docs are a development aid: not served by the production entry point.
-	@apidocs path /api/docs /api/docs/* /api/v1/openapi.json
-	respond @apidocs 404
-
 	# The API goes straight to the backend: one hop less, and X-Forwarded-For set by Caddy (the only proxy the
 	# backend trusts, FORWARDED_ALLOW_IPS) carries the real client IP. Caddy ignores X-Forwarded-For sent by clients.
 	handle /api/* {
+		# The API docs are a development aid: not served by the production entry point.
+		@apidocs path /api/docs /api/docs/* /api/v1/openapi.json
+		respond @apidocs 404
 		reverse_proxy backend:8000
 	}
 	handle {
