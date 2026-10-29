@@ -42,9 +42,17 @@ def create_session(db: Session, user: User, settings: Settings, ip: str | None, 
     return token
 
 
+def _now() -> datetime:
+    return datetime.now(UTC)
+
+
 def resolve_session(db: Session, token: str, settings: Settings) -> User | None:
-    """Return the active user for a token, sliding the idle expiry. None if invalid."""
-    now = datetime.now(UTC)
+    """Return the active user for a token, sliding the idle expiry. None if invalid.
+
+    Every check uses the persisted `last_seen_at`, and only a session that passed all of them is touched, at most
+    once per `session_touch_seconds`: the conditional UPDATE writes for one of any number of concurrent requests
+    (the others no longer match once it commits) and never for a session that expired in between."""
+    now = _now()
     row = db.execute(
         select(UserSession, User)
         .join(User, User.id == UserSession.user_id)
@@ -53,11 +61,25 @@ def resolve_session(db: Session, token: str, settings: Settings) -> User | None:
     if row is None:
         return None
     session, user = row
-    idle_limit = session.last_seen_at + timedelta(hours=settings.session_idle_hours)
-    if not user.active or now >= session.expires_at or now >= idle_limit:
+    idle = timedelta(hours=settings.session_idle_hours)
+    if not user.active or now >= session.expires_at or now >= session.last_seen_at + idle:
         return None
-    session.last_seen_at = now
-    db.commit()
+    touch = timedelta(seconds=settings.session_touch_seconds)
+    if now - session.last_seen_at >= touch:
+        touched = db.execute(
+            update(UserSession)
+            .where(
+                UserSession.id == session.id,
+                UserSession.revoked_at.is_(None),
+                UserSession.expires_at > now,
+                UserSession.last_seen_at > now - idle,
+                UserSession.last_seen_at <= now - touch,
+            )
+            .values(last_seen_at=now)
+            .execution_options(synchronize_session=False)
+        )
+        if touched.rowcount:  # type: ignore[attr-defined]
+            db.commit()
     return user
 
 
