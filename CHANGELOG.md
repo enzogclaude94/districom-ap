@@ -4,6 +4,12 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Changed — R9‑5‑1: sesiones y límite de login
+- **`last_seen_at` como mucho una vez por minuto por sesión** (`SESSION_TOUCH_SECONDS`, 60, máximo 60). Cada request valida revocación, usuario activo, expiración absoluta e inactividad con el valor guardado; solo si todo pasa y ya pasaron 60 s, un `UPDATE` condicional (`last_seen_at <= now − 60 s`, sesión no revocada ni vencida) lo actualiza y hace commit. Con requests simultáneos uno solo escribe; los demás no hacen commit. Medido: de 1 commit y 1 `UPDATE` por request a 0 dentro de la ventana (`/auth/me` 3 → 2 queries, Cajas 5 → 4). Duración máxima, inactividad, logout, revocación, cookies, CSRF y permisos sin cambios; la inactividad puede vencer hasta 60 s antes, nunca después.
+- **Límite de login:** las claves IP+email cuyas fallas salieron de la ventana se descartan (y preguntar por una clave ya no la guarda), así la memoria no crece sin límite. Mismos `LOGIN_MAX_ATTEMPTS`, `LOGIN_WINDOW_SECONDS` y clave IP+email.
+- `docs/SECURITY.md`: `SECRET_KEY` hoy no es una protección activa (no firma sesiones, cookies ni `preview_token`).
+- **R9‑4 DONE** (aprobada por Enzo el 2026-10-29).
+
 ### Changed — CI más rápido (CI‑1, CI‑2, CI‑3, aprobados por Enzo el 2026-10-29)
 - **CI‑1:** E2E y el smoke de Docker Compose dependen solo del job Frontend y corren en paralelo con el Backend. Todos los jobs siguen siendo requeridos y con el mismo nombre.
 - **CI‑2:** la limpieza entre tests es un `TRUNCATE` sin `CASCADE` de una lista exacta (suma cuentas, bocas, responsables, bancos, empleados, sus funciones y combustible de cierre, que antes vaciaba el `CASCADE`). Dos tests mantienen la lista completa y prueban que el reset repone las semillas.
