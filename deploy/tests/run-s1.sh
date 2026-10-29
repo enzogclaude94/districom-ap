@@ -92,6 +92,8 @@ EOF
 fi
 # shellcheck source=deploy/bin/lib.sh
 source "$ROOT/deploy/bin/lib.sh"
+# lib.sh turns on errexit for the scripts; the tests record failures and go on.
+set +e
 
 # ---------------------------------------------------------------- T0 static
 section "T0 Static checks"
@@ -102,7 +104,7 @@ prod_ports="$(docker compose --project-directory "$ROOT" -f "$ROOT/docker-compos
 expect "in production only caddy publishes ports (got: $prod_ports)" test "$prod_ports" = caddy
 expect "development compose unchanged and valid" docker compose --project-directory "$ROOT" -f "$ROOT/docker-compose.yml" config -q
 expect "Caddyfile valid (internal TLS)" docker run --rm -e DISTRICOM_HOST=$HOST -e CADDY_TLS_MODE=internal districom/caddy:current caddy validate --config /etc/caddy/Caddyfile
-expect "Caddyfile valid (cloudflare DNS-01)" docker run --rm -e DISTRICOM_HOST=$HOST -e CADDY_TLS_MODE=cloudflare -e CLOUDFLARE_API_TOKEN=dummy districom/caddy:current caddy validate --config /etc/caddy/Caddyfile
+expect "Caddyfile valid (cloudflare DNS-01)" docker run --rm -e DISTRICOM_HOST=$HOST -e CADDY_TLS_MODE=cloudflare -e CLOUDFLARE_API_TOKEN=s1-dummy-token-0123456789abcdefghijklmnopq districom/caddy:current caddy validate --config /etc/caddy/Caddyfile
 expect "Tailscale policy parses (HuJSON)" python3 -c 'import re,json,sys; s=open(sys.argv[1]).read(); s=re.sub(r"^\s*//.*$","",s,flags=re.M); json.loads(re.sub(r",(\s*[}\]])",r"\1",s))' "$ROOT/deploy/tailscale/policy.hujson"
 expect "host install script (dry run)" "$ROOT/deploy/host/install.sh" --dry-run
 
@@ -120,11 +122,11 @@ expect "repo2 content is encrypted (no PostgreSQL file names in clear)" sh -c "!
 section "T2 Exposure: what answers and where"
 published="$(docker ps --filter label=com.docker.compose.project=districom --format '{{.Label "com.docker.compose.service"}} {{.Ports}}' | awk '/->/ {print $1}' | sort | tr '\n' ' ')"
 expect "running stack publishes only caddy (+ the test-only db port) — got: $published" test "$published" = "caddy db "
-expect "backend port 8000 not reachable from the host" sh -c "! curl -s --max-time 3 http://127.0.0.1:8000/api/v1/health"
-expect "frontend port 3000 not reachable from the host" sh -c "! curl -s --max-time 3 http://127.0.0.1:3000/"
-expect "unknown Host over HTTP gets no answer" sh -c "! curl -s --max-time 5 -H 'Host: evil.example' http://127.0.0.1/ -o /dev/null"
-expect "unknown name over HTTPS: TLS refused" sh -c "! curl -sk --max-time 5 --resolve evil.example:443:127.0.0.1 https://evil.example/"
-expect "bare IP over HTTPS: TLS refused" sh -c "! curl -sk --max-time 5 https://127.0.0.1/"
+expect "backend port 8000 not reachable from the host" sh -c "! curl -s --noproxy "*" --max-time 3 http://127.0.0.1:8000/api/v1/health"
+expect "frontend port 3000 not reachable from the host" sh -c "! curl -s --noproxy "*" --max-time 3 http://127.0.0.1:3000/"
+expect "unknown Host over HTTP gets no answer" sh -c "! curl -s --noproxy "*" --max-time 5 -H 'Host: evil.example' http://127.0.0.1/ -o /dev/null"
+expect "unknown name over HTTPS: TLS refused" sh -c "! curl -sk --noproxy "*" --max-time 5 --resolve evil.example:443:127.0.0.1 https://evil.example/"
+expect "bare IP over HTTPS: TLS refused" sh -c "! curl -sk --noproxy "*" --max-time 5 https://127.0.0.1/"
 cert_cn="$(echo | openssl s_client -connect 127.0.0.1:443 -servername $HOST 2> /dev/null | openssl x509 -noout -ext subjectAltName 2> /dev/null | tr -d ' ' | tail -n1)"
 expect "certificate names $HOST ($cert_cn)" sh -c "echo '$cert_cn' | grep -q 'DNS:$HOST'"
 
@@ -132,7 +134,7 @@ expect "certificate names $HOST ($cert_cn)" sh -c "echo '$cert_cn' | grep -q 'DN
 section "T5 Fictitious data (backend/perf generator through the app's own API)"
 pw="$(sed -n 's/^POSTGRES_PASSWORD=//p' "$ROOT/.env")"
 gen_log="$ROOT/deploy/state/s1-generator.log"
-expect "generator: 20 business days of Rendiciones" sh -c "cd '$ROOT/backend' && PERF_DATABASE_URL='postgresql+psycopg://districom:$pw@127.0.0.1:55432/districom_perf_s1' uv run --frozen python -m perf.generate --scale 1 --workers 1 --days 20 --seed 11 > '$gen_log' 2>&1"
+expect "generator: 20 business days of Rendiciones" env -i PATH="$PATH" HOME="$HOME" sh -c "cd '$ROOT/backend' && PERF_DATABASE_URL='postgresql+psycopg://districom:$pw@127.0.0.1:55432/districom_perf_s1' uv run --frozen python -m perf.generate --scale 1 --workers 1 --days 20 --seed 11 > '$gen_log' 2>&1"
 entries="$(q 'SELECT count(*) FROM settlements.ledger_entries')"
 expect "ledger has fictitious entries ($entries)" test "${entries:-0}" -gt 100
 
@@ -146,7 +148,7 @@ caddy_curl -o /dev/null -D "$headers" -c "$jar" -H 'Content-Type: application/js
 expect "login over HTTPS through Caddy (200)" grep -q '^HTTP/[0-9.]* 200' "$headers"
 expect "session cookie is Secure, HttpOnly, SameSite=Lax" sh -c "grep -i '^set-cookie:' '$headers' | grep -i secure | grep -i httponly | grep -qi 'samesite=lax'"
 expect "authenticated API call with the cookie" caddy_curl -f -b "$jar" -o /dev/null "https://$HOST/api/v1/auth/me"
-expect "mutating call without the CSRF header is refused (403)" sh -c "[ \"\$(curl -sS -o /dev/null -w '%{http_code}' --cacert '$STATE_DIR/caddy-local-root.crt' --resolve $HOST:443:127.0.0.1 -b '$jar' -X POST https://$HOST/api/v1/auth/logout)\" = 403 ]"
+expect "mutating call without the CSRF header is refused (403)" sh -c "[ \"\$(curl -sS --noproxy '*' -o /dev/null -w '%{http_code}' --cacert '$STATE_DIR/caddy-local-root.crt' --resolve $HOST:443:127.0.0.1 -b '$jar' -X POST https://$HOST/api/v1/auth/logout)\" = 403 ]"
 gateway="$(docker network inspect districom_default -f '{{(index .IPAM.Config 0).Gateway}}')"
 session_ip="$(q 'SELECT ip FROM public.user_sessions ORDER BY id DESC LIMIT 1')"
 expect "session records the client IP seen by Caddy ($session_ip = gateway $gateway), not Caddy's, not a spoofed header" test "$session_ip" = "$gateway"

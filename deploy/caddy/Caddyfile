@@ -2,7 +2,6 @@
 # Every value comes from the environment (.env on the server); see deploy/production.env.example.
 {
 	admin off
-	email {$ACME_EMAIL:admin@example.invalid}
 	acme_ca {$ACME_CA:https://acme-v02.api.letsencrypt.org/directory}
 	servers {
 		protocols h1 h2

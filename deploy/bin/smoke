@@ -9,9 +9,9 @@ check() {
 }
 check "HTTPS /api/v1/health through Caddy" caddy_curl -f "https://$DISTRICOM_HOST/api/v1/health"
 check "HTTPS home page (frontend)" caddy_curl -f -o /dev/null "https://$DISTRICOM_HOST/login"
-check "HTTP redirects to HTTPS" sh -c "curl -sS -o /dev/null -w '%{http_code} %{redirect_url}' --resolve '$DISTRICOM_HOST:80:127.0.0.1' 'http://$DISTRICOM_HOST/' | grep -q '^30[18] https://$DISTRICOM_HOST/'"
-check "API docs not served" sh -c "[ \"\$(curl -sS -o /dev/null -w '%{http_code}' -k --resolve '$DISTRICOM_HOST:443:127.0.0.1' 'https://$DISTRICOM_HOST/api/docs')\" = 404 ]"
-check "HSTS header" sh -c "curl -sS -k -D - -o /dev/null --resolve '$DISTRICOM_HOST:443:127.0.0.1' 'https://$DISTRICOM_HOST/api/v1/health' | grep -qi '^strict-transport-security:'"
+check "HTTP redirects to HTTPS" sh -c "curl -sS --noproxy '*' -o /dev/null -w '%{http_code} %{redirect_url}' --resolve '$DISTRICOM_HOST:80:127.0.0.1' 'http://$DISTRICOM_HOST/' | grep -q '^30[18] https://$DISTRICOM_HOST/'"
+check "API docs not served" sh -c "[ \"\$(curl -sS --noproxy '*' -o /dev/null -w '%{http_code}' -k --resolve '$DISTRICOM_HOST:443:127.0.0.1' 'https://$DISTRICOM_HOST/api/docs')\" = 404 ]"
+check "HSTS header" sh -c "curl -sS --noproxy '*' -k -D - -o /dev/null --resolve '$DISTRICOM_HOST:443:127.0.0.1' 'https://$DISTRICOM_HOST/api/v1/health' | grep -qi '^strict-transport-security:'"
 check "database at the latest migration" sh -c "[ \"\$('$ROOT/deploy/bin/dc' run --rm --no-deps -T backend alembic current 2>/dev/null | grep -c '(head)')\" -ge 1 ]"
 check "WAL archiving works (pgBackRest check)" pgbr check
 exit "$fail"

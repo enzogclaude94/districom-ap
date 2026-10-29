@@ -85,7 +85,6 @@ services:
     environment:
       DISTRICOM_HOST: ${DISTRICOM_HOST:?set DISTRICOM_HOST in .env}
       CADDY_TLS_MODE: ${CADDY_TLS_MODE:-cloudflare}
-      ACME_EMAIL: ${ACME_EMAIL:-}
       ACME_CA: ${ACME_CA:-https://acme-v02.api.letsencrypt.org/directory}
       CADDY_MAX_BODY: ${CADDY_MAX_BODY:-30MB}
     # 0.0.0.0 on purpose: binding to the Tailscale address would fail at boot if Tailscale starts after Docker and

@@ -65,7 +65,7 @@ caddy_curl() {
         dc exec -T caddy cat /data/caddy/pki/authorities/local/root.crt > "$STATE_DIR/caddy-local-root.crt"
         ca=(--cacert "$STATE_DIR/caddy-local-root.crt")
     fi
-    curl -sS --max-time 20 --resolve "$DISTRICOM_HOST:443:127.0.0.1" --resolve "$DISTRICOM_HOST:80:127.0.0.1" "${ca[@]}" "$@"
+    curl -sS --noproxy "*" --max-time 20 --resolve "$DISTRICOM_HOST:443:127.0.0.1" --resolve "$DISTRICOM_HOST:80:127.0.0.1" "${ca[@]}" "$@"
 }
 
 # update and rollback check out another version of this very directory: they first re-run themselves from a
