@@ -361,3 +361,47 @@ def test_outlets_and_responsibilities_migrations_go_down_and_up() -> None:
         command.upgrade(cfg, "head")
     assert _settlements_tables(url) == SETTLEMENTS_TABLES
     assert "outlets" in _tables(url)
+
+
+def test_faster_ledger_guards_migration_goes_down_and_up() -> None:
+    """R9-4: 0031 only rewrites two guard functions and adds one index. Going back drops the index and restores the
+    functions exactly as 0030 had them; coming up again restores 0031's."""
+    cfg = alembic_config()
+    url = cfg.get_main_option("sqlalchemy.url")
+    assert url
+    guards = text(
+        "SELECT p.proname, pg_get_functiondef(p.oid) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace"
+        " WHERE n.nspname = 'settlements' AND p.proname IN ('check_account_not_negative', 'assert_outlet_advances')"
+    )
+    index = text("SELECT to_regclass('settlements.ix_ledger_entries_account_id_include_amount') IS NOT NULL")
+
+    engine = create_engine(url)
+    try:
+        # 0030 as it is built on its own, not as 0031's downgrade leaves it.
+        command.upgrade(cfg, "head")
+        command.downgrade(cfg, "0029")
+        command.upgrade(cfg, "0030")
+        with engine.connect() as conn:
+            before = dict(conn.execute(guards).all())
+            assert conn.execute(index).scalar() is False
+        command.upgrade(cfg, "head")
+        with engine.connect() as conn:
+            faster = dict(conn.execute(guards).all())
+            assert conn.execute(index).scalar() is True
+        assert set(faster) == set(before) == {"check_account_not_negative", "assert_outlet_advances"}
+        assert all(faster[name] != before[name] for name in before)
+        assert "IS NOT DISTINCT FROM" not in faster["assert_outlet_advances"]
+
+        command.downgrade(cfg, "0030")
+        with engine.connect() as conn:
+            assert dict(conn.execute(guards).all()) == before
+            assert conn.execute(index).scalar() is False
+    finally:
+        engine.dispose()
+        command.upgrade(cfg, "head")
+    engine = create_engine(url)
+    try:
+        with engine.connect() as conn:
+            assert dict(conn.execute(guards).all()) == faster
+    finally:
+        engine.dispose()

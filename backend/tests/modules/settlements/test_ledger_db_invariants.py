@@ -4,7 +4,9 @@ These tests write raw SQL on purpose: application code must never do this (singl
 """
 
 from collections.abc import Iterator
-from datetime import timedelta
+from datetime import date, timedelta
+from decimal import Decimal
+from random import Random
 from uuid import uuid4
 
 import pytest
@@ -240,3 +242,42 @@ def test_retroactive_raw_withdrawal_cannot_leave_a_past_day_negative(conn: Conne
     assert "negative balance" in message
     assert day2.isoformat() in message
     _committed(conn, ("main_cash", "-20000"), ("change_cash", "20000"), business_date=day2)
+
+
+def test_not_negative_trigger_matches_a_plain_end_of_day_check(conn: Connection) -> None:
+    """0031 reads only the days after a recent debit and keeps 0013's single pass for older ones; either way it must
+    refuse exactly what a plain check of every end-of-day balance from the debit's date on refuses, and name the
+    same lowest balance and day (the earliest one on a tie). Most debits probe the edge: they take the lowest balance
+    from their day on to exactly zero, a cent below or a little above."""
+    rng = Random(31)  # noqa: S311 - a reproducible sequence, never a secret
+    start = today() - timedelta(days=45)
+    booked: list[tuple[date, Decimal]] = []
+
+    def end_of(day: date, *extra: tuple[date, Decimal]) -> Decimal:
+        return sum((amount for when, amount in [*booked, *extra] if when <= day), Decimal(0))
+
+    _committed(
+        conn, ("main_cash", "300.00"), ("opening_balance", "-300.00"), type="OPENING_BALANCE", business_date=start
+    )
+    booked.append((start, Decimal("300.00")))
+    refused: set[tuple[bool, bool]] = set()
+    for _ in range(150):
+        day = start + timedelta(days=rng.randint(0, 45))
+        days = sorted({when for when, _ in booked} | {day})
+        if rng.random() < 0.3:
+            amount = Decimal(rng.choice(["10.00", "25.50", "40.00", "60.00"]))
+        else:
+            floor = min(end_of(when) for when in days if when >= day)
+            margin = Decimal(rng.choice(["-5.00", "0.00", "0.00", "0.01"]))
+            amount = -(floor + margin) if floor > 5 else Decimal("-0.01")
+        lowest, lowest_day = min((end_of(when, (day, amount)), when) for when in days if when >= day)
+        legs = (("main_cash", str(amount)), ("adjustment", str(-amount)))
+        if amount < 0 and lowest < 0:
+            message = _fails_at_commit(conn, *legs, type="ADJUSTMENT", description="x", business_date=day)
+            assert f"negative balance ({lowest} on {lowest_day.isoformat()})" in message
+            refused.add((day < today() - timedelta(days=31), lowest_day == day))
+        else:
+            _committed(conn, *legs, type="ADJUSTMENT", description="x", business_date=day)
+            booked.append((day, amount))
+    # Refusals on the debit's own day and on a later one, for recent and for older debits.
+    assert refused == {(False, False), (False, True), (True, False), (True, True)}

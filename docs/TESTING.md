@@ -35,6 +35,7 @@ cd frontend && pnpm e2e
 - E2E: `businessDay(offset)` de `frontend/e2e/helpers.ts` se llama al usarlo (`const today = () => businessDay()`), nunca como constante del spec ni con el reloj local de la máquina (`cash`, `delivery` y `fuel` pasaron a `businessDay`).
 
 ## R9‑4 (performance)
+- `0031`: `test_ledger_db_invariants.py::test_not_negative_trigger_matches_a_plain_end_of_day_check` escribe débitos SQL crudos (recientes y de más de 31 días) que llevan el saldo mínimo desde su fecha a exactamente cero, un centavo debajo o un poco arriba, y compara el rechazo del trigger, su saldo mínimo y su fecha con un chequeo simple de cada cierre de día; exige rechazos en el día del débito y en uno posterior para las dos ramas. `test_migrations.py::test_faster_ledger_guards_migration_goes_down_and_up` compara `pg_get_functiondef` de las dos funciones en `0030` (construida sola), en `0031` y después del `downgrade`, y la existencia del índice.
 - Los benchmarks no son tests: `backend/perf/` corre a mano contra una base `*perf*` (ver `docs/PERFORMANCE.md`) y nunca en CI ni con umbrales de tiempo.
 - `test_ledger_service.py::test_balances_at_any_date_and_lowest_balance_match_a_plain_sum`: con operaciones retroactivas y un reverso, el saldo de cada cuenta en cada uno de los últimos 52 días (a ambos lados de la ventana de un mes), el saldo de una cuenta y el saldo mínimo desde cada día (con su primera fecha) son iguales a una suma simple de asientos.
 

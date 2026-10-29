@@ -77,7 +77,21 @@ Las rutas se miden con y sin el área Empleados (un admin de plataforma sin el �
 - **N+1.** Cheques y pendientes en vigor de una página, y pagos de cada liquidación (lista y resumen de pago), en una
   consulta por página.
 
-## Pendiente de aprobación
+## Migración `0031` (aprobada por Enzo el 2026-10-29)
 
-Ver el informe: índice cubriente de asientos por cuenta y reescritura del trigger `check_account_not_negative`
-(migración `0031`), y la decisión sobre saldos materializados si el volumen lo exige.
+- `assert_outlet_advances` compara el cierre vigente con `=`: usa el índice de `settlement_closing_remittances`.
+- `check_account_not_negative`, para un débito de los últimos 31 días, lee solo los días posteriores (total − lo
+  posterior); uno más viejo conserva la pasada única de `0013`, que es más barata cuando casi toda la historia es
+  posterior. Mismo resultado y mismo mensaje.
+- `ix_ledger_entries_account_id_include_amount`: el total de una cuenta sin leer la tabla.
+
+`perf/guards.py` mide las escrituras que esas guardas frenan (entrega a cuenta y cierre de boca, pago en efectivo hoy
+y a 90 días, `account_balance`). Se corre sobre una copia restaurada, antes y después de `alembic upgrade head`:
+
+```bash
+PYTHONPATH=. uv run python -m perf.guards --runs 30 --out ../perf-results/guards-after
+```
+
+## Saldos materializados
+
+No hacen falta hoy (decisión de Enzo, 2026-10-29): el ledger sigue siendo la fuente calculada.
