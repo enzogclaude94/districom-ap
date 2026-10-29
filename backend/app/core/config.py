@@ -6,7 +6,7 @@ Required variables have no default: the app refuses to start without them.
 from functools import lru_cache
 from typing import Annotated, Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     session_absolute_days: int = Field(default=7, gt=0)
     login_max_attempts: int = Field(default=5, gt=0)
     login_window_seconds: int = Field(default=300, gt=0)
+    # "test" lowers the Argon2 cost so a test suite does not spend minutes hashing; only allowed with APP_ENV=test
+    # and set explicitly (tests/conftest.py). Anything else hashes with the standard parameters.
+    argon2_profile: Literal["standard", "test"] = "standard"
 
     upload_max_size_mb: int = Field(default=25, gt=0)
     business_timezone: str = "America/Argentina/Buenos_Aires"
@@ -34,6 +37,12 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return [origin.strip() for origin in value.split(",") if origin.strip()]
         return value
+
+    @model_validator(mode="after")
+    def _test_hashing_only_in_tests(self) -> "Settings":
+        if self.argon2_profile == "test" and self.app_env != "test":
+            raise ValueError("ARGON2_PROFILE=test requires APP_ENV=test")
+        return self
 
     @field_validator("database_url")
     @classmethod

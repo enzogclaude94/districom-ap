@@ -14,6 +14,10 @@
 - Escenarios verificables a mano en `backend/tests/fixtures/` (por ejemplo `route_execution.py`: cumplimiento 66,7 % vs. cobertura 75 %). Son la especificación ejecutable de fases futuras; un test unitario verifica que sus valores esperados coinciden con las definiciones de `METRICS.md`, y la fase que implemente la métrica los usa tal cual.
 - No se saltean ni desactivan tests para llegar a verde.
 
+## Base de tests y costo de hash
+- Entre tests, `reset_database` (`tests/conftest.py`) vacía la base con **un solo `TRUNCATE` sin `CASCADE`** de una lista explícita (`TRUNCATED_TABLES`) y repone las semillas: cuentas, bancos oficiales y la categoría FUEL. La lista es exacta: una tabla nueva que no figure hace fallar el `TRUNCATE` o `test_database_reset.py`, que exige que toda tabla esté en la lista o en `KEPT_TABLES` y prueba que el reset deja la base como la dejan las migraciones (CI‑2).
+- `tests/conftest.py` fija `ARGON2_PROFILE=test`: Argon2id con costo mínimo (mismo formato, sal y largo de hash). La configuración lo rechaza si `APP_ENV` no es `test`; dev y producción usan siempre los parámetros RFC 9106 de la librería (`test_password_hashing.py`, CI‑3).
+
 ## Cómo correr
 ```bash
 # Backend (requiere PostgreSQL; ver README)

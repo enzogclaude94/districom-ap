@@ -10,6 +10,8 @@ os.environ["DATABASE_URL"] = os.environ.get(
 )
 os.environ["SECRET_KEY"] = "test-secret-key-0123456789abcdef0123456789"
 os.environ["APP_ENV"] = "test"
+# The cheapest Argon2 cost, explicitly and only for tests (app/platform/auth/security.py).
+os.environ["ARGON2_PROFILE"] = "test"
 os.environ["COOKIE_SECURE"] = "false"
 os.environ["CORS_ORIGINS"] = ""
 
@@ -20,13 +22,15 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, text
+from sqlalchemy import Connection, create_engine, text
 from sqlalchemy.orm import Session
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 
-# Tables emptied after each test that uses the database.
+# Tables emptied after each test that uses the database, in one TRUNCATE without CASCADE: the list is exact, so a
+# table that references one of these and is missing here makes the TRUNCATE fail instead of being emptied silently.
 TRUNCATED_TABLES = (
+    "settlements.settlement_closing_fuel_loads",
     "settlements.expected_amount_events",
     "settlements.employee_payout_items",
     "settlements.employee_payouts",
@@ -81,6 +85,12 @@ TRUNCATED_TABLES = (
     "settlements.expenses",
     "settlements.expense_categories",
     "settlements.settlements",
+    "settlements.outlet_responsibilities",
+    "settlements.accounts",
+    "outlets",
+    "employee_functions",
+    "employees",
+    "financial_institutions",
 )
 # Rendiciones accounts seeded by migrations 0005, 0008-0010, 0012, 0019, 0023 and 0026; tests may add others,
 # removed afterwards.
@@ -138,6 +148,57 @@ def migrated_db() -> None:
     engine.dispose()
 
 
+def reset_database(conn: Connection) -> None:
+    """Back to what the migrations leave: every table of TRUNCATED_TABLES empty, with its identities restarted,
+    and the seeded accounts, official banks and the FUEL category put back."""
+    conn.execute(text(f"TRUNCATE {', '.join(TRUNCATED_TABLES)} RESTART IDENTITY"))
+    # The accounts go too (a boca's «Entregas a cuenta» references its boca, an employee's internal account its
+    # employee): put back the ones the migrations seeded, with their ids.
+    conn.execute(
+        text(
+            "INSERT INTO settlements.accounts OVERRIDING SYSTEM VALUE "
+            "SELECT * FROM jsonb_populate_recordset(NULL::settlements.accounts, CAST(:rows AS jsonb)) "
+            "WHERE NOT EXISTS (SELECT 1 FROM settlements.accounts)"
+        ),
+        {"rows": SEEDED_ACCOUNT_ROWS},
+    )
+    conn.execute(
+        text(
+            "SELECT setval(pg_get_serial_sequence('settlements.accounts', 'id'), "
+            "(SELECT coalesce(max(id), 0) + 1 FROM settlements.accounts), false)"
+        )
+    )
+    # The bank catalog goes too (a manual entry names its author): put back the official entries the migration
+    # seeded, with their ids.
+    conn.execute(
+        text(
+            "INSERT INTO financial_institutions (id, bcra_code, name, source, active) OVERRIDING SYSTEM VALUE "
+            "SELECT id, bcra_code, name, source, true FROM jsonb_to_recordset(CAST(:rows AS jsonb)) "
+            "AS r(id bigint, bcra_code int, name text, source text)"
+        ),
+        {"rows": SEEDED_BANKS},
+    )
+    conn.execute(
+        text(
+            "SELECT setval(pg_get_serial_sequence('financial_institutions', 'id'), "
+            "(SELECT coalesce(max(id), 0) + 1 FROM financial_institutions), false)"
+        )
+    )
+    # The FUEL category migration 0015 seeds (a fresh database has no «Combustible» to reuse).
+    conn.execute(
+        text(
+            "INSERT INTO settlements.expense_categories (name, name_key, active, code) "
+            "VALUES ('Combustible', 'combustible', true, 'FUEL')"
+        )
+    )
+    conn.execute(
+        text("DELETE FROM settlements.accounts WHERE code IS NULL OR code <> ALL(:codes)"),
+        {"codes": list(SEEDED_ACCOUNTS)},
+    )
+    # A test may deactivate a seeded account (R5-3: an inactive cash box never pays).
+    conn.execute(text("UPDATE settlements.accounts SET active = true WHERE NOT active"))
+
+
 @pytest.fixture
 def db(migrated_db: None) -> Iterator[Session]:
     from app.db.session import get_db
@@ -146,58 +207,7 @@ def db(migrated_db: None) -> Iterator[Session]:
     yield session
     session.close()
     with session.get_bind().begin() as conn:  # type: ignore[union-attr]
-        conn.execute(text(f"TRUNCATE {', '.join(TRUNCATED_TABLES)} RESTART IDENTITY CASCADE"))
-        # A boca's «Entregas a cuenta» (R7-3) references its boca, so TRUNCATE users CASCADE (through the bocas)
-        # empties the accounts too: put back the ones the migrations seeded, with their ids.
-        conn.execute(
-            text(
-                "INSERT INTO settlements.accounts OVERRIDING SYSTEM VALUE "
-                "SELECT * FROM jsonb_populate_recordset(NULL::settlements.accounts, CAST(:rows AS jsonb)) "
-                "WHERE NOT EXISTS (SELECT 1 FROM settlements.accounts)"
-            ),
-            {"rows": SEEDED_ACCOUNT_ROWS},
-        )
-        conn.execute(
-            text(
-                "SELECT setval(pg_get_serial_sequence('settlements.accounts', 'id'), "
-                "(SELECT coalesce(max(id), 0) + 1 FROM settlements.accounts), false)"
-            )
-        )
-        # TRUNCATE users CASCADE empties the bank catalog too (a manual entry names its author): put back
-        # the official entries the migration seeded, with their ids.
-        conn.execute(text("TRUNCATE financial_institutions CASCADE"))
-        conn.execute(
-            text(
-                "INSERT INTO financial_institutions (id, bcra_code, name, source, active) OVERRIDING SYSTEM VALUE "
-                "SELECT id, bcra_code, name, source, true FROM jsonb_to_recordset(CAST(:rows AS jsonb)) "
-                "AS r(id bigint, bcra_code int, name text, source text)"
-            ),
-            {"rows": SEEDED_BANKS},
-        )
-        conn.execute(
-            text(
-                "SELECT setval(pg_get_serial_sequence('financial_institutions', 'id'), "
-                "(SELECT coalesce(max(id), 0) + 1 FROM financial_institutions), false)"
-            )
-        )
-        # The FUEL category migration 0015 seeds (a fresh database has no «Combustible» to reuse).
-        conn.execute(
-            text(
-                "INSERT INTO settlements.expense_categories (name, name_key, active, code) "
-                "VALUES ('Combustible', 'combustible', true, 'FUEL')"
-            )
-        )
-        conn.execute(
-            text("DELETE FROM settlements.accounts WHERE code IS NULL OR code <> ALL(:codes)"),
-            {"codes": list(SEEDED_ACCOUNTS)},
-        )
-        # A test may deactivate a seeded account (R5-3: an inactive cash box never pays).
-        conn.execute(text("UPDATE settlements.accounts SET active = true WHERE NOT active"))
-        # Not truncated: an employee's internal account references it, and TRUNCATE ... CASCADE would
-        # empty the seeded accounts too.
-        for table in ("employee_functions", "employees"):
-            conn.execute(text(f"DELETE FROM {table}"))  # noqa: S608
-            conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN id RESTART"))
+        reset_database(conn)
 
 
 @pytest.fixture
