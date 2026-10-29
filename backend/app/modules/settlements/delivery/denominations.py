@@ -61,11 +61,9 @@ def by_code(db: Session) -> dict[str, Denomination]:
     return {d.code: d for d in configured(db)}
 
 
-def cash_boxes(db: Session) -> dict[str, ledger.AccountBalance]:
+def cash_boxes(db: Session) -> dict[str, ledger.AccountInfo]:
     """Active cash boxes by code (Caja principal, Caja de cambio...)."""
-    return {
-        str(a.code): a for a in ledger.account_balances(db) if a.kind == "CASH_BOX" and a.active and a.code is not None
-    }
+    return {str(a.code): a for a in ledger.accounts(db) if a.kind == "CASH_BOX" and a.active and a.code is not None}
 
 
 def update(db: Session, actor: User, items: list[Denomination]) -> list[Denomination]:

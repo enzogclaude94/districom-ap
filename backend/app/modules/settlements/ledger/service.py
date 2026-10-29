@@ -23,7 +23,7 @@ import hashlib
 import json
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -599,29 +599,27 @@ def _check_funds(
 
 
 def _lowest_balance_since(db: Session, account_id: int, since: date) -> tuple[Decimal, date]:
-    """Lowest end-of-day balance of the account on `since` or any later business date, and that date.
+    """Lowest end-of-day balance of the account on `since` or any later business date, and that date (the earliest
+    one when several share it).
 
-    Balances only change on days with entries, so the candidates are `since` itself and those days.
-    One indexed pass over the account's entries: a few hundred a day at most for a distributor.
+    Balances only change on days with entries, so the candidates are `since` itself and those days: the balance at
+    the end of `since`, then a running sum over the days after it. Only the days after `since` are read day by day
+    (R9-4: a debit dated today no longer walks the account's whole history).
     """
-    daily = (
-        select(FinancialOperation.business_date.label("day"), func.sum(LedgerEntry.amount).label("amount"))
-        .join(FinancialOperation, LedgerEntry.operation_id == FinancialOperation.id)
-        .where(LedgerEntry.account_id == account_id)
-        .group_by(FinancialOperation.business_date)
-        .subquery()
-    )
-    running = select(daily.c.day, func.sum(daily.c.amount).over(order_by=daily.c.day).label("balance")).subquery()
-    lowest = Decimal(db.scalar(select(func.coalesce(func.sum(daily.c.amount), 0)).where(daily.c.day <= since)) or 0)
+    lowest = _balances(db, on=since, account_id=account_id).get(account_id, Decimal(0))
     on = since
     later = db.execute(
-        select(running.c.day, running.c.balance)
-        .where(running.c.day > since)
-        .order_by(running.c.balance, running.c.day)
-        .limit(1)
-    ).first()
-    if later is not None and later.balance < lowest:
-        lowest, on = Decimal(later.balance), later.day
+        select(FinancialOperation.business_date, func.sum(LedgerEntry.amount))
+        .join(FinancialOperation, LedgerEntry.operation_id == FinancialOperation.id)
+        .where(LedgerEntry.account_id == account_id, FinancialOperation.business_date > since)
+        .group_by(FinancialOperation.business_date)
+        .order_by(FinancialOperation.business_date)
+    ).tuples()
+    balance = lowest
+    for day, amount in later:
+        balance += Decimal(amount)
+        if balance < lowest:
+            lowest, on = balance, day
     return lowest, on
 
 
@@ -672,25 +670,73 @@ def _audit(db: Session, actor: User, operation: FinancialOperation, reverses: Fi
 
 def account_balances(db: Session, *, on: date | None = None, include_inactive: bool = False) -> list[AccountBalance]:
     """Balance of every account, at the end of `on` (business date) or today. Always summed from entries."""
-    sums_query = (
-        select(LedgerEntry.account_id, func.sum(LedgerEntry.amount).label("balance"))
-        .join(FinancialOperation)
-        .group_by(LedgerEntry.account_id)
-    )
-    if on is not None:
-        sums_query = sums_query.where(FinancialOperation.business_date <= on)
-    sums = sums_query.subquery()
-    query = (
-        select(Account, func.coalesce(sums.c.balance, 0))
-        .outerjoin(sums, sums.c.account_id == Account.id)
-        .order_by(Account.id)
-    )
+    sums = _balances(db, on=on)
+    query = select(Account).order_by(Account.id)
     if not include_inactive:
         query = query.where(Account.active)
-    return [
-        AccountBalance(a.id, a.code, a.name, a.kind, a.allow_negative, a.active, Decimal(balance))
-        for a, balance in db.execute(query)
-    ]
+    return [_with_balance(a, sums.get(a.id, Decimal(0))) for a in db.scalars(query)]
+
+
+# How far back the balances of a day are computed from today's (see `_balances`).
+RECENT_BALANCE_DAYS = 31
+
+
+def _balances(db: Session, *, on: date | None = None, account_id: int | None = None) -> dict[int, Decimal]:
+    """The sum of the entries of each account (or of one), up to the end of business date `on` when given.
+
+    An entry's business date is its operation's and never changes (the ledger is append-only), so the balance up to
+    a recent `on` is computed as the whole sum minus what is dated after it: that reads only the operations of the
+    last days through their date index instead of joining every entry to its operation (R9-4: the Cierre del día and
+    the balances of a recent day). For an older day the plain sum up to `on` joins fewer rows, so it stays. Both
+    give the same number."""
+    whole = select(LedgerEntry.account_id, func.sum(LedgerEntry.amount)).group_by(LedgerEntry.account_id)
+    if account_id is not None:
+        whole = whole.where(LedgerEntry.account_id == account_id)
+    if on is not None and on < business_today() - timedelta(days=RECENT_BALANCE_DAYS):
+        upto = whole.join(FinancialOperation, FinancialOperation.id == LedgerEntry.operation_id).where(
+            FinancialOperation.business_date <= on
+        )
+        return {a: Decimal(amount) for a, amount in db.execute(upto).tuples()}
+    sums: dict[int, Decimal] = {a: Decimal(amount) for a, amount in db.execute(whole).tuples()}
+    if on is not None:
+        later = (
+            select(LedgerEntry.account_id, func.sum(LedgerEntry.amount))
+            .join(FinancialOperation, FinancialOperation.id == LedgerEntry.operation_id)
+            .where(FinancialOperation.business_date > on)
+            .group_by(LedgerEntry.account_id)
+        )
+        if account_id is not None:
+            later = later.where(LedgerEntry.account_id == account_id)
+        for a, amount in db.execute(later).tuples():
+            sums[a] -= Decimal(amount)
+    return sums
+
+
+def _with_balance(account: Account, balance: Decimal) -> AccountBalance:
+    return AccountBalance(
+        account.id, account.code, account.name, account.kind, account.allow_negative, account.active, balance
+    )
+
+
+@dataclass(frozen=True)
+class AccountInfo:
+    """An account without its balance: what a screen needs to name an account or check its kind."""
+
+    account_id: int
+    code: str | None
+    name: str
+    kind: str
+    allow_negative: bool
+    active: bool
+
+
+def accounts(db: Session, *, include_inactive: bool = False) -> list[AccountInfo]:
+    """Every account (active ones unless asked), without summing the ledger (R9-4: naming an account must not
+    cost a pass over every entry)."""
+    query = select(Account).order_by(Account.id)
+    if not include_inactive:
+        query = query.where(Account.active)
+    return [AccountInfo(a.id, a.code, a.name, a.kind, a.allow_negative, a.active) for a in db.scalars(query)]
 
 
 def account_movements(
@@ -713,11 +759,18 @@ def account_movements(
         .outerjoin(reversal, reversal.reverses_operation_id == FinancialOperation.id)
         .where(LedgerEntry.account_id == account_id)
     )
+    # The author and the reversal join one row each (a reversal is unique per operation), so the total counts the
+    # account's entries alone, and joins their operation only to filter by date (R9-4).
+    counted = select(func.count()).select_from(LedgerEntry).where(LedgerEntry.account_id == account_id)
+    if date_from is not None or date_to is not None:
+        counted = counted.join(FinancialOperation, LedgerEntry.operation_id == FinancialOperation.id)
     if date_from is not None:
         query = query.where(FinancialOperation.business_date >= date_from)
+        counted = counted.where(FinancialOperation.business_date >= date_from)
     if date_to is not None:
         query = query.where(FinancialOperation.business_date <= date_to)
-    total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
+        counted = counted.where(FinancialOperation.business_date <= date_to)
+    total = db.scalar(counted) or 0
     rows = db.execute(
         query.order_by(FinancialOperation.business_date.desc(), FinancialOperation.id.desc())
         .limit(limit)
@@ -805,10 +858,10 @@ def operation_detail(db: Session, operation_id: int) -> OperationDetail:
 
 def account_balance(db: Session, account_id: int, *, on: date | None = None) -> AccountBalance:
     """One account with its balance (inactive accounts included)."""
-    for balance in account_balances(db, on=on, include_inactive=True):
-        if balance.account_id == account_id:
-            return balance
-    raise AppError(404, "account_not_found", "La cuenta no existe.")
+    account = db.get(Account, account_id)
+    if account is None:
+        raise AppError(404, "account_not_found", "La cuenta no existe.")
+    return _with_balance(account, _balances(db, on=on, account_id=account_id).get(account_id, Decimal(0)))
 
 
 def system_account_id(db: Session, code: str) -> int:

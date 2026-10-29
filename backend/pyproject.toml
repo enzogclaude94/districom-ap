@@ -36,6 +36,7 @@ ignore = ["S101"]  # assert is fine in tests
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S105", "S106"]
 "migrations/**" = ["E501"]
+"perf/**" = ["S311"]  # the dataset generator wants reproducible pseudo-random numbers, never secrets
 
 [tool.mypy]
 strict = true

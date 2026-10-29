@@ -372,14 +372,21 @@ def amounts_in_effect(db: Session, pendings: Sequence[PendingCollection]) -> dic
     result: dict[int, InEffect] = {}
     settlement_ids = {p.settlement_id for p in pendings if p.settlement_id is not None}
     if settlement_ids:
-        closes = db.scalars(
-            select(Settlement.current_close_operation_id).where(
-                Settlement.id.in_(settlement_ids), Settlement.current_close_operation_id.is_not(None)
+        closes = select(Settlement.current_close_operation_id).where(
+            Settlement.id.in_(settlement_ids), Settlement.current_close_operation_id.is_not(None)
+        )
+        # One query for the whole page (R9-4: it was one per settlement).
+        rows = db.execute(
+            select(
+                SettlementClosingPending.pending_id,
+                SettlementClosingPending.amount,
+                SettlementClosingPending.customer_name,
+            ).where(
+                SettlementClosingPending.close_operation_id.in_(closes),
+                SettlementClosingPending.pending_id.in_([p.id for p in pendings]),
             )
         )
-        wanted = {p.id for p in pendings}
-        for close_id in closes:
-            result.update({pid: e for pid, e in in_effect(db, close_id).items() if pid in wanted})
+        result.update({pid: InEffect(amount, customer) for pid, amount, customer in rows})
     for p in pendings:
         if p.origin_type != "SETTLEMENT" and p.voided_at is None:
             result[p.id] = InEffect(p.amount, p.customer_name)

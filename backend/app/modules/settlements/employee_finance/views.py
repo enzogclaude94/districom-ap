@@ -541,8 +541,9 @@ def payrolls(
     )
     names = _employee_names(db, {r.employee_id for r in rows})
     closings = _closings_by_id(db, [r.current_closing_id for r in rows if r.current_closing_id is not None])
+    paid = payout_service.paid_by_closing(db, list(closings))
     return s.PayrollPage(
-        items=[_payroll_row(db, r, names, closings.get(r.current_closing_id or 0)) for r in rows], total=total
+        items=[_payroll_row(db, r, names, closings.get(r.current_closing_id or 0), paid) for r in rows], total=total
     )
 
 
@@ -648,7 +649,11 @@ def _totals(credits: Decimal, deductions: Decimal, credits_applied: Decimal, net
 
 
 def _payroll_row(
-    db: Session, row: EmployeePayroll, names: dict[int, str], closing: EmployeePayrollClosing | None
+    db: Session,
+    row: EmployeePayroll,
+    names: dict[int, str],
+    closing: EmployeePayrollClosing | None,
+    paid: dict[int, Decimal] | None = None,
 ) -> s.PayrollRow:
     from_draft = row.status == "OPEN"
     if from_draft:
@@ -672,7 +677,9 @@ def _payroll_row(
         totals_from_draft=from_draft,
         in_correction=row.status == "OPEN" and row.current_closing_id is not None,
         payment_status=(
-            payout_service.state(closing.net, payout_service.paid(db, closing.id)).status
+            payout_service.state(
+                closing.net, paid[closing.id] if paid is not None else payout_service.paid(db, closing.id)
+            ).status
             if row.status == "CLOSED" and closing is not None
             else None
         ),
@@ -864,7 +871,11 @@ def pay_summary(db: Session, employee_id: int) -> s.EmployeePaySummary:
             )
         )
     )
-    pending = [p for p in (payout_service.payment(db, row) for row in closed) if p is not None and p.pending > 0]
+    # The payment state of every closed payroll in two queries (R9-4: it was two per payroll, a year adds twelve).
+    closed_closings = _closings_by_id(db, [r.current_closing_id for r in closed if r.current_closing_id is not None])
+    paid = payout_service.paid_by_closing(db, list(closed_closings))
+    states = [payout_service.state(c.net, paid[c.id]) for c in closed_closings.values()]
+    pending = [p for p in states if p.pending > 0]
     recent = list(db.scalars(_payouts_query().where(EmployeePayout.employee_id == employee_id).limit(5)))
     last_row = None
     if last is not None:
@@ -901,9 +912,7 @@ def _payout_outs(db: Session, rows: list[EmployeePayout]) -> list[s.PayoutOut]:
     ):
         items.setdefault(item.payout_id, []).append(item)
     account_ids = {i.account_id for group in items.values() for i in group}
-    accounts = {
-        b.account_id: b.name for b in ledger.account_balances(db, include_inactive=True) if b.account_id in account_ids
-    }
+    accounts = {b.account_id: b.name for b in ledger.accounts(db, include_inactive=True) if b.account_id in account_ids}
     payrolls = {
         p.id: p for p in db.scalars(select(EmployeePayroll).where(EmployeePayroll.id.in_({r.payroll_id for r in rows})))
     }

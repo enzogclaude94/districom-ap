@@ -659,3 +659,63 @@ def test_replace_checks_the_net_effect_only(db: Session, post, accounts, actor) 
     _replace(db, operator, original.id, accounts, "1200")
     db.commit()
     assert balances(db)["Caja principal"] == Decimal("200.00")
+
+
+def test_balances_at_any_date_and_lowest_balance_match_a_plain_sum(db: Session, post, funded, actor) -> None:  # type: ignore[no-untyped-def]
+    """R9-4 computes a past balance as today's minus what is dated later, and the lowest balance from a date by
+    reading only the days after it: both must equal a plain sum of the entries dated up to each day."""
+    from app.modules.settlements.ledger.service import account_balance, lowest_balance_since
+
+    post(
+        "OPENING_BALANCE",
+        (funded["main_cash"], "1000"),
+        (funded["opening_balance"], "-1000"),
+        business_date=days_ago(50),
+    )
+    # Days older than RECENT_BALANCE_DAYS (31) are summed up to the date; recent ones from today's balance.
+    moves = [
+        (45, "-100"),
+        (40, "100"),
+        (32, "-50"),
+        (31, "50"),
+        (30, "-10"),
+        (10, "-290"),
+        (9, "200"),
+        (7, "-650"),
+        (7, "100"),
+        (4, "-250"),
+        (2, "400"),
+        (1, "-400"),
+        (0, "-20"),
+    ]
+    for ago, amount in moves:
+        post(
+            "CASH_TRANSFER",
+            (funded["main_cash"], amount),
+            (funded["change_cash"], str(-Decimal(amount))),
+            business_date=days_ago(ago),
+        )
+    # Retroactive and reversed operations count on their own business date, never on when they were made.
+    late = post("CASH_TRANSFER", (funded["main_cash"], "-30"), (funded["change_cash"], "30"), business_date=days_ago(5))
+    reverse_operation(db, actor=actor("admin"), operation_id=late.operation.id, reason="x", client_request_id=uuid4())
+    db.commit()
+
+    def plain(account_id: int, upto) -> Decimal:  # type: ignore[no-untyped-def]
+        total = db.scalar(
+            select(func.coalesce(func.sum(LedgerEntry.amount), 0))
+            .join(FinancialOperation, FinancialOperation.id == LedgerEntry.operation_id)
+            .where(LedgerEntry.account_id == account_id, FinancialOperation.business_date <= upto)
+        )
+        return Decimal(total)
+
+    db.expire_all()
+    for ago in range(52, -1, -1):
+        day = days_ago(ago)
+        by_id = {b.account_id: b.balance for b in account_balances(db, on=day, include_inactive=True)}
+        for account_id, balance in by_id.items():
+            assert balance == plain(account_id, day), (account_id, day)
+        assert account_balance(db, funded["main_cash"], on=day).balance == plain(funded["main_cash"], day)
+        # The lowest end-of-day balance from `day` on, and the first day it happens, by brute force.
+        candidates = [(plain(funded["main_cash"], days_ago(a)), days_ago(a)) for a in range(ago, -1, -1)]
+        expected = min(candidates, key=lambda c: (c[0], c[1]))
+        assert lowest_balance_since(db, funded["main_cash"], day) == expected, day

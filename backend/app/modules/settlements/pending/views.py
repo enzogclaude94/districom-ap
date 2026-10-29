@@ -169,7 +169,7 @@ def detail(db: Session, pending_id: int) -> s.PendingDetailOut:
         + [r.reversed_by for r in resolutions if r.reversed_by],
     )
     employees = _names(db, Employee, [p.employee_id for ps in parts.values() for p in ps if p.employee_id])
-    accounts = {a.account_id: a.name for a in ledger.account_balances(db, include_inactive=True)}
+    accounts = {a.account_id: a.name for a in ledger.accounts(db, include_inactive=True)}
     driver = db.get(Employee, settlement.employee_id) if settlement else None
     return s.PendingDetailOut(
         **base.model_dump(),

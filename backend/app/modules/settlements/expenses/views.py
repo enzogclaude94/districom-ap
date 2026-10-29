@@ -89,7 +89,7 @@ def outs(db: Session, rows: Sequence[tuple[Expense, date]]) -> list[s.ExpenseOut
     # Names and kinds of the paying accounts, read through the ledger service (its models are its own).
     paying = {e.paid_from_account_id for e in expenses if e.paid_from_account_id}
     accounts = (
-        {a.account_id: a for a in ledger.account_balances(db, include_inactive=True) if a.account_id in paying}
+        {a.account_id: a for a in ledger.accounts(db, include_inactive=True) if a.account_id in paying}
         if paying
         else {}
     )

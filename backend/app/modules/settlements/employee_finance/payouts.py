@@ -34,6 +34,7 @@ client's.
 """
 
 import logging
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -192,6 +193,20 @@ def paid(db: Session, closing_id: int) -> Decimal:
         )
     )
     return Decimal(total or 0)
+
+
+def paid_by_closing(db: Session, closing_ids: Collection[int]) -> dict[int, Decimal]:
+    """Σ payouts in effect of each close, in one query (R9-4: lists asked once per row); 0 when none."""
+    if not closing_ids:
+        return {}
+    rows = db.execute(
+        select(EmployeePayout.payroll_closing_id, func.sum(EmployeePayout.amount))
+        .where(EmployeePayout.payroll_closing_id.in_(closing_ids), EmployeePayout.reversal_operation_id.is_(None))
+        .group_by(EmployeePayout.payroll_closing_id)
+    ).tuples()
+    paid_amounts = dict.fromkeys(closing_ids, Decimal(0))
+    paid_amounts.update({closing_id: Decimal(total) for closing_id, total in rows})
+    return paid_amounts
 
 
 def payment(db: Session, payroll: EmployeePayroll) -> Payment | None:
