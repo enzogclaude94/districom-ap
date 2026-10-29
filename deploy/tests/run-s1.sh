@@ -186,7 +186,7 @@ result PASS "measured restore time from off-site with this dataset: ${rto}s (RTO
 section "T8 Point-in-time restore from off-site"
 q "INSERT INTO s1test.markers (label) VALUES ('pitr-before')"
 sleep 2
-target="$(q "SELECT to_char(now(), 'YYYY-MM-DD HH24:MI:SS.US OF')")"
+target="$(q "SELECT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS.MS') || '+00'")"
 sleep 2
 q "INSERT INTO s1test.markers (label) VALUES ('pitr-after')"
 dc exec -T -u postgres db pgbackrest --stanza=districom check > /dev/null
@@ -200,12 +200,15 @@ section "T9 Off-site unreachable (Internet cut): the app keeps working, WAL catc
 dc stop s3test > /dev/null
 q "INSERT INTO s1test.markers (label) VALUES ('during-cut')"
 q "SELECT pg_switch_wal()" > /dev/null
-sleep 20
+# PostgreSQL hears of the failure when pgBackRest's archive-timeout (60 s) runs out.
+sleep 90
 during="$(q "SELECT count(*) FROM s1test.markers WHERE label='during-cut'")"
 expect "database accepts writes during the cut ($during row)" test "$during" = 1
 expect "app answers during the cut" caddy_curl -f -o /dev/null "https://$HOST/api/v1/health"
 failed_after="$(q 'SELECT (last_failed_time > coalesce(last_archived_time, last_failed_time - interval '"'1 s'"'))::text FROM pg_stat_archiver')"
-expect "archiver reports the failure (monitor sees it)" test "$failed_after" = true
+expect "archiver reports the failure" test "$failed_after" = true
+behind="$("$ROOT/deploy/bin/monitor" 2> /dev/null | grep 'repo2: WAL')"
+expect "monitor sees repo2 behind ($behind)" sh -c "echo '$behind' | grep -q 'behind'"
 dc start s3test > /dev/null
 sleep 3
 expect "after the cut, pgBackRest check passes (backlog archived)" dc exec -T -u postgres db pgbackrest --stanza=districom check

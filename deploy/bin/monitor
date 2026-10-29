@@ -44,6 +44,34 @@ else
     fi
 fi
 
+# 4b. WAL in each repository: how many closed segments it lacks, and since when (an unreachable off-site repo
+# does not always reach pg_stat_archiver: pgBackRest accepts the WAL once the backup disk has it).
+current=$(psql_db -XtA -c "SELECT pg_walfile_name(pg_current_wal_lsn())" 2>/dev/null || echo "")
+for repo in $(repos); do
+    max=$(pgbr --repo="$repo" info --output=json 2>/dev/null | python3 -c 'import json,sys
+a=json.load(sys.stdin)[0].get("archive", [])
+print(max((x.get("max") or "" for x in a), default=""))' 2>/dev/null || echo "")
+    behind=$(python3 -c 'import sys
+def segno(n): return int(n[8:16], 16) * 256 + int(n[16:24], 16)
+cur, mx = sys.argv[1], sys.argv[2]
+print(max(segno(cur) - segno(mx) - 1, 0) if cur and mx else -1)' "$current" "$max")
+    since_file="$STATE_DIR/wal-behind-repo$repo"
+    if [ "$behind" -lt 0 ]; then
+        bad "repo$repo: WAL archive state unknown"
+    elif [ "$behind" -eq 0 ]; then
+        rm -f "$since_file"
+        ok "repo$repo: WAL up to date"
+    else
+        [ -f "$since_file" ] || echo "$now" > "$since_file"
+        lag=$((now - $(cat "$since_file")))
+        if [ "$lag" -gt 900 ]; then
+            bad "repo$repo: WAL behind by $behind segments for $((lag / 60)) min: RPO at risk"
+        else
+            warn "repo$repo: WAL behind by $behind segments for $((lag / 60)) min"
+        fi
+    fi
+done
+
 # 5. Backups: the newest one of each repository.
 for repo in $(repos); do
     stop=$(pgbr --repo="$repo" info --output=json 2>/dev/null | python3 -c 'import json,sys
@@ -63,7 +91,9 @@ fi
 
 # 7. Certificate.
 expiry=$(echo | openssl s_client -connect 127.0.0.1:443 -servername "$DISTRICOM_HOST" 2>/dev/null | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2)
-if [ -z "$expiry" ]; then
+if [ "${CADDY_TLS_MODE:-cloudflare}" = internal ]; then
+    if [ -n "$expiry" ]; then ok "certificate from Caddy's internal CA (short-lived, renewed by Caddy)"; else bad "cannot read the HTTPS certificate"; fi
+elif [ -z "$expiry" ]; then
     bad "cannot read the HTTPS certificate"
 else
     days=$((($(date -d "$expiry" +%s) - now) / 86400))
