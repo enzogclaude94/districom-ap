@@ -1,0 +1,32 @@
+# TEST ONLY (deploy/tests/run-s1.sh): an S3-compatible server standing in for the off-site bucket, and the
+# database published on loopback so the data generator (backend/perf) can fill it with fictitious data.
+# Never used on the production server.
+services:
+  s3test:
+    image: rclone/rclone:1.70
+    command:
+      - serve
+      - s3
+      - /data
+      - --addr=:9000
+      - --auth-key=s1test,s1test-secret-key-0123456789
+      - --cert=/certs/s3test.crt
+      - --key=/certs/s3test.key
+    volumes:
+      - s3test-data:/data
+      - ./deploy/tests/.certs:/certs:ro
+
+  db:
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - ./deploy/tests/.certs:/certs:ro
+
+  files-sync:
+    environment:
+      RCLONE_CA_CERT: /certs/ca.crt
+    volumes:
+      - ./deploy/tests/.certs:/certs:ro
+
+volumes:
+  s3test-data:
