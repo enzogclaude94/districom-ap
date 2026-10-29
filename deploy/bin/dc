@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# docker compose with the production override: deploy/bin/dc ps | logs -f backend | ...
+# shellcheck source=lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+dc "$@"

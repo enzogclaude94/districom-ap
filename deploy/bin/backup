@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# pgBackRest backup to every configured repository (1 = backup disk, 2 = off-site).
+#   deploy/bin/backup full|diff|incr [annotation]
+# Timers: full on Sundays, diff every night (deploy/systemd). WAL is archived continuously in between.
+# shellcheck source=lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+type="${1:-diff}"
+note="${2:-scheduled}"
+case "$type" in full | diff | incr) ;; *) die "usage: backup full|diff|incr [annotation]" ;; esac
+status=0
+for repo in $(repos); do
+    log "backup $type to repo$repo ($note)"
+    if ! pgbr --repo="$repo" --type="$type" --annotation="districom-note=$note" backup; then
+        log "backup $type to repo$repo FAILED"
+        status=1
+    fi
+done
+[ "$status" -eq 0 ] && date +%s > "$STATE_DIR/backup-$type.ok"
+exit "$status"

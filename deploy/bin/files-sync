@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Copies imported files and logical dumps to the backup disk and off-site (deploy/rclone/files-sync.sh).
+# shellcheck source=lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+dc --profile ops run --rm -T files-sync

@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Applies pending migrations (alembic upgrade head) with the backend image that is about to run.
+# In production this is an explicit step of deploy/bin/up and deploy/bin/update, always after a backup.
+# shellcheck source=lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+log "migrations: before $(dc run --rm --no-deps -T backend alembic current 2>/dev/null | tail -n1)"
+dc run --rm --no-deps -T backend alembic upgrade head
+log "migrations: now $(dc run --rm --no-deps -T backend alembic current 2>/dev/null | tail -n1)"

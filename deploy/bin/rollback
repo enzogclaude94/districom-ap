@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Returns to the version that ran before the last deploy/bin/update.
+#   deploy/bin/rollback                 images and code only (the update did not migrate, or migrated compatibly)
+#   deploy/bin/rollback --restore-db    also puts the database back to the pre-update backup
+# --restore-db discards everything written after the update started: the app was stopped during the update,
+# so that is only what users did after it came back. Decide it, and say it, before running it.
+# shellcheck source=lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+run_from_copy "$0" "$@"
+restore_db=0
+[ "${1:-}" = --restore-db ] && restore_db=1
+cd "$ROOT"
+[ -f "$STATE_DIR/rollback-ref" ] || die "no previous update recorded ($STATE_DIR/rollback-ref)"
+previous="$(cat "$STATE_DIR/rollback-ref")"
+
+log "rollback: stopping the app"
+dc stop caddy frontend backend
+
+for image in "${IMAGES[@]}"; do
+    docker image inspect "$image:rollback" > /dev/null 2>&1 || die "image $image:rollback not found"
+    docker image tag "$image:rollback" "$image:current"
+done
+git checkout --quiet --detach "$previous"
+
+if [ "$restore_db" -eq 1 ]; then
+    label="$(cat "$STATE_DIR/rollback-backup-label")"
+    log "rollback: restoring the database to backup $label (repo1)"
+    dc stop db
+    # --type=immediate: consistent at the end of that backup, i.e. the moment the update began.
+    dc run --rm --no-deps -T -u postgres --entrypoint pgbackrest db \
+        --stanza=districom --repo=1 --set="$label" --type=immediate --target-action=promote --delta restore
+fi
+
+dc up -d --no-build db
+wait_healthy db
+dc up -d --no-build
+wait_healthy backend
+"$ROOT/deploy/bin/smoke" || die "smoke test failed after the rollback"
+if [ "$restore_db" -eq 1 ]; then
+    # A restore starts a new timeline: a fresh full backup makes it the base of the next restores.
+    "$ROOT/deploy/bin/backup" full "after rollback"
+fi
+printf '%s rollback to %s (restore-db=%s) ok\n' "$(date -Is)" "$previous" "$restore_db" >> "$STATE_DIR/updates.log"
+log "rollback: done, running $previous"

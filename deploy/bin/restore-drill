@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# Restores a backup into a throwaway PostgreSQL (never production) and compares it with production.
+#   deploy/bin/restore-drill [--repo 1|2] [--target-time 'YYYY-MM-DD HH:MM:SS-03'] [--network NAME] [--keep]
+# --repo 2 does not mount the backup disk at all: it proves that the off-site copy alone is enough (loss of
+# the whole office). --target-time restores to that minute (point in time) and skips the comparison.
+# Monthly with --repo 1 and quarterly with --repo 2 (docs/OPERATIONS.md); the result is kept in deploy/state/drills.
+# shellcheck source=lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+repo=1 target="" network=bridge keep=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --repo) repo="$2"; shift 2 ;;
+        --target-time) target="$2"; shift 2 ;;
+        --network) network="$2"; shift 2 ;;
+        --keep) keep=1; shift ;;
+        *) die "unknown option $1" ;;
+    esac
+done
+image="districom/db:current"
+name="districom-drill"
+volume="districom-drill-data"
+out="$STATE_DIR/drills/$(date +%Y%m%d-%H%M%S)-repo$repo"
+mkdir -p "$out"
+
+cleanup() {
+    [ "$keep" -eq 1 ] && return 0
+    docker rm -f "$name" > /dev/null 2>&1 || true
+    docker volume rm "$volume" > /dev/null 2>&1 || true
+}
+trap cleanup EXIT
+docker rm -f "$name" > /dev/null 2>&1 || true
+docker volume rm "$volume" > /dev/null 2>&1 || true
+
+run_args=(--network "$network" -v "$volume:/var/lib/postgresql/data" -e PGBACKREST_REPO="$repo" -e PGBACKREST_PG1_USER="$POSTGRES_USER")
+[ -f "$ROOT/deploy/pgbackrest.env" ] && run_args+=(--env-file "$ROOT/deploy/pgbackrest.env")
+[ "$repo" = 1 ] && run_args+=(-v "$BACKUP_ROOT/pgbackrest:/var/lib/pgbackrest:ro")
+# Extra `docker run` arguments, e.g. a CA file for a private S3 endpoint (deploy/tests).
+# shellcheck disable=SC2206
+[ -n "${DRILL_DOCKER_ARGS:-}" ] && run_args+=(${DRILL_DOCKER_ARGS})
+
+compare=1
+[ -n "$target" ] && compare=0
+if [ "$compare" -eq 1 ]; then
+    if dc ps --status running -q db | grep -q .; then
+        log "drill: production snapshot, then a WAL switch archived in every repository (pgBackRest check)"
+        psql_db -f - < "$ROOT/deploy/sql/verify.sql" > "$out/production.txt"
+        pgbr check
+    else
+        log "drill: production is not running here; only the restored copy is fingerprinted"
+        compare=0
+    fi
+fi
+
+restore_opts=(--stanza=districom --archive-mode=off)
+if [ -n "$target" ]; then
+    restore_opts+=(--type=time "--target=$target" --target-action=promote)
+fi
+started=$(date +%s)
+log "drill: restoring from repo$repo${target:+ to $target}"
+docker run --rm "${run_args[@]}" -u postgres --entrypoint pgbackrest "$image" "${restore_opts[@]}" restore
+docker run -d --name "$name" "${run_args[@]}" -e POSTGRES_PASSWORD=unused "$image" postgres -c archive_mode=off > /dev/null
+
+waited=0
+until [ "$(docker exec -u postgres "$name" psql -XtAq -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c 'SELECT pg_is_in_recovery()' 2>/dev/null)" = f ]; do
+    [ "$waited" -lt 900 ] || die "the restored database did not finish recovery in 15 minutes (docker logs $name)"
+    sleep 2; waited=$((waited + 2))
+done
+finished=$(date +%s)
+docker exec -i -u postgres "$name" psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f - \
+    < "$ROOT/deploy/sql/verify.sql" > "$out/restored.txt"
+
+{
+    echo "repo=$repo target=${target:-latest} restore_seconds=$((finished - started))"
+    echo "restored_rows_total=$(awk '$1=="rows" {s+=$3} END {print s+0}' "$out/restored.txt")"
+} > "$out/summary.txt"
+if [ "$compare" -eq 1 ]; then
+    if diff -u "$out/production.txt" "$out/restored.txt" > "$out/diff.txt"; then
+        echo "result=IDENTICAL" >> "$out/summary.txt"
+    else
+        echo "result=DIFFERENT (see diff.txt; writes after the snapshot also show up here)" >> "$out/summary.txt"
+    fi
+else
+    echo "result=RESTORED (no comparison)" >> "$out/summary.txt"
+fi
+cat "$out/summary.txt"
+log "drill: report in $out"
+grep -q 'result=DIFFERENT' "$out/summary.txt" && exit 2
+exit 0

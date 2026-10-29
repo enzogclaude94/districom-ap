@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Nightly logical dump (pg_dump, custom format) on the backup disk: an independent second format, handy to
+# inspect or restore one table. files-sync copies it off-site, encrypted. Keeps DUMP_RETENTION_DAYS days locally.
+# shellcheck source=lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+name="districom-$(date +%Y%m%d-%H%M%S).dump"
+dc exec -T -u postgres db sh -c \
+    "pg_dump -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" --format=custom --no-owner -f /var/lib/districom-dumps/$name.partial \
+     && mv /var/lib/districom-dumps/$name.partial /var/lib/districom-dumps/$name \
+     && find /var/lib/districom-dumps -name 'districom-*.dump' -mtime +${DUMP_RETENTION_DAYS:-30} -delete"
+log "dump written: $BACKUP_ROOT/dumps/$name"
+date +%s > "$STATE_DIR/dump.ok"
