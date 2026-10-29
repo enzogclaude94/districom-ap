@@ -140,7 +140,7 @@ El resultado queda en `deploy/state/drills/` (`summary.txt`: duración, `amcheck
    - `deploy/bin/rollback --restore-db`: además, la base vuelve al backup previo a la actualización. **Quita de la base todo lo cargado después de la actualización**, así que tiene tres protecciones:
      1. sin confirmación **solo informa**: compara la base actual con la huella tomada al hacer el backup y lista, tabla por tabla, qué cambió desde entonces (filas de antes y de ahora). No toca nada y termina con código 3;
      2. para ejecutarlo hay que escribir la **etiqueta del backup** que muestra el informe (en una terminal, cuando la pide; en un script, `--confirm <etiqueta>`). Otra cosa cancela;
-     3. antes de restaurar hace un backup **pre-rollback** del estado que se descarta, y anota su etiqueta en `deploy/state/rollback-safety-label`: lo descartado se puede mirar o recuperar con `restore-drill --set`. Después de una reversión de base, otra sobre la misma actualización se rechaza.
+     3. antes de restaurar hace un backup **pre-rollback** del estado que se descarta, y anota su etiqueta en `deploy/state/rollback-safety-label`: lo descartado se puede mirar o recuperar con `restore-drill --set`. Ese backup sigue la retención de cada repositorio: en `repo1` hasta que los backups completos siguientes lo vencen (una a dos semanas), en `repo2` 90 días. Después de una reversión de base, otra sobre la misma actualización se rechaza.
 5. Registro: `deploy/state/updates.log`.
 
 ## 7. Acceso remoto (Tailscale) **[S3]**

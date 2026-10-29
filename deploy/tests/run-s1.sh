@@ -284,7 +284,8 @@ expect "monitor fails when the backup disk is not there" sh -c "BACKUP_ROOT='$no
 # ---------------------------------------------------------------- T12 update and rollback
 section "T12 Update to a new version with a migration, then rollback restoring the database"
 cd "$ROOT"
-start_branch="$(git rev-parse --abbrev-ref HEAD)"
+# The branch to come back to, or the commit when the checkout is detached (a worktree, CI).
+start_branch="$(git symbolic-ref -q --short HEAD || git rev-parse HEAD)"
 start_ref="$(git rev-parse HEAD)"
 head_rev="$(dc run --rm --no-deps -T backend alembic heads 2> /dev/null | awk '{print $1}' | tail -n1)"
 q "SELECT 1" > /dev/null
