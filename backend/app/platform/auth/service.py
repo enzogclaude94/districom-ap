@@ -184,15 +184,20 @@ def open_sessions(db: Session, user_id: int, settings: Settings) -> list[OpenSes
     ]
 
 
-def revoke_own_session(db: Session, user: User, session_id: int) -> bool:
-    """The user closes one of their own sessions; False when it is not theirs or already closed (same answer)."""
+def revoke_session_of(db: Session, user_id: int, session_id: int, reason: str, *, by: int) -> bool:
+    """Close one open session of the user, in the caller's transaction; False when it is not theirs or is closed."""
     result = db.execute(
         update(UserSession)
-        .where(UserSession.id == session_id, UserSession.user_id == user.id, UserSession.revoked_at.is_(None))
-        .values(revoked_at=_now(), revoked_reason="revoked_by_user", revoked_by=user.id)
+        .where(UserSession.id == session_id, UserSession.user_id == user_id, UserSession.revoked_at.is_(None))
+        .values(revoked_at=_now(), revoked_reason=reason, revoked_by=by)
         .execution_options(synchronize_session=False)
     )
-    if not result.rowcount:  # type: ignore[attr-defined]
+    return bool(result.rowcount)  # type: ignore[attr-defined]
+
+
+def revoke_own_session(db: Session, user: User, session_id: int) -> bool:
+    """The user closes one of their own sessions; False when it is not theirs or already closed (same answer)."""
+    if not revoke_session_of(db, user.id, session_id, "revoked_by_user", by=user.id):
         db.rollback()
         return False
     record_event(
