@@ -114,7 +114,8 @@ Al cerrar una fase, reportar: qué se implementó, archivos/módulos, decisiones
 
 ## 9. Documentación
 
-- Si cambia una regla de negocio → actualizar `docs/BUSINESS_RULES.md` / `METRICS.md` / `docs/CUSTOMER_STATUS.md` / `docs/OPPORTUNITY_ENGINE.md` **en el mismo commit**.
+- Si cambia una regla de negocio → actualizar `docs/BUSINESS_RULES.md` / `METRICS.md` / `docs/CUSTOMER_STATUS.md` / `docs/OPPORTUNITY_ENGINE.md` **en el mismo commit**. Si cambia una regla de importación (fuente, columnas, exclusión, idempotencia, mapping) → `docs/IMPORTS.md` en el mismo commit.
+- Los archivos reales de AXUM / STORE SYS nunca se commitean: los fixtures son sintéticos con la misma estructura (`docs/IMPORTS.md §9`).
 - Decisiones arquitectónicas importantes → ADR en `docs/ADR/NNN-titulo.md`.
 - `CHANGELOG.md` al cerrar cada unidad relevante, explicando qué cambió realmente.
 

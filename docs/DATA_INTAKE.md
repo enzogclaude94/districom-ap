@@ -1,7 +1,7 @@
 # DATA_INTAKE — Exportaciones reales para la Fase 1
 
-> v0.1 · 2026-10-02 · Estado: **esperando muestras de Enzo**
-> Objetivo: diseñar mappings e importadores sobre archivos reales, no sobre supuestos. Mientras no lleguen y se analicen, la Fase 1 no se implementa (`PLAN.md §11`).
+> v0.2 · 2026-10-30 · Estado: **muestras STORE SYS recibidas; faltan maestro de artículos y AXUM No Compra** (§7).
+> Este documento fue el pedido inicial de exportaciones (2026-10-02). La lista de reportes cambió con el brief de Fase 1 de Enzo (2026-10-29): las fuentes vigentes, su formato real y sus reglas están en `docs/IMPORTS.md` y ADR 014. §1–§6 se conservan como historia del pedido; donde contradigan a `docs/IMPORTS.md`, manda `docs/IMPORTS.md`.
 
 ## 1. Cómo exportar y enviar
 
@@ -85,3 +85,18 @@ Respuestas cortas alcanzan; si no sabés alguna, la deduzco de los datos y te la
 2. Informe de hallazgos con respuesta propuesta a D3–D6 y a los riesgos R1, R2, R8–R12 de `PLAN.md`.
 3. Propuesta de mapping por archivo y ajustes al modelo (`DATA_MODEL.md`), para tu aprobación.
 4. Recién con tu aprobación se implementan los importadores (Fase 1).
+
+## 7. Estado al 2026-10-30
+
+Las muestras son **de formato**: sirven para verificar firma, encoding, estructura, columnas, claves y granularidad, y para construir fixtures sintéticos. No son la historia productiva inicial y **no se commitean** (se guardan en los archivos del proyecto, fuera del repositorio).
+
+| Fuente vigente (brief de Fase 1) | Muestra | Estado | Perfil |
+|---|---|---|---|
+| STORE SYS · Clientes (con zona y vendedor) | `clientes.xls` | Recibida | `docs/IMPORTS.md §3.2` |
+| STORE SYS · Ventas artículos/clientes | `ventas.xls` (1 día) | Recibida; falta una de varios días (ADR 014 S7) | `docs/IMPORTS.md §3.3` |
+| STORE SYS · Comprobantes emitidos | `comprobantes emitidos.xls` (1 día) | Recibida | `docs/IMPORTS.md §3.4` |
+| STORE SYS · Maestro de artículos | — | **Pendiente** | `docs/IMPORTS.md §3.5` |
+| AXUM · No Compra (CSV) | — | **Pendiente** | `docs/IMPORTS.md §3.6` |
+| (derivados) Clientes por zona / por vendedor | `.xlsx` generados con openpyxl | No son fuente | `docs/IMPORTS.md §3.1` |
+
+Lo que ya no se pide en Fase 1 (D‑H): programación, visitas y pedidos de AXUM (A3–A5 de §3). Se vuelven a pedir cuando exista una fuente confiable.

@@ -1,6 +1,6 @@
 # ARCHITECTURE — DistriCom
 
-> v0.3 · 2026-10-04 · Fase 0 implementada. v0.2: DistriCom como **plataforma modular** (ADR 006). v0.3: módulo **Rendiciones** aprobado (ADR 007), empleados y roles por módulo en plataforma.
+> v0.3 · 2026-10-04 · Fase 0 implementada. v0.2: DistriCom como **plataforma modular** (ADR 006). v0.3: módulo **Rendiciones** aprobado (ADR 007), empleados y roles por módulo en plataforma. v0.4 (2026-10-30): pipeline de importación de la Fase 1 de Comercial (ADR 014, §6).
 
 ## 1. Contexto
 
@@ -8,7 +8,7 @@
 
 | Pieza | Estado | Alcance |
 |---|---|---|
-| **Plataforma (DistriCom Core)** | En construcción | Usuarios, sesiones, roles por módulo, configuración, auditoría, sistemas fuente, identidades compartidas (empleados y funciones; clientes y localidades en Fase 1), framework de importación. |
+| **Plataforma (DistriCom Core)** | En construcción | Usuarios, sesiones, roles por módulo, configuración, auditoría, sistemas fuente, identidades compartidas (empleados y funciones; clientes en Fase 1), framework de importación, mappings externos y calidad de datos (Fase 1). |
 | **Inteligencia Comercial** (`commercial`, `/comercial`) | En desarrollo | Capa de **inteligencia comercial** sobre AXUM y STORE SYS. Alcance en `ROADMAP.md`. |
 | **Rendiciones** (`settlements`, `/rendiciones`) | En desarrollo (R2) | Rendiciones de reparto y boca de expendio, cajas, cheques, pendientes, gastos, combustible, pagos y cuenta interna y liquidación interna de empleados por período (área protegida, ADR 010), con ledger propio (ADR 007, §4.6). |
 | Otros módulos | Sin desarrollar | Se agregan con el patrón de §4.5. Nada de su modelo se anticipa. |
@@ -20,7 +20,7 @@ Sistemas fuente:
 
 La aplicación **no** reemplaza ni escribe en esos sistemas. La ingesta inicial es por archivos (XLSX/CSV); las APIs vendrán en el futuro.
 Usuarios iniciales: propietario, administración y dirección (pocos usuarios).
-Escala: 3 preventistas, 7 rutas, ~600 clientes, 500+ SKU, historia desde 2026-01-01.
+Escala estimada: 3 preventistas, zonas RUTA 01–08, ~820 clientes en el maestro de STORE SYS, 500+ SKU. La historia empieza en la puesta en marcha (ADR 014 §2.13).
 
 ## 2. Vista general
 
@@ -34,7 +34,7 @@ Escala: 3 preventistas, 7 rutas, ~600 clientes, 500+ SKU, historia desde 2026-01
                 │  FastAPI (backend, un proceso)       │
                 │  ├─ core/ db/      técnico           │
                 │  ├─ platform/      DistriCom Core    │  auth, settings, audit, sources,
-                │  │                                   │  (Fase 1) imports, identity, parties
+                │  │                                   │  (Fase 1) imports, mappings, quality, customers
                 │  ├─ modules/                         │
                 │  │   ├─ commercial/  Intel. Comercial │  /api/v1/commercial/*
                 │  │   └─ settlements/ Rendiciones      │  /api/v1/settlements/*
@@ -58,7 +58,7 @@ Escala: 3 preventistas, 7 rutas, ~600 clientes, 500+ SKU, historia desde 2026-01
 | Formularios | React Hook Form + Zod | Zod valida forma; las reglas de negocio se validan en backend. |
 | Gráficos | **ECharts** (vía `echarts-for-react`) | Heatmaps, sparklines, funnels y matrices grandes rinden mejor que Recharts. Una sola librería. |
 | Backend | Python 3.12+, FastAPI, Pydantic v2, SQLAlchemy 2, Alembic | |
-| Imports | `openpyxl` (read‑only, sin macros) + `csv` estándar | Ver PLAN M1. |
+| Imports | `xlrd` 2.x (XLS BIFF) + `openpyxl` (XLSX read‑only, sin macros) + `csv` estándar | Ver PLAN M1 y ADR 014. |
 | Auth | Argon2id (`argon2-cffi`), sesiones en DB | Ver §8. |
 | DB | PostgreSQL 17 | |
 | Tooling | `uv`, `ruff`, `mypy`, `pytest`; `pnpm`, `eslint`, `prettier`, `vitest`, Playwright | |
@@ -78,9 +78,10 @@ backend/app/
 │   ├── audit/             audit_events
 │   ├── settings/          app_settings + registro de parámetros por scope (platform.*, <módulo>.*)
 │   ├── sources/           source_systems
-│   ├── imports/           [Fase 1] framework: batches, files, staging, errors, plantillas, TabularReader, registro de tipos
-│   ├── identity/          [Fase 1] external_entity_mappings
-│   └── parties/           [R0] employees, employee_functions, registro de funciones · [Fase 1] customers (identidad), localities
+│   ├── imports/           [Fase 1] framework: import_files, import_jobs, import_rows (staging), lectores CSV/XLSX/XLS, registro de tipos, pipeline (ADR 014)
+│   ├── mappings/          [Fase 1] external_entity_mappings (resolución y decisiones auditadas)
+│   ├── quality/           [Fase 1] data_quality_issues + registro de códigos por módulo
+│   └── parties/           [R0] employees, employee_functions, registro de funciones · [Fase 1] customers (identidad)
 ├── modules/
 │   ├── __init__.py        MODULES: lista literal de módulos instalados
 │   └── commercial/        Inteligencia Comercial
@@ -88,8 +89,9 @@ backend/app/
 │       ├── api.py         router montado en /api/v1/commercial
 │       ├── settings.py    parámetros commercial.* con defaults y etiquetas
 │       ├── public.py      [cuando otro módulo lo necesite] interfaz pública
-│       ├── models/        [Fase 1] routes, assignments, products, sales, visits, orders…
-│       ├── imports/       [Fase 1] adaptadores AXUM / STORE SYS + tipos commercial.*
+│       ├── masters/       [Fase 1] zonas y días, listas de precio, categorías, tipos de comprobante, motivos, productos, familias, precios, asignaciones con historia
+│       ├── facts/         [Fase 1] documents, sale_lines, no_purchase_events
+│       ├── imports/       [Fase 1] adaptadores por reporte STORE SYS / AXUM + tipos commercial.* (docs/IMPORTS.md)
 │       ├── analytics/     [Fase 2] REGISTRO ÚNICO de métricas (IDs = METRICS.md), filtros, períodos
 │       └── customer_status/  opportunities/  goals/  incentives/  reports/   [Fases 4–9]
 │   └── settlements/       Rendiciones (ADR 007)
@@ -135,11 +137,11 @@ Reglas que siguen vigentes:
 
 ### 4.3 Excepción analítica: lectura directa del modelo canónico
 
-Dentro de un módulo, los paquetes **operacionales** (en Comercial: `imports/`, `customer_status/`, `opportunities/`, `goals/`, `incentives/`…) mantienen encapsulación: son dueños de sus tablas, escriben solo a través de sus servicios y exponen interfaces Python.
+Dentro de un módulo, los paquetes **operacionales** (en Comercial: `masters/`, `facts/`, `imports/`, `customer_status/`, `opportunities/`, `goals/`, `incentives/`…) mantienen encapsulación: son dueños de sus tablas, escriben solo a través de sus servicios y exponen interfaces Python.
 
 `modules/commercial/analytics/` es la excepción explícita, para no sobrearquitecturar consultas BI:
 
-- **Puede** escribir consultas SQL (SQLAlchemy Core) que crucen directamente las tablas **del módulo comercial y de plataforma** que necesite: `commercial.sales`, `sale_items`, `products`, `product_categories`, `brands`, `routes`, asignaciones, `scheduled_visits`, `visits`, `orders`, `customer_status_*`, `opportunities`, etc., y `public.customers`, `employees`, `employee_functions`, `localities`. No tiene que encadenar servicios para armar un join.
+- **Puede** escribir consultas SQL (SQLAlchemy Core) que crucen directamente las tablas **del módulo comercial y de plataforma** que necesite: `commercial.documents`, `sale_lines`, `document_types`, `products`, `product_categories`, `product_families`, `price_lists`, `zones`, `zone_visit_days`, asignaciones, `no_purchase_events`, `customer_status_*`, `opportunities`, etc., y `public.customers`, `employees`, `employee_functions`. Toda exclusión se lee de banderas canónicas (`document_types.commercial_universe`, `products.analytics_eligible`, `customers.is_generic`), nunca de códigos o nombres escritos en una consulta. No tiene que encadenar servicios para armar un join.
 - **Nunca** lee tablas de otro módulo. Un reporte que cruce módulos se resuelve cuando exista, con la interfaz pública o una vista de solo lectura publicada por el módulo dueño.
 - **Solo lectura.** `analytics/` nunca inserta, actualiza ni borra filas. Los procesos que escriben resultados derivados (estados de cliente, oportunidades) viven en su propio paquete, aunque lean de `analytics/`.
 - **Centralizado.** Esas consultas están únicamente en `analytics/` (registro de métricas, filtros, períodos y servicios por pantalla). Los routers y los demás paquetes no escriben SQL analítico propio: piden la métrica a `analytics/`.
@@ -201,7 +203,8 @@ frontend/src/
 │       ├── portfolio/{productos,categorias,marcas,penetracion}
 │       ├── gestion/{objetivos,incentivos,reuniones}
 │       ├── boca
-│       └── datos/{importaciones,calidad}
+│       ├── maestros/{clientes,productos,zonas,vendedores,listas}   [Fase 1]
+│       └── datos/{importaciones,mapeos,calidad}                    [Fase 1]
 ├── modules/registry.ts           registro de módulos (key, nombre, ruta base, navegación); lo usan solo las rutas de app/
 ├── modules/commercial/           navegación, API y features del módulo
 ├── modules/settlements/          ídem para Rendiciones (incluye su logo oficial); cash/ = API y pantallas de Cajas
@@ -222,45 +225,46 @@ frontend/src/
 
 ## 6. Pipeline de importación
 
-```
-UPLOAD → IDENTIFICACIÓN → MAPPING → PARSING → VALIDACIÓN → NORMALIZACIÓN
-       → RESOLUCIÓN DE ENTIDADES → PREVIEW → IMPORT (transacción) → CHECKS → AUDITORÍA
-```
-
-El framework (lote, archivo, staging, errores, plantillas, lectores por formato) es de **plataforma**; los tipos de import y los adaptadores son de cada **módulo** (`commercial.sales`, `commercial.visits`…), registrados en código.
-
-1. **Upload**: límite de tamaño (`UPLOAD_MAX_SIZE`), extensión + MIME + firma mágica validadas contra el **registro de formatos** (V1: `.xlsx` = ZIP, `.csv` = texto). Nombre de archivo sanitizado; se guarda con nombre UUID fuera del webroot. Hash SHA‑256.
-2. **Identificación**: el usuario elige sistema + tipo (o se sugiere por encabezados conocidos).
-3. **Mapping**: detección automática por sinónimos (`Cliente`, `Razón Social`, `NomCliente` → `customer_name`); corrección manual; guardado como plantilla (`import_column_mappings`).
-4. **Parsing**: el `TabularReader` del formato convierte el archivo en filas crudas. V1: `openpyxl` read‑only con `data_only=True` (nunca ejecuta fórmulas ni macros) para `.xlsx`; CSV con detección de encoding (UTF‑8 / Latin‑1) y separador.
-5. **Validación** por fila → `import_errors` con fila, columna, código, severidad (`ERROR`/`WARNING`).
-6. **Normalización**: espacios, mayúsculas, decimales `1.234,56`, fechas `dd/mm/yyyy`, CUIT a 11 dígitos, strings vacíos → NULL.
-7. **Resolución**: por ID externo exacto → `external_entity_mappings`; lo no resuelto queda `PENDING_REVIEW`, nunca se fusiona en silencio.
-8. **Preview**: filas, válidas, warnings, errores, nuevas, actualizaciones, duplicados; descarga de errores CSV.
-9. **Import**: una transacción por batch; upsert por business key; rollback total ante error crítico.
-10. **Checks post‑import** y evento de auditoría.
-
-**Idempotencia** (tres defensas): hash de archivo (rechazo de duplicado exacto salvo reproceso deliberado), business key de documento (`source_system + external_document_id`, o `doc_type + punto_venta + número`), clave de línea (`sale_id + line_number`).
-
-**Dos capas separadas: formato y sistema fuente.** El adaptador de sistema no sabe de qué formato vienen las filas.
+Decisiones en ADR 014 (amplía ADR 003); reglas por fuente, idempotencia, mappings y errores en `docs/IMPORTS.md`.
 
 ```
-archivo .xlsx / .csv / .xls (futuro)      API AXUM / STORE SYS (futuro)
+SUBIR → DETECTAR → ANALIZAR (staging + resolución, nada canónico) → PREVIEW
+      → CONFIRMAR (operator) → ESCRIBIR (una transacción, lock por tipo) → AUDITAR + CALIDAD
+```
+
+El **framework** es de **plataforma** (`platform/imports`, `mappings`, `quality`): archivo original, job, staging, lectores por formato, registro de tipos, mappings externos e issues de calidad. Los **tipos de import, adaptadores y códigos de calidad** son de cada **módulo** y se registran en `ModuleSpec` (`commercial.store_sys.customers`, `.sales_lines`, `.documents`, `.products`, `commercial.axum.no_purchase`).
+
+1. **Subir:** límite `UPLOAD_MAX_SIZE_MB`; extensión permitida **y firma** del contenido; nombre sanitizado solo para mostrar; el original se guarda con nombre UUID bajo `UPLOAD_DIR` (volumen persistente con backup, hilo Servidor), nunca se modifica; SHA‑256.
+2. **Detectar:** el lector se elige **por firma** (OLE2 → XLS, ZIP → XLSX, texto → CSV), nunca por extensión; cada adaptador puntúa su firma de encabezados. Con el tipo conocido, mismo `sha256` + tipo ya importado → job `duplicate`, sin analizar.
+3. **Analizar:** el adaptador normaliza y valida cada fila y resuelve entidades sin escribir datos canónicos; todo queda en `import_rows` (crudo, normalizado, mensajes); mappings, zonas e issues solo se proponen y se crean al confirmar.
+4. **Preview:** contadores, filas rechazadas, warnings, pendientes de resolución y lo que se reemplazaría.
+5. **Confirmar:** `operator`; lock consultivo de PostgreSQL por tipo; **una transacción**; error estructural o inesperado → rollback total y job `failed`.
+6. **Auditar:** `platform.import.*` en `audit_events`; apertura y cierre de `data_quality_issues`.
+
+Estados del job: `pending`, `processing`, `completed`, `completed_with_warnings`, `failed`, `duplicate`, `cancelled`.
+
+**Idempotencia** (detalle en `docs/IMPORTS.md §5`): (1) archivo idéntico por `sha256` + tipo; (2) clave natural por entidad (código de cliente o producto, `document_key` de comprobante, vigencias); (3) ventas sin clave de línea → reemplazo por **período + scope** declarado, que se detiene si no es demostrable. Nunca se deduplica por contenido algo que puede repetirse legítimamente.
+
+**Resolución de entidades:** mapping existente → ID externo exacto → regla segura configurable → pendiente/ambiguo → decisión manual auditada. El vínculo entidad ↔ sistema vive solo en `external_entity_mappings`; nunca hay fusión por nombre ni fuzzy matching.
+
+**Dos capas separadas: formato y sistema fuente.**
+
+```
+archivo .xls (BIFF) / .xlsx / .csv          API AXUM / STORE SYS (futuro)
         │                                          │
-  TabularReader (por formato)              ApiClient (por sistema)
-        │  Iterable[RawRecord]                     │  Iterable[RawRecord]
+  lector por formato (firma)               ApiClient (por sistema)
+        │  RawSheet: filas de celdas tipadas       │
         └──────────────────┬───────────────────────┘
-                     SourceAdapter (por sistema + tipo: STORE SYS ventas, AXUM visitas…)
-                           │  Iterable[CanonicalSale | CanonicalVisit | …]
-                  Normalización → Resolución → Modelo canónico
+          adaptador por reporte (commercial.store_sys.documents…)
+                           │  registros normalizados + mensajes
+            resolución → modelo canónico → (analítica futura)
 ```
 
-- `RawRecord`: número de fila/origen + valores por columna (texto, número, fecha o vacío), ya despegados del formato. Es lo único que recibe el `SourceAdapter`, junto con el mapping de columnas.
-- `TabularReader`: un lector por formato, registrado por extensión + firma (`.xlsx`, `.csv` en V1). Agregar `.xls` = registrar un lector nuevo (candidatos: `xlrd` para BIFF o conversión con LibreOffice headless), sin tocar adaptadores, validación ni analítica. Se decide el parser cuando lleguen los exports reales de STORE SYS (PLAN D2).
-- `SourceAdapter`: semántica del sistema fuente (qué columna es el comprobante, cómo se lee el signo de una NC, cómo se deduce el canal). No importa `openpyxl` ni `csv`.
-- Reemplazar archivos por API = escribir un `ApiClient` que emita `RawRecord` (o un adaptador que emita registros canónicos directamente); normalización, resolución y analítica no cambian.
+- **Lectores:** `xlrd` 2.x para XLS BIFF2–8 (STORE SYS exporta BIFF7, que `openpyxl` no lee); `openpyxl` read‑only con `data_only` para XLSX (sin fórmulas ni macros, `defusedxml`); `csv` estándar con detección de encoding y separador. Un `.xls` que en realidad es HTML o SpreadsheetML se rechaza hasta que una muestra real justifique su lector. Sin dataframes (PLAN M1).
+- **Adaptadores:** columnas requeridas y opcionales con alias **en código**, versionados (`parser_version` en el job); sin plantillas de columnas editables (ADR 014 reemplaza esa parte de ADR 003). No importan `xlrd`, `openpyxl` ni `csv` (contrato de import‑linter).
+- Reemplazar archivos por API = un `ApiClient` que emita las mismas filas; normalización, resolución y modelo no cambian.
 
-Imports síncronos en V1 (volumen chico). Si superan ~30 s se pasan a una tarea en background **dentro del mismo proceso** (tabla `import_batches` como cola), sin Celery.
+**Ejecución:** síncrona en V1; si un análisis supera ~20 s medidos, pasa a tarea en el mismo proceso con el estado en `import_jobs` (sin Celery ni Redis). Operación y recuperación por CLI idempotente (`python -m app.cli imports …`); la programación de tareas en el servidor la define el hilo Servidor.
 
 ## 7. Procesos derivados (cálculos)
 
@@ -281,19 +285,19 @@ Son procesos del módulo comercial. Se ejecutan como comandos CLI (`python -m ap
   - **Etapa 1 (R0, ADR 007):** tabla `user_module_roles(user_id, module_key, role)` con roles `viewer < operator < admin`. `users.role = admin` es el **administrador de plataforma** (usuarios, empleados, configuración general) y tiene `admin` en todos los módulos; los demás usuarios acceden solo a los módulos asignados. Todo endpoint de módulo usa `require_module_access("<módulo>", min_role)`; `GET /auth/me` devuelve `modules: [{key, name, role}]`. Asignación por CLI (`grant-module-role`, `revoke-module-role`).
   - **Áreas protegidas (R8‑1, ADR 010):** un módulo declara áreas con autorización propia en `ModuleSpec.protected_areas` (`ProtectedAreaSpec(key="<módulo>.<área>", name, explicit_grant_required)`). La capa central resuelve `area_role` / `require_area_access`: el área exige un rol en su módulo **y** un permiso propio (fila de `user_module_roles` con la clave del área); con `explicit_grant_required` el admin de plataforma no la hereda. Sin el área, 404 sin detalles; por debajo del rol, 403. `GET /auth/me` devuelve además `areas: [{key, name, role}]`. El admin de plataforma otorga y revoca (CLI o `PUT /auth/access-grants`, `POST /auth/access-grants/revoke`) sin poder leer el área antes. Primera área: `settlements.employee_finance` (Rendiciones › Empleados); segunda, `settlements.store_sys_import` (Rendiciones › Integración Store Sys, R9‑1, ADR 011).
   - **Etapa 2 (solo si hace falta):** permisos por acción como mapa en código rol → permisos.
-  - `admin` de plataforma: usuarios, empleados y configuración general. `admin` de módulo: imports, configuración, correcciones y aprobaciones del módulo. `operator`: operación diaria (en Rendiciones: cargar y cerrar rendiciones, acreditar pendientes, registrar pagos). `viewer`: lectura.
+  - `admin` de plataforma: usuarios, empleados y configuración general. `admin` de módulo: imports, configuración, correcciones y aprobaciones del módulo. `operator`: operación diaria (en Rendiciones: cargar y cerrar rendiciones, acreditar pendientes, registrar pagos; en Comercial: subir, analizar y confirmar imports y resolver mappings operativos, ADR 014 §2.12). `viewer`: lectura.
 - CSRF: `SameSite=Lax` + header custom obligatorio en métodos mutantes.
 - Rate limit simple en login (en memoria, por IP+usuario).
 - Validación estricta Pydantic en todos los endpoints; queries parametrizadas.
 - Secretos solo por variables de entorno; `.env.example` sin valores reales.
 - PII (CUIT, teléfono, dirección) nunca en logs ni mensajes de error.
-- Archivos subidos: ver §6.1. Sin ejecución de macros ni contenido embebido.
+- Archivos subidos: ver §6 y `docs/IMPORTS.md §9`. Sin ejecución de macros ni contenido embebido.
 
 ## 9. Observabilidad
 
-- Logging JSON estructurado (stdlib `logging` + formatter JSON) con `request_id` (header `X-Request-ID`) e `import_batch_id`.
+- Logging JSON estructurado (stdlib `logging` + formatter JSON) con `request_id` (header `X-Request-ID`) e `import_job_id`; nunca valores de filas importadas.
 - `/api/v1/health` (liveness + DB).
-- Métricas de import en `import_batches` (duración, filas, errores).
+- Métricas de import en `import_jobs` (tiempos, filas por estado, warnings, errores).
 - Hook de error tracking preparado (Sentry opcional por variable de entorno, desactivado por defecto).
 
 ## 10. Despliegue y backups
@@ -309,10 +313,10 @@ Son procesos del módulo comercial. Se ejecutan como comandos CLI (`python -m ap
 
 ## 12. Futuras integraciones y extensiones
 
-- APIs AXUM / STORE SYS → nuevos `SourceAdapter`.
+- APIs AXUM / STORE SYS → nuevos `ApiClient` + adaptador por reporte.
 - Asistente IA: consumirá el **registro de métricas** y las reglas estructuradas (no SQL libre ni UI).
 - ML (churn, propensión, next best product): puntos de extensión en `modules/commercial/customer_status/` y `opportunities/rules/` (una regla puede ser un modelo con el mismo contrato: inputs → score + motivos).
-- Market basket (support/confidence/lift) a partir de `sale_items`.
+- Market basket (support/confidence/lift) a partir de `sale_lines` (unidades por cliente, producto y día).
 
 ## 13. ADRs
 
@@ -323,3 +327,5 @@ Son procesos del módulo comercial. Se ejecutan como comandos CLI (`python -m ap
 - 005 Registro centralizado de métricas en backend.
 - 006 Plataforma modular (núcleo compartido + módulos).
 - 007 Módulo Rendiciones (`settlements`): identidad, empleados en plataforma, roles por módulo, ledger propio, logo.
+- 008–012 Rendiciones: integridad del ledger, bocas, finanzas de empleados, contrato Store Sys del importe esperado, cierre del día.
+- 014 Importación y maestros de Inteligencia Comercial (Fase 1): framework en plataforma, XLS BIFF, staging, mappings, calidad, zonas, comprobantes y líneas de venta.

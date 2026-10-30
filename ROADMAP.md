@@ -1,6 +1,7 @@
 # ROADMAP — DistriCom
 
 > v0.4 · 2026-10-04. v0.4: carril **Rendiciones** (ADR 007); PL‑1 en DONE; empleados y roles por módulo adelantados a R0.
+> v0.5 · 2026-10-30: Fase 1 de Comercial **IN_PROGRESS** con diseño F1.0 aprobado (ADR 014) y subfases F1.0–F1.8.
 > Estados: `PLANNED`, `PREPARATION` (análisis previo, sin implementación), `IN_PROGRESS`, `BLOCKED`, `DONE`.
 > Una fase es `DONE` solo si cumple la Definition of Done de fase (`CLAUDE.md §7`) y todos sus criterios críticos están en PASS.
 
@@ -12,7 +13,7 @@ DistriCom es una plataforma modular (ADR 006). Este roadmap tiene tres carriles:
 |---|---|---|---|
 | PL‑1 | Preparación modular (P0‑1 … P0‑7 de la revisión del 2026-10-03) | **DONE** (PR #3, mergeado el 2026-10-04) | Fase 0 |
 | PL‑2a | Empleados: `employees` + `employee_functions` con alta manual y registro de funciones por módulo | **DONE** (R0, ADR 007) | PL‑1 |
-| PL‑2b | Identidades `customers`, `localities`, vinculación por imports y framework de importación | PLANNED (se construye dentro de la Fase 1) | PL‑2a |
+| PL‑2b | Framework de importación (jobs, archivos, lectores CSV/XLSX/XLS, staging), `external_entity_mappings`, `data_quality_issues` e identidad `customers` | PLANNED (se construye en F1.1b y F1.2, ADR 014) | PL‑2a |
 | PL‑3 | Roles por módulo (`user_module_roles`, `viewer < operator < admin`) y selector de módulos | **DONE** (R0) | PL‑1 |
 | PL‑4 | Pantalla de gestión de usuarios | PLANNED (mientras tanto, CLI) | PL‑3 |
 
@@ -21,7 +22,7 @@ DistriCom es una plataforma modular (ADR 006). Este roadmap tiene tres carriles:
 | Fase | Nombre | Estado | Depende de |
 |---|---|---|---|
 | 0 | Fundación y arquitectura | **DONE** (aprobada y mergeada el 2026-10-02, PR #1) | — |
-| 1 | Importación y maestros | **PREPARATION** (análisis de exportaciones reales, `docs/DATA_INTAKE.md`) | 0 · PL‑1 · PL‑2a · muestras reales y aprobación de Enzo para implementar |
+| 1 | Importación y maestros | **IN_PROGRESS** (F1.0 diseño aprobado el 2026-10-30; F1.1a documentación en revisión) | 0 · PL‑1 · PL‑2a |
 | 2 | Dashboard general | PLANNED | 1 |
 | 3 | Rutas y preventistas | PLANNED | 2 |
 | 4 | Cliente 360° y estados | PLANNED | 1 (puede ir en paralelo con 3) |
@@ -70,19 +71,35 @@ Cada etapa termina con un informe y la aprobación de Enzo. Despliegue, red, bac
 **Criterios:** F0‑1 … F0‑16 en `PLAN.md §7`. **Resultado:** todos en PASS (`PLAN.md §10`).
 
 ## Fase 1 — Importación y maestros
-**Preparación (actual):** recibir y perfilar exportaciones reales de AXUM y STORE SYS, responder D3–D6 con datos y proponer mappings para aprobación (`PLAN.md §11`). La implementación empieza solo con autorización explícita de Enzo.
-**Alcance:** identidades de plataforma (`employees` + función `commercial.salesperson` en `employee_functions`, `customers`, `localities`), maestros comerciales, asignaciones con historia, ventas/ítems, visitas, programación, pedidos, canales, `import_*`, `external_entity_mappings`, pipeline completo, pantalla Importaciones (subir, mapping, preview, errores, confirmación, historial), revisión de mappings pendientes, generador de demo data por pipeline, página inicial de Calidad de datos.
-**Criterios:**
-- XLSX y CSV aceptados; archivo inválido (extensión, tamaño, estructura) rechazado con mensaje útil.
-- Columnas mapeables, plantilla guardable y auto‑detectada.
-- **Importar dos veces el mismo archivo no cambia el conteo de ventas ni de ítems** (test obligatorio).
-- Reimport con cambios actualiza y lo registra.
-- Entidades desconocidas/ambiguas quedan en revisión, nunca fusionadas.
-- Cada fila importada rastreable a su batch; batch con auditoría completa.
-- Error crítico → rollback total y batch `FAILED` con evidencia.
-- Demo data carga por pipeline con seed fijo.
-- Ningún error silencioso (todo rechazo aparece en `import_errors`).
-- Semántica de NC/devoluciones confirmada con datos reales (D4).
+**Objetivo:** que DistriCom reciba periódicamente los exports de AXUM y STORE SYS y los convierta en un modelo canónico confiable, auditado y sin duplicados. Sin métricas, dashboards, scoring, IA ni recomendaciones.
+**Diseño:** ADR 014 · `docs/IMPORTS.md` · `DATA_MODEL.md` §4–§7. Muestras reales de formato recibidas el 2026-10-30 (clientes, ventas, comprobantes de STORE SYS); faltan el maestro de artículos y AXUM No Compra.
+**Alcance:** framework de importación de plataforma (archivo original + SHA‑256, jobs con estados, lectores CSV/XLSX/XLS BIFF, staging `import_rows`, análisis → preview → confirmación), `customers`, `external_entity_mappings`, `data_quality_issues`; configuración comercial (zonas y días, reglas de zona, listas de precio, categorías y mapping de rubros, tipos de comprobante, motivos de no compra); productos con campos fuente y canónicos, `analytics_eligible`, familias y precios; asignaciones cliente ↔ zona y cliente ↔ vendedor con historia; hechos `documents`, `sale_lines`, `no_purchase_events`; UI mínima (importaciones, mapeos, calidad, maestros). **Fuera:** visitas, programación, pedidos, plantillas de columnas, métricas.
+
+| Sub | Contenido | Estado | Depende de |
+|---|---|---|---|
+| F1.0 | Diseño técnico | **DONE** (aprobado 2026-10-30, decisiones D‑A…D‑K + ajustes 1–3) | — |
+| F1.1a | Documentación: ADR 014, `docs/IMPORTS.md`, DATA_MODEL, ARCHITECTURE, ROADMAP, PLAN, DATA_INTAKE, SECURITY | IN_PROGRESS (PR en revisión) | F1.0 |
+| F1.1b | Infraestructura de plataforma: archivos, jobs, lectores CSV/XLSX/XLS, staging, pipeline con lock y transacción, issues base, API y CLI | PLANNED | F1.1a |
+| F1.2 | Maestros y configuración + núcleo de mappings: `customers`, `external_entity_mappings`, schema `commercial`, zonas, listas, categorías, tipos de comprobante, motivos, productos, familias, precios, seed controlado | PLANNED | F1.1b · confirmaciones S1–S3 de ADR 014 para sembrar |
+| F1.3 | Importadores STORE SYS (clientes, artículos, comprobantes, ventas) + pantalla Importaciones | PLANNED | F1.2 · muestra del maestro de artículos · muestra de ventas de varios días |
+| F1.4 | Importador AXUM No Compra (motivo crudo + categoría, ocurrencias) | PLANNED | F1.3 · muestra del CSV |
+| F1.5 | Revisión manual de mappings (ambiguos, confirmación en lote, reasignación con motivo, re‑resolución) + pantalla Mapeos | PLANNED | F1.4 |
+| F1.6 | Calidad de datos completa + pantalla Calidad | PLANNED | F1.5 |
+| F1.7 | UI mínima de maestros (clientes, productos, zonas, vendedores, listas) | PLANNED | F1.6 |
+| F1.8 | Hardening: reproceso, recuperación, performance con volumen realista, generador de demo por pipeline con seed fijo, documentación e informe de fase | PLANNED | F1.7 |
+
+Cada subfase es un PR propio que espera la aprobación de Enzo antes de la siguiente. Las migraciones se numeran desde el `main` vigente al abrir cada PR.
+
+**Criterios de cierre de la fase:**
+- CSV, XLSX y **XLS BIFF real** aceptados sin conversión manual; detección por firma; archivo inválido (extensión, firma, tamaño, estructura) rechazado con mensaje útil.
+- Analizar nunca escribe datos canónicos; confirmar escribe todo o nada (error crítico → rollback y job `failed` con evidencia).
+- **Importar dos veces el mismo archivo no cambia ningún conteo** (test obligatorio); mismo contenido con otro archivo → sin duplicados por clave natural; ventas reimportadas → reemplazo por período y scope, o confirmación detenida si no es demostrable.
+- Entidades desconocidas o ambiguas quedan pendientes, nunca fusionadas; ningún matching por nombre sin confirmación.
+- Cada fila del archivo rastreable a su job en `import_rows`, con su estado y motivo; ningún descarte silencioso.
+- Cambios manuales (mappings, configuración, categorías, elegibilidad, familias, asignaciones, reprocesos) auditados con quién, cuándo, antes, después y motivo.
+- RETIRO fuera del universo comercial; zonas con días configurables y Boca de Expendio sin visitas, sin `if` en código; producto sin clasificar con `analytics_eligible = false`.
+- Asignaciones de zona y vendedor con historia; nunca se destruye historia.
+- Fixtures sintéticos con la estructura real; ningún dato real en el repo; demo generada por el mismo pipeline con seed fijo.
 
 ## Fase 2 — Dashboard general
 **Alcance:** filtros globales en URL, períodos y comparación, KPIs jerarquizados (ventas, preventa/boca, compradores, activos, sin compra, nuevos, cobertura, cumplimiento de visitas, conversión, ticket, SKU, categorías), variaciones, tendencias/sparklines, drill‑down básico.
