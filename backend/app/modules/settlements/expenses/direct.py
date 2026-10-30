@@ -29,7 +29,7 @@ from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.clock import business_today
-from app.core.errors import AppError
+from app.core.errors import AppError, database_timeout
 from app.modules.settlements.delivery import fuel, idempotency
 from app.modules.settlements.delivery.models import FUEL, Expense, ExpenseCategory, FuelLoad
 from app.modules.settlements.delivery.service import money
@@ -295,6 +295,8 @@ def commit(db: Session) -> None:
         db.commit()
     except DBAPIError as exc:
         db.rollback()
+        if (timeout := database_timeout(exc)) is not None:
+            raise timeout from exc
         logger.warning("direct_expense_commit_rejected", extra={"sqlstate": getattr(exc.orig, "sqlstate", None)})
         raise AppError(
             409, "invalid_direct_expense", "El gasto no cumple las reglas de los gastos directos y no se registró."

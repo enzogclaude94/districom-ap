@@ -280,6 +280,6 @@ Cada fase frena con su informe y la aprobación de Enzo.
 | R9‑2 | Reporte diario de cierre por caja y banco: vista calculada por `business_date`, sin arqueo ni conciliación, preferentemente sin migración | DONE (aprobada por Enzo el 2026-10-28 con un ajuste previo al merge: una cuenta creada después del día no aparece; PR #47 mergeado `a8c79b9`, sin migración, ADR 012 aceptado) |
 | R9‑3 | E2E completo de Rendiciones de punta a punta | DONE (aprobada por Enzo el 2026-10-28 con sus 8 desvíos; PR #49 mergeado `e680ff7`, sin código productivo ni migración) |
 | R9‑4 | Performance | **DONE** (aprobada por Enzo el 2026-10-29): parte sin schema PR #51 (`efc5d06`); `0031` PR #52 (`68297c7`), congelada; mejoras de CI (CI‑1/2/3) PR #53 (`66c1b3e`), con `main` 4/4; sin saldos materializados |
-| R9‑5 | Hardening operativo y preparación de producción | IN_PROGRESS (propuesta v2 aprobada por Enzo el 2026-10-29 con precisiones: S1 = infraestructura, R9‑5 = aplicación; PRs R9‑5‑1 a R9‑5‑6, uno por vez). R9‑5‑1 (sesiones y limiter) en revisión |
+| R9‑5 | Hardening operativo y preparación de producción | IN_PROGRESS (propuesta v2 aprobada por Enzo el 2026-10-29 con precisiones: S1 = infraestructura, R9‑5 = aplicación; PRs R9‑5‑1 a R9‑5‑6, uno por vez). R9‑5‑1 (sesiones y limiter) **DONE** (PR #55, 2026-10-30); R9‑5‑2 (límites, timeouts y no‑store) en revisión |
 
 Cada fase frena con su informe y la aprobación de Enzo. Sin parser de archivos, carpetas, conexión, cron, RPA ni API keys en R9‑1.

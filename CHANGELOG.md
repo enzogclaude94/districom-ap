@@ -4,6 +4,12 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Changed — R9‑5‑2: límites de request, timeouts de PostgreSQL y no‑store
+- **Cuerpo máximo de 1 MiB en bytes reales** (`REQUEST_MAX_BODY_BYTES`): 413 `request_too_large` en el formato estándar. Con `Content-Length` mayor, sin leer el cuerpo; sin él (chunked) o si el encabezado subestima, se cuenta lo recibido y se corta en el primer bloque que pasa el límite. Los archivos (`multipart/form-data`) usan `UPLOAD_MAX_SIZE_MB`. El lote Store Sys más grande posible (200 registros con todos los campos al máximo) pesa 89 KB.
+- **Timeouts solo en las conexiones del backend** (opciones de conexión del engine; sin `ALTER ROLE`, sin migración): `statement_timeout` 30 s, `lock_timeout` 10 s, `idle_in_transaction_session_timeout` 60 s (`DB_*_TIMEOUT_MS`). Excederlos responde 503 `database_timeout` o `database_busy`; los commits que traducían cualquier error de base a un 409 de reglas ahora dejan pasar los timeouts, y en Store Sys el registro afectado vuelve con `database_timeout`. `migrate`, backups, restores y dumps no cambian.
+- **`Cache-Control: no-store` en todas las respuestas del backend**, de forma centralizada.
+- **R9‑5‑1 DONE** (aprobada por Enzo el 2026-10-30, PR #55).
+
 ### Added — S1: infraestructura del servidor propio (ADR 013)
 - **Sin despliegue productivo ni cambios de código de la app**: `docker-compose.yml`, Dockerfiles, workflows, reglas de negocio y migraciones intactos. Todo lo nuevo está en `deploy/` y en docs.
 - `deploy/docker-compose.prod.yml`:
