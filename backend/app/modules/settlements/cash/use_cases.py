@@ -13,6 +13,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 from app.core.errors import AppError, database_timeout
+from app.core.logging import db_error_fields
 from app.modules.settlements.cash import schemas
 from app.modules.settlements.ledger import accounts as ledger_accounts
 from app.modules.settlements.ledger import service as ledger
@@ -121,7 +122,7 @@ def _commit(db: Session) -> None:
         db.rollback()
         if (timeout := database_timeout(exc)) is not None:
             raise timeout from exc
-        logger.warning("ledger_commit_rejected", extra={"sqlstate": getattr(exc.orig, "sqlstate", None)})
+        logger.warning("ledger_commit_rejected", extra=db_error_fields(exc))
         raise AppError(
             409,
             "invalid_ledger_operation",
