@@ -4,6 +4,30 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Added — S1: infraestructura del servidor propio (ADR 013)
+- **Sin despliegue productivo ni cambios de código de la app**: `docker-compose.yml`, Dockerfiles, workflows, reglas de negocio y migraciones intactos. Todo lo nuevo está en `deploy/` y en docs.
+- `deploy/docker-compose.prod.yml`:
+  - **Caddy** es la única puerta: HTTPS, un nombre para la LAN y para Tailscale, `/api/*` directo al backend, `/api/docs` no servido, otros `Host` sin respuesta, HSTS.
+  - Backend, frontend y base sin puertos publicados.
+  - El backend confía en `X-Forwarded-For` solo desde Caddy, así que las sesiones registran la IP real.
+  - El backend no migra al arrancar.
+  - Volumen `uploads` para las importaciones de Comercial.
+- **PostgreSQL 17 + pgBackRest** (`deploy/postgres`): WAL continuo (`archive_timeout` 60 s) a un disco de backup y a un bucket S3 compatible fuera del local, cifrados. Completo semanal y diferencial diario. **files-sync** copia archivos y dumps cada 5 min, cifrados con rclone crypt.
+- Scripts en `deploy/bin`:
+  - `init-env`, `up`, `migrate`, `backup`, `dump`, `files-sync`, `smoke` y `monitor` (HTTPS, discos, RAID, WAL, backups, certificado, Tailscale; alerta configurable);
+  - `restore-drill` (restauración descartable comparada con producción por huella de la base, desde el disco o **solo desde fuera del local**, y PITR);
+  - `update` (backup etiquetado → migración → smoke) y `rollback [--restore-db]`.
+- Host: `deploy/host/install.sh` (Ubuntu 24.04, Docker, Tailscale, ufw, timers) y `firewall.sh` (cadena `DOCKER-USER`: 80/443 solo desde la LAN y Tailscale). Timers de systemd. Política de Tailscale versionada con mínimo privilegio y sin Funnel. Split DNS opcional (CoreDNS).
+- Pruebas: `deploy/tests/run-s1.sh` sobre un stack descartable con datos ficticios.
+- Docs: ADR 013, `docs/OPERATIONS.md`, `docs/SERVER_REQUIREMENTS.md`, ARCHITECTURE §10, SECURITY, README y el carril «Servidor» del ROADMAP.
+- **Revisión de Enzo (2026-10-29), antes del merge:**
+  - **Disco de backup:** `deploy/bin/backup-disk-init` lo marca una vez; `up`, `backup`, `dump`, `files-sync`, `update`, `rollback --restore-db` y el simulacro desde `repo1` se niegan sin un disco montado y marcado, y el monitor falla. `install.sh` se detiene sin el disco. Las pruebas usan un tmpfs montado (o `BACKUP_REQUIRE_MOUNTPOINT=0`).
+  - **Red:** `LAN_SUBNET` solo privada, `LAN_INTERFACE` opcional, reglas solo para puertos publicados (nada directo a un contenedor), cadena IPv6, firewall aplicado antes de Docker, `CADDY_BIND_IP` solo IPv4, `ufw` con IPv6.
+  - **Restauraciones:** `verify.sql` hashea cada fila de cada tabla de todos los schemas más la estructura; el simulacro compara en un punto de restauración con nombre, corre `pg_amcheck` y devuelve INCOMPLETE si no llega.
+  - **Reversión:** `rollback --restore-db` informa qué se perdería, exige la etiqueta del backup y guarda lo descartado en un backup *pre-rollback*.
+  - **Disco de backup al arrancar (decisión final de Enzo, 2026-10-30):** el punto de entrada de la imagen de la base (`deploy/postgres/districom-entrypoint.sh`) no inicia PostgreSQL sin la marca del disco, en cualquier arranque, incluido el reinicio automático de Docker o del servidor. Con el disco perdido mientras la base funciona, la base sigue y el monitor encabeza una alerta crítica de «protección de backups degradada» con el estado de cada repositorio y del RPO.
+  - **Cola de WAL:** el WAL descartado por `archive-push-queue-max` se detecta (monitor y smoke en FAIL) hasta un backup completo nuevo; `deploy/bin/wal-gap`.
+
 ### Changed — R9‑5‑1: sesiones y límite de login
 - **`last_seen_at` como mucho una vez por minuto por sesión** (`SESSION_TOUCH_SECONDS`, 60, máximo 60). Cada request valida revocación, usuario activo, expiración absoluta e inactividad con el valor guardado; solo si todo pasa y ya pasaron 60 s, un `UPDATE` condicional (`last_seen_at <= now − 60 s`, sesión no revocada, no vencida, no inactiva y usuario activo) lo actualiza y hace commit. Si no encuentra la fila, una relectura de solo lectura con el mismo `now` decide: otro request la tocó primero (sigue autenticado) o la sesión dejó de ser válida en el medio (este mismo request da 401). Con requests simultáneos uno solo escribe; los demás no hacen commit. La relectura solo ocurre en esa carrera, nunca dentro de la ventana. Medido: de 1 commit y 1 `UPDATE` por request a 0 dentro de la ventana (`/auth/me` 3 → 2 queries, Cajas 5 → 4). Duración máxima, inactividad, logout, revocación, cookies, CSRF y permisos sin cambios; la inactividad puede vencer hasta 60 s antes, nunca después.
 - **Límite de login:** las claves IP+email cuyas fallas salieron de la ventana se descartan (y preguntar por una clave ya no la guarda), así la memoria no crece sin límite. Mismos `LOGIN_MAX_ATTEMPTS`, `LOGIN_WINDOW_SECONDS` y clave IP+email.

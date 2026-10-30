@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Creates the server's configuration files from their examples and generates every secret, once.
+# Never overwrites an existing file. Run as the administrator on the server, from the repository root:
+#   deploy/bin/init-env
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+umask 077
+
+secret() { openssl rand -base64 48 | tr -d '\n/+=' | cut -c1-48; }
+
+create() {
+    local target="$1" example="$2"
+    if [ -e "$target" ]; then
+        echo "keep    $target (already exists)"
+        return 1
+    fi
+    cp "$example" "$target"
+    chmod 600 "$target"
+    echo "create  $target"
+}
+
+if create "$ROOT/.env" "$ROOT/deploy/production.env.example"; then
+    sed -i "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$(secret)|; s|^SECRET_KEY=.*|SECRET_KEY=$(secret)|" "$ROOT/.env"
+fi
+if create "$ROOT/deploy/pgbackrest.env" "$ROOT/deploy/pgbackrest.env.example"; then
+    sed -i "s|^PGBACKREST_REPO1_CIPHER_PASS=.*|PGBACKREST_REPO1_CIPHER_PASS=$(secret)|; s|^# PGBACKREST_REPO2_CIPHER_PASS=.*|# PGBACKREST_REPO2_CIPHER_PASS=$(secret)|" "$ROOT/deploy/pgbackrest.env"
+fi
+create "$ROOT/deploy/offsite.env" "$ROOT/deploy/offsite.env.example" || true
+create "$ROOT/deploy/caddy.env" "$ROOT/deploy/caddy.env.example" || true
+
+cat <<'MSG'
+
+Next steps (docs/OPERATIONS.md, "Instalación"):
+  1. Complete the PENDING values of .env (name, LAN, Tailscale) and, when they exist, deploy/caddy.env,
+     the repo2 lines of deploy/pgbackrest.env and deploy/offsite.env (rclone obscure for its passwords).
+  2. Copy the passphrases of deploy/pgbackrest.env and deploy/offsite.env OUTSIDE the server
+     (company password manager + sealed envelope). Without them, no backup can be restored.
+  3. deploy/bin/up
+MSG
