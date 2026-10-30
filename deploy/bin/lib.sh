@@ -42,7 +42,7 @@ BACKUP_MARKER=".districom-backup-disk"
 backup_disk_problem() {
     if [ "${BACKUP_REQUIRE_MOUNTPOINT:-1}" != 0 ] && ! mountpoint -q "$BACKUP_ROOT"; then
         echo "$BACKUP_ROOT is not a mount point: the backup disk is not mounted"
-    elif [ ! -f "$BACKUP_ROOT/$BACKUP_MARKER" ]; then
+    elif [ ! -f "$BACKUP_ROOT/$BACKUP_MARKER" ] || [ ! -f "$BACKUP_ROOT/pgbackrest/$BACKUP_MARKER" ]; then
         echo "$BACKUP_ROOT has no $BACKUP_MARKER: it is not the prepared backup disk (deploy/bin/backup-disk-init)"
     fi
 }

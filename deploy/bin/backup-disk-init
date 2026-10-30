@@ -5,7 +5,14 @@
 #   deploy/bin/backup-disk-init
 # shellcheck source=lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+# The marker also goes inside pgbackrest/, the only part of the disk the database container sees: its entry
+# point refuses to start PostgreSQL without it (deploy/postgres/districom-entrypoint.sh).
+inner_marker() {
+    cp "$BACKUP_ROOT/$BACKUP_MARKER" "$BACKUP_ROOT/pgbackrest/$BACKUP_MARKER"
+    chown 999:999 "$BACKUP_ROOT/pgbackrest/$BACKUP_MARKER"
+}
 if [ -f "$BACKUP_ROOT/$BACKUP_MARKER" ]; then
+    [ -f "$BACKUP_ROOT/pgbackrest/$BACKUP_MARKER" ] || inner_marker
     log "backup disk already prepared: $BACKUP_ROOT ($(cat "$BACKUP_ROOT/$BACKUP_MARKER"))"
     exit 0
 fi
@@ -20,4 +27,5 @@ for dir in pgbackrest dumps files state; do mkdir -p "$BACKUP_ROOT/$dir"; done
 # pgbackrest/ and dumps/ belong to the postgres user of the db image (uid 999).
 chown 999:999 "$BACKUP_ROOT/pgbackrest" "$BACKUP_ROOT/dumps"
 chmod 750 "$BACKUP_ROOT/pgbackrest" "$BACKUP_ROOT/dumps"
+inner_marker
 log "backup disk prepared: $BACKUP_ROOT"

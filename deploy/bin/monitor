@@ -6,6 +6,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 now=$(date +%s)
 report=()
 fail=0
+declare -A repo_state=()
 ok() { report+=("OK    $*"); }
 warn() { report+=("WARN  $*"); }
 bad() { report+=("FAIL  $*"); fail=1; }
@@ -16,7 +17,13 @@ if caddy_curl -f "https://$DISTRICOM_HOST/api/v1/health" > /dev/null 2>&1; then 
 
 # 2. Disks. The backup disk first: mounted and prepared, or every local backup goes nowhere (or to the system disk).
 problem="$(backup_disk_problem)"
+if [ -z "$problem" ] && dc ps --status running -q db | grep -q . \
+    && ! dc exec -T db test -f "/var/lib/pgbackrest/$BACKUP_MARKER" 2> /dev/null; then
+    problem="the running database does not see the backup disk (unmounted or replaced after it started)"
+fi
 if [ -n "$problem" ]; then
+    # The database keeps running on purpose (no shutdown during operations); the alert says what still protects it.
+    degraded="$problem"
     bad "backup disk: $problem"
 elif [ "${BACKUP_REQUIRE_MOUNTPOINT:-1}" = 0 ]; then
     warn "backup disk: mount point check disabled (BACKUP_REQUIRE_MOUNTPOINT=0, test environments only)"
@@ -66,12 +73,14 @@ print(max(segno(cur) - segno(mx) - 1, 0) if cur and mx else -1)' "$current" "$ma
     since_file="$STATE_DIR/wal-behind-repo$repo"
     if [ "$behind" -eq 0 ]; then
         rm -f "$since_file"
+        repo_state[$repo]="receiving WAL"
         ok "repo$repo: WAL up to date"
     else
         # Behind, or unreachable (an Internet cut for repo2): a warning first, a failure after 15 minutes.
         [ -f "$since_file" ] || echo "$now" > "$since_file"
         lag=$((now - $(cat "$since_file")))
         if [ "$behind" -lt 0 ]; then what="unreachable"; else what="behind by $behind segments"; fi
+        repo_state[$repo]="WAL $what for $((lag / 60)) min"
         if [ "$lag" -gt 900 ]; then
             bad "repo$repo: WAL $what for $((lag / 60)) min: RPO at risk"
         else
@@ -124,6 +133,17 @@ if command -v tailscale > /dev/null 2>&1; then
     if [ "$state" = Running ]; then ok "Tailscale running"; else bad "Tailscale state: $state (remote access down; the LAN still works)"; fi
 fi
 
+# Backup disk lost while the database runs: one critical line on top that says what still protects the data.
+if [ -n "${degraded:-}" ]; then
+    states="" receiving=""
+    for repo in $(repos); do
+        states="$states repo$repo: ${repo_state[$repo]:-unknown};"
+        # repo1 lives on the backup disk that is in doubt: only the other repositories count for the RPO.
+        [ "$repo" = 1 ] || [ "${repo_state[$repo]:-}" != "receiving WAL" ] || receiving="$receiving repo$repo"
+    done
+    if [ -n "$receiving" ]; then rpo="RPO kept only through$receiving"; else rpo="RPO NOT MET: no repository is receiving WAL"; fi
+    report=("FAIL  CRITICAL: BACKUP PROTECTION DEGRADED: $degraded. The database keeps running (no automatic shutdown).$states $rpo." "${report[@]}")
+fi
 printf '%s\n' "${report[@]}" | tee "$STATE_DIR/monitor.txt"
 if [ "$fail" -ne 0 ] && [ -n "${ALERT_COMMAND:-}" ]; then
     { echo "DistriCom ($DISTRICOM_HOST) — monitor $(date -Is)"; printf '%s\n' "${report[@]}"; } | sh -c "$ALERT_COMMAND" || log "ALERT_COMMAND failed"

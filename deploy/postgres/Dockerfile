@@ -10,3 +10,8 @@ RUN apt-get update \
     && install -d -o postgres -g postgres -m 750 /var/lib/districom-dumps
 
 COPY pgbackrest.conf /etc/pgbackrest/pgbackrest.conf
+
+# Refuses to start PostgreSQL without the prepared backup disk, on every start (districom-entrypoint.sh).
+COPY districom-entrypoint.sh /usr/local/bin/districom-entrypoint.sh
+ENTRYPOINT ["districom-entrypoint.sh"]
+CMD ["postgres"]

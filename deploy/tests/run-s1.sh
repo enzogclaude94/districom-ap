@@ -402,6 +402,58 @@ expect "the gap is closed for restores after that backup" sh -c "[ -z \"\$('$ROO
 expect "drill from repo2 after the remedy: identical" "$ROOT/deploy/bin/restore-drill" --repo 2 --network districom_default
 expect "monitor reports no FAIL again" "$ROOT/deploy/bin/monitor"
 
+# ---------------------------------------------------------------- T16 database start without the backup disk
+section "T16 The database does not start without the prepared backup disk, at any start (also Docker's own restarts)"
+db_id="$(dc ps -q db)"
+fatal_count() { docker logs "$db_id" 2>&1 | grep -c 'backup disk not mounted or not prepared'; }
+dc stop db > /dev/null 2>&1
+# What a reboot with the backup disk missing looks like: nothing (or an empty disk) at the mount point.
+if mountpoint -q "$TEST_ROOT/backup"; then
+    mount -t tmpfs -o size=16m s1-empty-disk "$TEST_ROOT/backup"; hide="overmount"
+else
+    mv "$TEST_ROOT/backup/pgbackrest/$BACKUP_MARKER" "$TEST_ROOT/backup-inner-marker"; hide="marker"
+fi
+dc start db > /dev/null 2>&1
+sleep 15
+expect "PostgreSQL refuses to start ($(fatal_count) refusals logged)" sh -c "[ $(fatal_count) -ge 1 ] && ! docker exec '$db_id' pg_isready -q"
+expect "deploy/bin/up refuses too" sh -c "! '$ROOT/deploy/bin/up' --no-build"
+if [ -n "${S1_DOCKER_RESTART_CMD:-}" ]; then
+    before="$(fatal_count)"
+    sh -c "$S1_DOCKER_RESTART_CMD" > /dev/null 2>&1
+    until docker info > /dev/null 2>&1; do sleep 1; done
+    sleep 20
+    after="$(fatal_count)"
+    expect "after a restart of Docker, its restart policy starts the database again and it refuses again ($before → $after)" sh -c "[ $after -gt $before ] && ! docker exec '$db_id' pg_isready -q"
+    expect "the rest of the stack came back (Caddy answers)" sh -c "docker ps --format '{{.Names}}' | grep -q caddy"
+else
+    result FAIL "Docker restart not exercised (set S1_DOCKER_RESTART_CMD)"
+fi
+if [ "$hide" = overmount ]; then umount "$TEST_ROOT/backup"; else mv "$TEST_ROOT/backup-inner-marker" "$TEST_ROOT/backup/pgbackrest/$BACKUP_MARKER"; fi
+dc up -d --no-build s3test db > /dev/null 2>&1
+docker restart "$db_id" > /dev/null 2>&1
+wait_healthy db
+expect "with the disk back, the database starts" docker exec "$db_id" pg_isready -q
+dc up -d --no-build > /dev/null 2>&1
+wait_healthy backend
+expect "and the stack passes its smoke test" "$ROOT/deploy/bin/smoke"
+
+# ---------------------------------------------------------------- T17 backup disk lost while running
+section "T17 Backup disk lost while the database runs: it keeps running, the alert is critical and says what protects the data"
+mv "$TEST_ROOT/backup/$BACKUP_MARKER" "$TEST_ROOT/backup-root-marker"
+"$ROOT/deploy/bin/monitor" > "$TEST_ROOT/monitor-degraded.txt" 2> /dev/null
+critical="$(head -n1 "$TEST_ROOT/monitor-degraded.txt")"
+expect "first line is the critical alert ($critical)" sh -c "echo '$critical' | grep -q '^FAIL  CRITICAL: BACKUP PROTECTION DEGRADED'"
+expect "it reports both repositories and that the RPO holds only through repo2" sh -c "echo '$critical' | grep -q 'repo1: ' && echo '$critical' | grep -q 'RPO kept only through repo2'"
+expect "the database keeps running and the app answers" sh -c "docker exec '$db_id' pg_isready -q && '$ROOT/deploy/bin/smoke'"
+dc stop s3test > /dev/null
+"$ROOT/deploy/bin/monitor" > "$TEST_ROOT/monitor-degraded.txt" 2> /dev/null
+critical="$(head -n1 "$TEST_ROOT/monitor-degraded.txt")"
+expect "with repo2 down too, it says the RPO is not met ($critical)" sh -c "echo '$critical' | grep -q 'RPO NOT MET'"
+dc start s3test > /dev/null
+mv "$TEST_ROOT/backup-root-marker" "$TEST_ROOT/backup/$BACKUP_MARKER"
+sleep 3
+expect "with the disk back, no critical line" sh -c "! '$ROOT/deploy/bin/monitor' 2> /dev/null | grep -q CRITICAL"
+
 # ---------------------------------------------------------------- summary
 printf '\n%s passed, %s failed\n' "$pass" "$failed" | tee -a "$REPORT"
 [ "$failed" -eq 0 ]

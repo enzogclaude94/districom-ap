@@ -44,6 +44,10 @@ Requisitos de hardware y de red en `docs/SERVER_REQUIREMENTS.md`.
 4. `deploy/host/install.sh` (antes, `--dry-run` para ver qué hará): instala paquetes, Docker, Tailscale, `ufw`, el firewall de Docker y los timers.
 5. **[S3]** Tailscale: `tailscale up --advertise-tags=tag:districom-server --auth-key=<clave de un solo uso>`. Anotar la IP 100.x en `.env` (`TAILSCALE_SERVER_IP`) si se usa el split DNS.
 6. `deploy/bin/backup-disk-init`: comprueba que el disco de backup esté montado, le escribe la marca `.districom-backup-disk` y crea sus carpetas. Sin esa marca, `up`, `backup`, `dump`, `files-sync`, `update`, `rollback --restore-db` y el simulacro desde `repo1` **se niegan a correr**, y el monitor da FAIL: si el disco no se montó (o se desmontó), nada escribe backups en el disco del sistema creyendo que es el de backup.
+
+   **Comportamiento con el disco de backup (decisión de Enzo, 2026-10-30):**
+   - **Al arrancar, PostgreSQL no inicia sin el disco.** La marca también queda dentro de `pgbackrest/`, la única parte del disco que ve el contenedor de la base, y su punto de entrada (`deploy/postgres/districom-entrypoint.sh`) se niega a iniciar PostgreSQL sin ella (código 78, mensaje «backup disk not mounted or not prepared» en `deploy/bin/dc logs db`). Vale para cualquier arranque: `up`, un reinicio del servidor y la política de reinicio de Docker. La app queda sin base hasta montar el disco; después, `deploy/bin/dc restart db` (o el reintento de Docker) la levanta sola.
+   - **Si el disco se pierde con la base funcionando, la base sigue funcionando.** No hay apagado automático durante la operación. El monitor pone primero una línea **«FAIL CRITICAL: BACKUP PROTECTION DEGRADED»** que dice la causa, el estado de cada repositorio y si el RPO se sostiene: solo cuenta `repo2`, porque `repo1` vive en el disco perdido. Si `repo2` tampoco recibe WAL, dice «RPO NOT MET». La alerta va a `ALERT_COMMAND` en cada pasada (cada 5 minutos) hasta que vuelva el disco.
 7. `deploy/bin/up`: construye las imágenes, levanta la base, crea el *stanza* de pgBackRest en los dos repositorios, migra, levanta la app, hace el primer backup completo y corre el smoke test.
 8. Crear el primer administrador: `deploy/bin/dc exec backend python -m app.cli create-admin --email ... --name ...` (la contraseña se lee de stdin). Hasta S2, los roles por módulo se asignan con `grant-module-role` (ver `CLAUDE.md §2`).
 9. **[S3]** DNS: registro local en el router (`DISTRICOM_HOST` → `LAN_SERVER_IP`) y split DNS en la consola de Tailscale (dominio → `TAILSCALE_SERVER_IP`, con `COMPOSE_PROFILES=dns` en `.env` y `deploy/bin/dc up -d dns`).
@@ -177,5 +181,7 @@ El resultado queda en `deploy/state/drills/` (`summary.txt`: duración, `amcheck
 - **T7b:** la huella detecta un carácter, un microsegundo, una fila borrada o un centavo del ledger en cualquier tabla, y no cambia por reescribir tablas.
 - **T14:** firewall con dos redes simuladas: la LAN entra, otra red no (y sin las reglas sí entraría), nadie llega directo a un contenedor.
 - **T15:** corte largo que llena la cola de WAL: descarte detectado, simulacro INCOMPLETE, remedio con un backup completo.
+- **T16:** sin el disco de backup, PostgreSQL no arranca, tampoco cuando Docker se reinicia; con el disco de vuelta, arranca.
+- **T17:** disco perdido con la base funcionando: la base sigue, el monitor da la alerta crítica con el estado de los repositorios y del RPO.
 
 Se niega a correr donde haya un `.env` real. `deploy/tests/run-s1.sh clean` lo desarma.

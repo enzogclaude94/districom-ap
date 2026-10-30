@@ -42,7 +42,9 @@ trap cleanup EXIT
 docker rm -f "$name" > /dev/null 2>&1 || true
 docker volume rm "$volume" > /dev/null 2>&1 || true
 
-run_args=(--network "$network" -v "$volume:/var/lib/postgresql/data" -e PGBACKREST_REPO="$repo" -e PGBACKREST_PG1_USER="$POSTGRES_USER")
+# A throwaway copy, never production: its PostgreSQL may start without the backup disk.
+run_args=(--network "$network" -v "$volume:/var/lib/postgresql/data" -e PGBACKREST_REPO="$repo" -e PGBACKREST_PG1_USER="$POSTGRES_USER"
+    -e DISTRICOM_REQUIRE_BACKUP_DISK=0)
 [ -f "$ROOT/deploy/pgbackrest.env" ] && run_args+=(--env-file "$ROOT/deploy/pgbackrest.env")
 if [ "$repo" = 1 ]; then
     require_backup_disk
