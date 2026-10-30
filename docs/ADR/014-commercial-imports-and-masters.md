@@ -6,7 +6,7 @@
   - De ADR 003: las plantillas de columnas editables. También la lista de formatos (ahora incluye XLS BIFF).
   - De ADR 006: la definición de `routes` como rutas de preventa de AXUM.
   - El resto de ADR 003 y ADR 006 sigue vigente.
-- **Numeración:** el PR #54 (Servidor) ocupa la ADR 013. Si al mergear el número siguiente libre cambia, este ADR se renumera en el mismo PR.
+- **Numeración:** la ADR 013 es del hilo Servidor (PR #54, mergeado).
 - **Detalle operativo:** `docs/IMPORTS.md`. **Tablas:** `DATA_MODEL.md` §0, §4–§7 y §10.
 
 Igual que ADR 011, este documento separa tres cosas:
@@ -207,7 +207,7 @@ Todo bajo `require_module_access("commercial", …)`.
 - **Docs:** `DATA_MODEL.md` cambia las tablas de Fase 1 (§0, §4–§7, §10–§12). `METRICS.md` **no** cambia en Fase 1, pero queda una deuda declarada: `visit.conversion_order` y el denominador de `visit.conversion_invoiced` suponen visitas que hoy no existen y se redefinen antes de la fase de métricas.
 - **Dependencias nuevas** (F1.1b): `openpyxl`, `xlrd`, `defusedxml` y `python-multipart` (runtime); `xlwt` solo en desarrollo, para generar fixtures `.xls`.
 - **Dependencias de otros hilos:**
-  - `UPLOAD_DIR` como volumen persistente con backup lo provee el hilo Servidor (PR #54). Comercial solo agrega la variable.
+  - `UPLOAD_DIR` como volumen persistente con backup ya lo provee el despliegue (ADR 013: volumen `uploads` en `/data/uploads`). Comercial solo agrega la variable a la configuración del backend.
   - Las migraciones se numeran desde el `main` vigente al abrir cada PR.
 - **Lo que no se hace en Fase 1:**
   - métricas, dashboards, scoring, IA ni recomendaciones;

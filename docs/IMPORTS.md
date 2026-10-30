@@ -363,7 +363,7 @@ El admin de plataforma es admin del módulo (ARCHITECTURE §8).
 ## 9. Seguridad y privacidad
 
 - **Subida:**
-  - Límite `UPLOAD_MAX_SIZE_MB`; el límite del reverse proxy lo define el hilo Servidor (PR #54) y debe ser mayor o igual.
+  - Límite `UPLOAD_MAX_SIZE_MB`; el límite del reverse proxy lo define Caddy (`CADDY_MAX_BODY`, 30 MB por defecto, ADR 013) y debe ser mayor o igual.
   - Lista blanca de extensión **y** firma.
   - Nombre original sanitizado, solo para mostrar.
   - En disco va con UUID bajo `UPLOAD_DIR`, nunca dentro del contenedor ni del webroot.

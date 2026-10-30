@@ -1,0 +1,4 @@
+source-path=SCRIPTDIR
+external-sources=true
+# Functions called through trap or as arguments look unreachable to shellcheck.
+disable=SC2317

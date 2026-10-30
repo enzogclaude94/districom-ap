@@ -1,0 +1,9 @@
+[Unit]
+Description=DistriCom: copy imported files and dumps to the backup disk and off-site
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=@ROOT@
+ExecStart=@ROOT@/deploy/bin/files-sync

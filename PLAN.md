@@ -275,7 +275,7 @@ Estado: **IN_PROGRESS.** Diseño F1.0 aprobado por Enzo el 2026-10-30 con las de
 - S4 si *Ventas artículos/clientes* puede exportarse con código de cliente · S7 muestra de ventas de varios días · S8 si los `.xls` pasaron por Excel → antes de F1.3.
 - Confirmar que `clientes_por_zona.xlsx` y `clientes_por_vendedor.xlsx` son informes derivados y no un export de STORE SYS.
 
-**Dependencias de otros hilos:** `UPLOAD_DIR` como volumen persistente con backup (hilo Servidor, PR #54); numeración de migraciones desde el `main` vigente (Rendiciones y Servidor también migran); `employees.external_store_id` es de Rendiciones y Comercial solo lo lee.
+**Dependencias de otros hilos:** `UPLOAD_DIR` como volumen persistente con backup (hilo Servidor, ADR 013, ya en `main`); numeración de migraciones desde el `main` vigente (Rendiciones y Servidor también migran); `employees.external_store_id` es de Rendiciones; Comercial no lo escribe ni lo usa para resolver.
 
 ## 12. Preparación de la plataforma modular (P0)
 

@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# Updates the server to a released version (a Git tag such as v1.2.0, or a commit), with a way back.
+#   deploy/bin/update <git-ref>
+# Order: checks → new images built while the old ones serve → app stopped (no writes) → backup labelled
+# pre-update → migrations → start → smoke test. If anything fails after the backup: deploy/bin/rollback
+# (add --restore-db if the migrations ran). Users see the app unavailable from "stop" to "smoke": a few minutes.
+# shellcheck source=lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+run_from_copy "$0" "$@"
+ref="${1:?usage: update <git-ref>}"
+cd "$ROOT"
+
+require_backup_disk
+[ -z "$(git status --porcelain --untracked-files=no)" ] || die "the working tree has local changes: commit or discard them first"
+git fetch --tags origin
+git rev-parse --verify --quiet "$ref^{commit}" > /dev/null || die "unknown ref: $ref"
+free_kb="$(df -Pk "$BACKUP_ROOT" | awk 'NR==2 {print $4}')"
+[ "$free_kb" -gt 5242880 ] || die "less than 5 GB free on $BACKUP_ROOT"
+"$ROOT/deploy/bin/smoke" || die "the stack is not healthy before the update: fix that first"
+
+previous="$(git rev-parse HEAD)"
+log "update: $previous -> $(git rev-parse "$ref^{commit}") ($ref)"
+for image in "${IMAGES[@]}"; do docker image tag "$image:current" "$image:rollback"; done
+echo "$previous" > "$STATE_DIR/rollback-ref"
+
+git checkout --quiet --detach "$ref"
+# UPDATE_BUILD_SERVICES limits the build to some services (e.g. "backend frontend" when nothing else changed).
+# shellcheck disable=SC2086
+dc build ${UPDATE_BUILD_SERVICES:-}
+
+log "update: stopping the app (no writes from now on)"
+dc stop caddy frontend backend
+"$ROOT/deploy/bin/backup" full "pre-update $ref" || die "pre-update backup failed: the app stays stopped; run deploy/bin/rollback"
+pgbr --repo=1 info --output=json | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["backup"][-1]["label"])' > "$STATE_DIR/rollback-backup-label"
+log "update: pre-update backup $(cat "$STATE_DIR/rollback-backup-label")"
+# Fingerprint of the database exactly as in that backup (the app is stopped): rollback --restore-db compares the
+# database of that moment with this one to tell what a restore would discard.
+psql_db -f - < "$ROOT/deploy/sql/verify.sql" > "$STATE_DIR/rollback-fingerprint.txt"
+date +%s > "$STATE_DIR/rollback-backup-time"
+
+dc up -d --no-build db
+wait_healthy db
+if ! "$ROOT/deploy/bin/migrate"; then
+    die "migrations failed: run deploy/bin/rollback --restore-db"
+fi
+dc up -d --no-build
+wait_healthy backend
+if ! "$ROOT/deploy/bin/smoke"; then
+    die "smoke test failed after the update: run deploy/bin/rollback --restore-db"
+fi
+printf '%s update %s -> %s ok\n' "$(date -Is)" "$previous" "$ref" >> "$STATE_DIR/updates.log"
+log "update: done ($ref). Rollback stays possible until the next update."

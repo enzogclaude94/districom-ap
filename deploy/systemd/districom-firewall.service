@@ -1,0 +1,14 @@
+[Unit]
+Description=DistriCom: who may reach the ports Docker publishes (DOCKER-USER chain)
+# Before Docker: no container publishes a port while the filter is missing, at boot or when Docker restarts.
+Before=docker.service
+PartOf=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=@ROOT@/deploy/host/firewall.sh apply
+ExecStop=@ROOT@/deploy/host/firewall.sh remove
+
+[Install]
+WantedBy=docker.service

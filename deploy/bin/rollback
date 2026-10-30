@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+# Returns to the version that ran before the last deploy/bin/update.
+#   deploy/bin/rollback                                  images and code only (no migration ran, or a compatible one)
+#   deploy/bin/rollback --restore-db                     shows what restoring the database would discard, and stops
+#   deploy/bin/rollback --restore-db --confirm <label>   does it (the label is the one the report shows)
+# --restore-db puts the database back to the backup taken when the update began, so everything users recorded
+# after the update is removed from the running database. Before anything changes, the report lists, table by
+# table, what differs from that moment, and the restore needs that backup's label typed back: on a terminal at
+# the prompt, otherwise with --confirm. Right before restoring, a backup labelled pre-rollback keeps the
+# discarded state, so it can still be recovered (docs/OPERATIONS.md, "Actualizar y volver atrás").
+# shellcheck source=lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+run_from_copy "$0" "$@"
+restore_db=0 confirm=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --restore-db) restore_db=1; shift ;;
+        --confirm) confirm="${2:-}"; shift 2 ;;
+        *) die "unknown option $1" ;;
+    esac
+done
+cd "$ROOT"
+[ -f "$STATE_DIR/rollback-ref" ] || die "no previous update recorded ($STATE_DIR/rollback-ref)"
+previous="$(cat "$STATE_DIR/rollback-ref")"
+
+if [ "$restore_db" -eq 1 ]; then
+    require_backup_disk
+    for file in rollback-backup-label rollback-fingerprint.txt rollback-backup-time; do
+        [ -f "$STATE_DIR/$file" ] || die "$STATE_DIR/$file is missing: no safe database rollback for this update"
+    done
+    label="$(cat "$STATE_DIR/rollback-backup-label")"
+    report="$STATE_DIR/rollback-report-$(date +%Y%m%d-%H%M%S).txt"
+    psql_db -f - < "$ROOT/deploy/sql/verify.sql" > "$STATE_DIR/rollback-now.txt"
+    python3 - "$STATE_DIR/rollback-fingerprint.txt" "$STATE_DIR/rollback-now.txt" "$label" \
+        "$(cat "$STATE_DIR/rollback-backup-time")" > "$report" << 'PY'
+import sys, datetime
+def tables(path):
+    rows = {}
+    for line in open(path):
+        parts = line.split()
+        if parts and parts[0] == "table":
+            rows[parts[1]] = (int(parts[2]), parts[3])
+    return rows
+before, now, label, when = tables(sys.argv[1]), tables(sys.argv[2]), sys.argv[3], int(sys.argv[4])
+changed = []
+for name in sorted(set(before) | set(now)):
+    b, n = before.get(name, (0, "absent")), now.get(name, (0, "absent"))
+    if b != n:
+        changed.append(f"  {name}: {b[0]} rows at the backup, {n[0]} now" + ("" if b[0] != n[0] else " (same count, contents changed)"))
+start = datetime.datetime.fromtimestamp(when).astimezone().strftime("%Y-%m-%d %H:%M %Z")
+print(f"Database rollback to backup {label}, taken when the update began ({start}).")
+if changed:
+    print(f"Everything recorded since then is REMOVED from the running database. {len(changed)} tables differ:")
+    print("\n".join(changed))
+else:
+    print("No table differs from that backup: nothing recorded since the update would be lost.")
+print("Migrations applied by the update are undone too.")
+PY
+    cat "$report"
+    if [ -z "$confirm" ] && [ -t 0 ]; then
+        printf '\nType the backup label (%s) to restore, or anything else to cancel: ' "$label"
+        read -r confirm
+    fi
+    if [ "$confirm" != "$label" ]; then
+        log "rollback: NOT done. Nothing changed. To restore: deploy/bin/rollback --restore-db --confirm $label"
+        exit 3
+    fi
+fi
+
+log "rollback: stopping the app"
+dc stop caddy frontend backend
+
+if [ "$restore_db" -eq 1 ]; then
+    # The state about to be discarded stays restorable (deploy/bin/restore-drill or pgBackRest --set=<label>).
+    "$ROOT/deploy/bin/backup" diff "pre-rollback: state discarded by the rollback of $label" \
+        || die "the pre-rollback backup failed: nothing was restored; the app stays stopped (deploy/bin/up to restart it)"
+    pgbr --repo=1 info --output=json | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["backup"][-1]["label"])' \
+        > "$STATE_DIR/rollback-safety-label"
+    log "rollback: discarded state kept in backup $(cat "$STATE_DIR/rollback-safety-label")"
+fi
+
+for image in "${IMAGES[@]}"; do
+    docker image inspect "$image:rollback" > /dev/null 2>&1 || die "image $image:rollback not found"
+    docker image tag "$image:rollback" "$image:current"
+done
+git checkout --quiet --detach "$previous"
+
+if [ "$restore_db" -eq 1 ]; then
+    log "rollback: restoring the database to backup $label (repo1)"
+    dc stop db
+    # --type=immediate: consistent at the end of that backup, i.e. the moment the update began.
+    dc run --rm --no-deps -T -u postgres --entrypoint pgbackrest db \
+        --stanza=districom --repo=1 --set="$label" --type=immediate --target-action=promote --delta restore
+fi
+
+dc up -d --no-build db
+wait_healthy db
+dc up -d --no-build
+wait_healthy backend
+"$ROOT/deploy/bin/smoke" || die "smoke test failed after the rollback"
+if [ "$restore_db" -eq 1 ]; then
+    # A restore starts a new timeline: a fresh full backup makes it the base of the next restores.
+    "$ROOT/deploy/bin/backup" full "after rollback"
+    rm -f "$STATE_DIR/rollback-backup-label" "$STATE_DIR/rollback-fingerprint.txt" "$STATE_DIR/rollback-backup-time"
+fi
+printf '%s rollback to %s (restore-db=%s) ok\n' "$(date -Is)" "$previous" "$restore_db" >> "$STATE_DIR/updates.log"
+log "rollback: done, running $previous"

@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# First start, or start after a reboot of a stopped stack. Idempotent:
+#   backup disk check → images → database → pgBackRest stanza → migrations → app → first full backup.
+#   deploy/bin/up [--no-build]
+# shellcheck source=lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+build=1
+[ "${1:-}" = --no-build ] && build=0
+
+# Never start writing backups anywhere but the prepared backup disk (deploy/bin/backup-disk-init).
+require_backup_disk
+[ -f "$ROOT/deploy/pgbackrest.env" ] || die "deploy/pgbackrest.env is missing: run deploy/bin/init-env"
+
+[ "$build" -eq 1 ] && dc build
+dc up -d db
+wait_healthy db
+# Creates the stanza in every repository, or checks it if it exists.
+pgbr stanza-create
+"$ROOT/deploy/bin/migrate"
+# The uploads volume is created by Docker as root; the backend runs as uid 1001.
+dc run --rm --no-deps -T -u root --entrypoint sh backend -c 'chown 1001 /data/uploads'
+dc up -d --no-build
+wait_healthy backend
+pgbr check
+if ! pgbr --repo=1 info --output=json | grep -q '"label"'; then
+    "$ROOT/deploy/bin/backup" full first-backup
+fi
+"$ROOT/deploy/bin/smoke"

@@ -1,0 +1,8 @@
+[Unit]
+Description=DistriCom: health, backups, WAL archiving, disks, certificate, Tailscale
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=@ROOT@
+ExecStart=@ROOT@/deploy/bin/monitor

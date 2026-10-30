@@ -1,0 +1,50 @@
+// Tailscale access policy of DistriCom (ADR 013, docs/OPERATIONS.md "Acceso remoto").
+// Source of truth for the tailnet policy: paste it in the admin console (Access controls) after every change,
+// or apply it with the Tailscale GitOps action once the tailnet exists. Keep it least-privilege:
+// - users reach only the server, and only HTTPS (and the split DNS when it is used);
+// - SSH only for the IT group; no subnet router, no exit node, no Funnel (no nodeAttrs grant it).
+// Tailscale only opens the network path: DistriCom's own login, roles and areas still decide everything.
+{
+	"groups": {
+		// PENDING (S3): company identities (with MFA at the identity provider), e.g. "enzo@empresa.com.ar".
+		"group:districom-remote": [],
+		"group:districom-it": [],
+	},
+
+	"tagOwners": {
+		// Only IT can tag a machine as the DistriCom server. Tagged devices do not expire with a user.
+		"tag:districom-server": ["group:districom-it"],
+	},
+
+	"grants": [
+		{
+			// Remote users: DistriCom over HTTPS, plus the split DNS that resolves its name to the server.
+			"src": ["group:districom-remote", "group:districom-it"],
+			"dst": ["tag:districom-server"],
+			"ip": ["tcp:443", "tcp:53", "udp:53"],
+		},
+		{
+			// Maintenance of the server.
+			"src": ["group:districom-it"],
+			"dst": ["tag:districom-server"],
+			"ip": ["tcp:22"],
+		},
+	],
+
+	// Tailscale SSH for IT with a fresh identity check; OpenSSH (port 22, keys only) keeps working as fallback.
+	"ssh": [
+		{
+			"action": "check",
+			"src": ["group:districom-it"],
+			"dst": ["tag:districom-server"],
+			"users": ["autogroup:nonroot"],
+		},
+	],
+
+	// Checked by Tailscale on every save of the policy: the server is reachable only where it must be.
+	// PENDING (S3): replace the placeholder users with real members of each group, then uncomment.
+	// "tests": [
+	// 	{"src": "remote.user@empresa.com.ar", "accept": ["tag:districom-server:443"], "deny": ["tag:districom-server:22", "tag:districom-server:5432", "tag:districom-server:8000", "tag:districom-server:3000"]},
+	// 	{"src": "it.user@empresa.com.ar", "accept": ["tag:districom-server:443", "tag:districom-server:22"], "deny": ["tag:districom-server:5432"]},
+	// ],
+}
