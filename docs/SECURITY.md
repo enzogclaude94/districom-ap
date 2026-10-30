@@ -6,9 +6,13 @@ Línea base de Fase 0 (detalle en `ARCHITECTURE.md §8` y ADR 004).
 |---|---|
 | Autenticación | Usuarios locales, Argon2id, mínimo 12 caracteres |
 | Sesiones | Token 256 bits en cookie `HttpOnly; SameSite=Lax; Secure` (prod); solo el hash en DB; expiración por inactividad y absoluta; logout revoca. Cada request valida revocación, usuario activo, expiración absoluta e inactividad con el `last_seen_at` guardado y, solo si todo pasa, lo actualiza como mucho una vez cada `SESSION_TOUCH_SECONDS` (60) con un `UPDATE` condicional que repite todas esas condiciones, gana un único request concurrente y nunca revive una sesión; si no encuentra la fila, una relectura de solo lectura con el mismo instante decide: si otro request la tocó primero el request sigue, y si la sesión fue revocada, venció, quedó inactiva o el usuario se desactivó en el medio, se rechaza este mismo request (R9‑5‑1): la inactividad puede vencer hasta 60 s antes que con un registro exacto, nunca después |
+| Contraseñas (S2, ADR 015) | Mínimo 12 y máximo 256 caracteres, no solo espacios ni el propio email. Cambio propio desde «Mi cuenta» probando la actual (los fallos cuentan como intentos de login) y cierra las otras sesiones. Contraseña temporal generada por el servidor (CLI `reset-password`; panel en S2‑2): se muestra una vez, se guarda solo el hash, nunca en auditoría ni logs, vence a las `TEMPORARY_PASSWORD_HOURS` (72) y, hasta reemplazarla, la API responde `403 password_change_required` a todo menos `/auth/me`, `/auth/password` y `/auth/logout` (bloqueo central en `current_user`). Un reseteo cierra todas las sesiones del usuario |
+| Sesiones propias (S2) | «Mi cuenta» lista las sesiones abiertas (dispositivo, IP, red, inicio, última actividad) y cierra una o todas las otras; nunca las de otro usuario (404). Cada cierre guarda motivo y autor |
+| IP real y origen (S2) | Detrás de Caddy, la IP del cliente (ADR 013) se clasifica como `local`, `tailscale`, `lan` u `other` y se guarda en la sesión y en `LOGIN` / `platform.login.failed`. **Solo auditoría: nunca autoriza ni deniega** |
+| Origin (S2) | Todo método mutante de `/api` con `Origin` tiene que venir del origen propio (esquema y `Host` que pasa Caddy) o de `TRUSTED_ORIGINS` / `CORS_ORIGINS`; si no, `403 origin_not_allowed`. Sin `Origin`, se rechaza si `Sec-Fetch-Site` es `cross-site` o `same-site`. Suma al header `X-Requested-With`. Producción: `TRUSTED_ORIGINS` vacío |
 | Autorización | Roles `admin` / `viewer` con `require_role`; RBAC ampliable |
 | Enumeración de cuentas | Mismo mensaje y verificación de hash simulada para email inexistente |
-| Fuerza bruta | Límite de intentos por IP+email (en memoria, instancia única); las claves cuyas fallas salieron de la ventana se descartan, así la memoria guarda solo las recientes (R9‑5‑1) |
+| Fuerza bruta | Límite de intentos por IP+email (en memoria, instancia única); las claves cuyas fallas salieron de la ventana se descartan, así la memoria guarda solo las recientes (R9‑5‑1). Los logins rechazados se auditan (`platform.login.failed`, con motivo, IP y origen, sin el email tipeado) |
 | CSRF | `SameSite=Lax` + header `X-Requested-With` obligatorio en métodos mutantes de `/api` |
 | CORS | Producción mismo origen (rewrite de Next.js); CORS solo para orígenes de desarrollo explícitos |
 | Validación | Pydantic estricto en todos los endpoints; errores de validación no devuelven los valores enviados |
@@ -30,7 +34,7 @@ Línea base de Fase 0 (detalle en `ARCHITECTURE.md §8` y ADR 004).
 - Archivos subidos (Fase 1): límite de tamaño, extensión + MIME + firma, nombre sanitizado, sin macros ni fórmulas.
 - Rate limit compartido si el backend se escala a más de una instancia.
 - Despliegue (ADR 013, S1 hecho; se activa en S3): TLS en Caddy con certificado público por DNS‑01; acceso remoto solo por Tailscale (MFA, aprobación de dispositivos, solo 443 al servidor); nada publicado en Internet; filtro `DOCKER-USER` para 80/443 (LAN y Tailscale); IP real solo desde Caddy; backups cifrados dentro y fuera del local; secretos del servidor en archivos fuera de Git, cada uno leído solo por el servicio que lo usa.
-- Administración de usuarios, contraseñas y sesiones desde la app (S2 del hilo Servidor); verificación de `Origin` en métodos mutantes.
+- Panel de administración de usuarios (S2‑2): alta, edición, activación, reseteo, roles y áreas, sesiones de otros, último administrador y anti‑escalamiento.
 - Auditoría de dependencias en CI (`pip-audit`, `pnpm audit`).
 
 ## Reporte

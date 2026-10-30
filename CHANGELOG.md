@@ -4,6 +4,16 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Added — S2‑1: contraseñas, sesiones y verificación de `Origin` (ADR 015)
+- **Cambio de contraseña propio** (`POST /auth/password`, pantalla «Mi cuenta» en `/cuenta`): pide la actual, valida mínimo 12 / máximo 256, no solo espacios ni el propio email, distinta de la actual; los fallos cuentan como intentos de login. Cierra todas las otras sesiones del usuario.
+- **Contraseña temporal con cambio obligatorio:** `users.must_change_password` y `temporary_password_expires_at` (vence a las `TEMPORARY_PASSWORD_HOURS`, 72). Hasta reemplazarla, la API responde `403 password_change_required` a todo salvo `/auth/me`, `/auth/password` y `/auth/logout` (bloqueo central en `current_user`) y la app muestra solo «Elegí tu contraseña». CLI `reset-password --email ...`: genera una temporal, la muestra una vez, guarda solo el hash y cierra todas las sesiones del usuario.
+- **Sesiones propias:** `GET /auth/sessions`, `POST /auth/sessions/{id}/revoke`, `POST /auth/sessions/revoke-others`; «Mi cuenta» las lista con dispositivo, IP, red, inicio y última actividad. Las sesiones de otro usuario no existen para estos endpoints (404).
+- **IP real y origen, solo auditoría:** `user_sessions.access_origin` (`lan`, `tailscale`, `local`, `other`) y los eventos `LOGIN` y `platform.login.failed` (nuevo: motivo, IP y origen, sin el email tipeado) los registran. Nunca autorizan.
+- **Verificación de `Origin`** en todo método mutante de `/api` (`403 origin_not_allowed`), además de `X-Requested-With`. Variable nueva `TRUSTED_ORIGINS` (vacía en producción; en desarrollo, sin definir, `http://localhost:3000`; el E2E la define para su puerto).
+- Auditoría: `platform.password.changed`, `platform.password.reset`, `platform.session.revoked`, `platform.sessions.revoked`; las sesiones cerradas guardan `revoked_reason` y `revoked_by`.
+- Migración `0032` (plataforma): columnas nuevas en `users` y `user_sessions`, sin tocar datos; los usuarios y sesiones existentes siguen igual.
+- Docs: ADR 015, SECURITY, ARCHITECTURE §8, OPERATIONS, README; ROADMAP: **S1 DONE** (PR #54, `5d1d3f5`), S2 en curso, S3 pendiente en el hardware real.
+
 ### Changed — R9‑5‑2: límites de request, timeouts de PostgreSQL y no‑store
 - **Cuerpo máximo de 1 MiB en bytes reales** (`REQUEST_MAX_BODY_BYTES`): 413 `request_too_large` en el formato estándar. Con `Content-Length` mayor, sin leer el cuerpo; sin él (chunked) o si el encabezado subestima, se cuenta lo recibido y se corta en el primer bloque que pasa el límite. Los archivos (`multipart/form-data`) usan `UPLOAD_MAX_SIZE_MB`. El lote Store Sys más grande posible (200 registros con todos los campos al máximo) pesa 89 KB.
 - **Timeouts solo en las conexiones del backend** (opciones de conexión del engine; sin `ALTER ROLE`, sin migración): `statement_timeout` 30 s, `lock_timeout` 10 s, `idle_in_transaction_session_timeout` 60 s (`DB_*_TIMEOUT_MS`). Excederlos responde 503 `database_timeout` o `database_busy`; los commits que traducían cualquier error de base a un 409 de reglas ahora dejan pasar los timeouts, y en Store Sys el registro afectado vuelve con `database_timeout`. `migrate`, backups, restores y dumps no cambian.
