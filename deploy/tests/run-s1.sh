@@ -339,7 +339,9 @@ expect "WAL archiving works on the new timeline after the rollback" dc exec -T -
 section "T13 Optional split DNS (CoreDNS): one name, two answers"
 DNS_LAN_BIND_IP=127.0.0.3 LAN_SERVER_IP=192.168.1.10 DNS_TAILSCALE_BIND_IP=127.0.0.4 TAILSCALE_SERVER_IP=100.101.102.103 \
     DNS_UPSTREAM=127.0.0.53 dc --profile dns up -d dns > /dev/null 2>&1
-sleep 3
+start=$(date +%s)
+until [ -n "$(dig +short +time=1 +tries=1 @127.0.0.3 $HOST A)" ] || [ $(($(date +%s) - start)) -gt 30 ]; do sleep 1; done
+docker logs "$(dc --profile dns ps -aq dns)" 2>&1 | tail -n 5 | sed 's/^/      coredns: /' | tee -a "$REPORT"
 lan_answer="$(dig +short @127.0.0.3 $HOST A)"
 ts_answer="$(dig +short @127.0.0.4 $HOST A)"
 expect "LAN interface answers the LAN address ($lan_answer)" test "$lan_answer" = 192.168.1.10
@@ -424,7 +426,7 @@ if [ -n "${S1_DOCKER_RESTART_CMD:-}" ]; then
     sleep 20
     after="$(fatal_count)"
     expect "after a restart of Docker, its restart policy starts the database again and it refuses again ($before → $after)" sh -c "[ $after -gt $before ] && ! docker exec '$db_id' pg_isready -q"
-    expect "the rest of the stack came back (Caddy answers)" sh -c "docker ps --format '{{.Names}}' | grep -q caddy"
+    expect "the rest of the stack came back (Caddy running)" sh -c "docker ps --format '{{.Names}}' | grep -q caddy"
 else
     result FAIL "Docker restart not exercised (set S1_DOCKER_RESTART_CMD)"
 fi
