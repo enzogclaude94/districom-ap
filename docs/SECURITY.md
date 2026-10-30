@@ -5,15 +5,15 @@ Línea base de Fase 0 (detalle en `ARCHITECTURE.md §8` y ADR 004).
 | Control | Implementación |
 |---|---|
 | Autenticación | Usuarios locales, Argon2id, mínimo 12 caracteres |
-| Sesiones | Token 256 bits en cookie `HttpOnly; SameSite=Lax; Secure` (prod); solo el hash en DB; expiración por inactividad y absoluta; logout revoca |
+| Sesiones | Token 256 bits en cookie `HttpOnly; SameSite=Lax; Secure` (prod); solo el hash en DB; expiración por inactividad y absoluta; logout revoca. Cada request valida revocación, usuario activo, expiración absoluta e inactividad con el `last_seen_at` guardado y, solo si todo pasa, lo actualiza como mucho una vez cada `SESSION_TOUCH_SECONDS` (60) con un `UPDATE` condicional que repite todas esas condiciones, gana un único request concurrente y nunca revive una sesión; si no encuentra la fila, una relectura de solo lectura con el mismo instante decide: si otro request la tocó primero el request sigue, y si la sesión fue revocada, venció, quedó inactiva o el usuario se desactivó en el medio, se rechaza este mismo request (R9‑5‑1): la inactividad puede vencer hasta 60 s antes que con un registro exacto, nunca después |
 | Autorización | Roles `admin` / `viewer` con `require_role`; RBAC ampliable |
 | Enumeración de cuentas | Mismo mensaje y verificación de hash simulada para email inexistente |
-| Fuerza bruta | Límite de intentos por IP+email (en memoria, instancia única) |
+| Fuerza bruta | Límite de intentos por IP+email (en memoria, instancia única); las claves cuyas fallas salieron de la ventana se descartan, así la memoria guarda solo las recientes (R9‑5‑1) |
 | CSRF | `SameSite=Lax` + header `X-Requested-With` obligatorio en métodos mutantes de `/api` |
 | CORS | Producción mismo origen (rewrite de Next.js); CORS solo para orígenes de desarrollo explícitos |
 | Validación | Pydantic estricto en todos los endpoints; errores de validación no devuelven los valores enviados |
 | Logs | JSON estructurado con `request_id`; sin cuerpos, query strings, credenciales ni PII |
-| Secretos | Solo por variables de entorno; `.env` ignorado por Git; la app no arranca sin `SECRET_KEY` ≥ 32 caracteres |
+| Secretos | Solo por variables de entorno; `.env` ignorado por Git; la app no arranca sin `SECRET_KEY` ≥ 32 caracteres. **`SECRET_KEY` hoy no es una protección activa de DistriCom:** no firma sesiones (son tokens opacos con su SHA‑256 en la base), no protege cookies ni firma los `preview_token` (son hashes del estado). Se mantiene por el contrato de entorno (decisión de Enzo, 2026-10-29); darle un uso real o sacarla es una decisión posterior al go‑live, con ADR |
 | Headers | `X-Content-Type-Options`, `X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy` |
 | Contenedores | Procesos sin root; puertos publicados solo en `127.0.0.1` |
 | Redirecciones | Login solo redirige a rutas relativas del mismo sitio |
