@@ -93,10 +93,10 @@ Las muestras son **de formato**: sirven para verificar firma, encoding, estructu
 | Fuente vigente (brief de Fase 1) | Muestra | Estado | Perfil |
 |---|---|---|---|
 | STORE SYS · Clientes (con zona y vendedor) | `clientes.xls` | Recibida | `docs/IMPORTS.md §3.2` |
-| STORE SYS · Ventas artículos/clientes | `ventas.xls` (1 día) | Recibida; falta una de varios días (ADR 014 S7) | §3.3 |
-| STORE SYS · Comprobantes emitidos | `comprobantes emitidos.xls` (1 día) | Recibida | §3.4 |
-| STORE SYS · Maestro de artículos | — | **Pendiente** | §3.5 |
-| AXUM · No Compra (CSV) | — | **Pendiente** | §3.6 |
-| (derivados) Clientes por zona / por vendedor | `.xlsx` generados con openpyxl | No son fuente | §3.1 |
+| STORE SYS · Ventas artículos/clientes | `ventas.xls` (1 día) | Recibida; falta una de varios días (ADR 014 S7) | `docs/IMPORTS.md §3.3` |
+| STORE SYS · Comprobantes emitidos | `comprobantes emitidos.xls` (1 día) | Recibida | `docs/IMPORTS.md §3.4` |
+| STORE SYS · Maestro de artículos | — | **Pendiente** | `docs/IMPORTS.md §3.5` |
+| AXUM · No Compra (CSV) | — | **Pendiente** | `docs/IMPORTS.md §3.6` |
+| (derivados) Clientes por zona / por vendedor | `.xlsx` generados con openpyxl | No son fuente | `docs/IMPORTS.md §3.1` |
 
 Lo que ya no se pide en Fase 1 (D‑H): programación, visitas y pedidos de AXUM (A3–A5 de §3). Se vuelven a pedir cuando exista una fuente confiable.

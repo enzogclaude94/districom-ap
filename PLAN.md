@@ -56,11 +56,11 @@ En preventa, el pedido se toma el día de la visita y la **factura suele emitirs
 ### R2 — Identidad de clientes entre AXUM y STORE SYS (ALTO)
 Es el mayor riesgo de integración. No sabemos si ambos sistemas comparten un código de cliente.
 **Supuesto:** cliente canónico propio con IDs externos separados; matching automático solo por clave exacta (código compartido o CUIT normalizado); todo lo demás queda **pendiente de revisión manual**. Nunca fuzzy matching irreversible.
-**Actualización 2026-10-30 (D‑B, ADR 014):** AXUM y STORE SYS son espacios de IDs independientes (`commercial.axum_customer_code_matches_store_sys = false`). Además, *Ventas artículos/clientes* de STORE SYS trae el cliente por **nombre** (no código) y el maestro tiene nombres repetidos: esos vínculos se proponen y se confirman a mano.
+**Actualización 2026-10-30 (D‑B, ADR 014):** AXUM y STORE SYS son espacios de IDs independientes (`commercial.axum_customer_code_matches_store_sys = false`). Además, *Ventas artículos/clientes* de STORE SYS trae el cliente por **nombre** (no código) y el maestro tiene nombres repetidos: esos vínculos se proponen y se confirman a mano. No hay matching automático por CUIT: en el maestro no es único ni confiable (739/820 vacíos).
 
 ### R3 — Semántica de notas de crédito y devoluciones (ALTO, requiere confirmación)
 El prompt pide confirmación antes de decisiones contables. **Supuesto provisional:** documentos separados con `document_type` (INVOICE, CREDIT_NOTE, DEBIT_NOTE) e importes **con signo** (NC negativa); `net_sales` = suma de importes con signo, sin impuestos. Se valida con el primer export real antes de cerrar Fase 1.
-**Actualización 2026-10-30:** *Comprobantes emitidos* trae NC y devoluciones como comprobantes separados, `netosa` sin signo y `total` con signo, sin IVA desglosado. La clasificación de cada tipo (incluidos COMP. INTERNO X, RECIBOS X, VALE PERSONAL V) va en `document_types` y la confirma Enzo (ADR 014 S3).
+**Actualización 2026-10-30:** *Comprobantes emitidos* trae NC y devoluciones como comprobantes separados, `netosa` sin signo y `total` con signo. La clasificación de cada tipo (incluidos COMP. INTERNO X, RECIBOS X, VALE PERSONAL V) va en `document_types` y la confirma Enzo (ADR 014 S3).
 
 ### R4 — "Cliente nuevo" con historia que empieza en 2026 (MEDIO)
 Con datos desde enero 2026, todo cliente parecería "nuevo" en sus primeras semanas.
@@ -81,7 +81,7 @@ Los preventistas no usan esta app, así que nadie marca "trabajada" en campo.
 ### R8 — Canal preventa vs. boca de expendio (MEDIO)
 No sabemos si STORE SYS trae un campo de canal. Puede deducirse por punto de venta, serie de comprobante o vendedor.
 **Supuesto:** el mapping de importación permite derivar el canal por regla configurable; si no se puede determinar → `OTRO` y aparece en Calidad de datos.
-**Actualización 2026-10-30:** las muestras muestran señales candidatas (zona `RUTA 08 - BOCA DE EXPENDIO`, vendedor «BOCA DE EXPENDIO», lista 2, Consumidor Final). Se decide en la fase que lo use, sobre `zone_type`.
+**Actualización 2026-10-30:** las muestras muestran señales candidatas (zona `RUTA 08 - BOCA DE EXPENDIO`, vendedor «BOCA DE EXPENDIO», lista 2, Consumidor Final). Se decide en la fase que lo use (candidatos en DATA_MODEL §6.4).
 
 ### R9 — Cliente genérico "Consumidor Final" en boca de expendio (MEDIO)
 Las ventas de mostrador suelen ir a un cliente genérico. Contarlo como "comprador" distorsiona penetración, ticket y estados.
@@ -128,7 +128,7 @@ Ninguna modificación cambia el alcance funcional.
 | D3 | ¿AXUM y STORE SYS comparten código de cliente / producto? | **Decidido (D‑B, 2026-10-30):** espacios independientes hasta comprobarlo con muestras. | — |
 | D4 | ¿Cómo se registran NC y devoluciones en STORE SYS? ¿Importes con o sin IVA? | Comprobantes separados; `netosa` sin signo y `total` con signo; signo canónico por `document_types`. **Pendiente:** clasificación de cada tipo (ADR 014 S3). | Siembra de `document_types` (F1.2). |
 | D5 | Desfase típico pedido → factura en preventa. | 2 días. | Conversión facturada. |
-| D6 | ¿Cómo se distingue boca de expendio en STORE SYS? | Regla configurable de mapping. | Fase 1/10. |
+| D6 | ¿Cómo se distingue boca de expendio en STORE SYS? | Regla configurable de mapping. | Se decide en la fase que lo use (DATA_MODEL §6.4). |
 | D7 | Hosting objetivo (VPS propio, cloud, on‑premise). | Docker Compose en un VPS. | Fase 0 (deploy), no bloquea desarrollo local. |
 
 ---

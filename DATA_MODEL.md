@@ -11,21 +11,21 @@ Una sola base PostgreSQL. **Plataforma** (DistriCom Core) en el schema `public`;
 
 | Dueño | Schema | Tablas |
 |---|---|---|
-| Plataforma | `public` | `users`, `user_sessions`, `app_settings`, `audit_events`, `source_systems` (Fase 0) · `employees`, `employee_functions`, `user_module_roles` (R0) · bancos, vehículos, terceros, bocas (R4–R7) · `customers`, `external_entity_mappings`, `import_files`, `import_jobs`, `import_rows`, `data_quality_issues` (Fase 1) |
-| Inteligencia Comercial | `commercial` | Configuración: `zones`, `zone_visit_days`, `zone_classification_rules`, `price_lists`, `product_categories`, `source_category_mappings`, `document_types`, `no_purchase_reason_categories`, `no_purchase_reason_mappings` · Maestros: `products`, `product_families`, `product_prices`, `customer_zone_assignments`, `customer_salesperson_assignments` · Hechos: `documents`, `sale_lines`, `no_purchase_events` (Fase 1) · `customer_status_*`, `customer_recovery_events`, `opportunities`, `opportunity_status_history`, `cross_sell_rules`, `commercial_goals`, `incentives` (Fases 4–8) · **Futuras, sin fuente todavía:** `visits`, `scheduled_visits`, `orders`, `order_items`, `customer_types`, `customer_profiles`, `brands`, `localities` (§6.4) |
+| Plataforma | `public` | `users`, `user_sessions`, `app_settings`, `audit_events`, `source_systems` (Fase 0) · `employees`, `employee_functions`, `user_module_roles` (R0) · bancos, vehículos, terceros, bocas (R4–R7) · `customers`, `external_entity_mappings`, `import_files`, `import_jobs`, `import_rows`, `data_quality_issues` (Fase 1) · `localities` (futura, sin fuente) |
+| Inteligencia Comercial | `commercial` | Configuración: `zones`, `zone_visit_days`, `zone_classification_rules`, `price_lists`, `product_categories`, `source_category_mappings`, `document_types`, `no_purchase_reason_categories`, `no_purchase_reason_mappings` · Maestros: `products`, `product_families`, `product_prices`, `customer_zone_assignments`, `customer_salesperson_assignments` · Hechos: `documents`, `sale_lines`, `no_purchase_events` (Fase 1) · `customer_status_*`, `customer_recovery_events`, `opportunities`, `opportunity_status_history`, `cross_sell_rules`, `commercial_goals`, `incentives` (Fases 4–8) · **Futuras, sin fuente todavía:** `visits`, `scheduled_visits`, `orders`, `order_items`, `customer_types`, `customer_profiles`, `brands`, `sales_channels` (§6.4) |
 | Rendiciones | `settlements` | Schema vacío en R0. Tablas por fase desde R1 (§13). |
 
 Reglas:
 - Una tabla tiene **un solo dueño**, que la define, la migra y es el único que escribe en ella. Un módulo escribe en tablas de plataforma solo a través de servicios de plataforma.
 - **Claves foráneas:** módulo → plataforma, sí. Plataforma → módulo, **nunca**. Módulo → otro módulo, solo si esa dependencia está declarada en ARCHITECTURE.md (hoy no hay ninguna).
-- Los nombres de tabla no llevan prefijo de módulo: el schema ya lo indica. En consultas y migraciones las tablas de módulo se califican (`commercial.sales`).
+- Los nombres de tabla no llevan prefijo de módulo: el schema ya lo indica. En consultas y migraciones las tablas de módulo se califican (`commercial.sale_lines`).
 - **Única fuente de verdad:** un dato compartido (persona, cliente, localidad, sistema fuente, identidad externa) existe una sola vez, en plataforma. Los módulos guardan solo sus relaciones y atributos propios, referenciando la fila de plataforma.
 - Las columnas que referencian a un empleado en un rol usan el nombre del rol (`salesperson_id → public.employees.id`).
 
 ## 1. Convenciones
 
 - **PK**: `id BIGINT GENERATED ALWAYS AS IDENTITY`. Nunca CUIT, DNI, nombre ni código externo como PK.
-- **IDs externos**: desde la Fase 1, el vínculo de una entidad con un sistema fuente vive **solo** en `external_entity_mappings` (§7.4), con estado, método y auditoría; las tablas nuevas no llevan columnas `external_*`. Excepción histórica: `employees.external_axum_id` / `external_store_id` (R0), que se mantienen; `external_store_id` lo administra Rendiciones (ADR 011) y Comercial solo lo lee (ADR 014).
+- **IDs externos**: desde la Fase 1, el vínculo de una entidad con un sistema fuente vive **solo** en `external_entity_mappings` (§7.4), con estado, método y auditoría; las tablas nuevas no llevan columnas `external_*`. Excepciones: (1) `employees.external_axum_id` / `external_store_id` (R0), que se mantienen; `external_store_id` lo administra Rendiciones (ADR 011) y Comercial no lo escribe ni lo usa para resolver (ADR 014). (2) Maestros **propios de un módulo con una única fuente** se identifican por su clave fuente en la propia tabla: `commercial.products.source_code` y `commercial.zones.name_key` (STORE SYS). Si otra fuente (p. ej. AXUM) aporta códigos de esas entidades, se vinculan por `external_entity_mappings`.
 - **Fechas de negocio**: `DATE` en zona horaria de negocio (`BUSINESS_TIMEZONE`, default `America/Argentina/Buenos_Aires`). Instantes: `TIMESTAMPTZ` (UTC).
 - **Dinero**: `NUMERIC(14,2)`. Moneda en `app_settings.currency` (default `ARS`); nunca símbolo en datos.
 - **Cantidades**: `NUMERIC(12,3)`.
@@ -149,7 +149,7 @@ Funciones del empleado con historia. Una persona puede tener varias funciones a 
 - Que un `salesperson_id` de una tabla comercial sea preventista **en esa fecha** lo valida el servicio comercial contra esta tabla (no es una FK).
 
 #### customers (Fase 1, ADR 014)
-Identidad **única** del cliente para toda la plataforma. Asignaciones y datos comerciales viven en `commercial` (§4.2, §5). Lo crea **solo** el import del maestro de clientes de STORE SYS (o un alta manual de admin); los demás imports nunca crean clientes.
+Identidad **única** del cliente para toda la plataforma. Asignaciones y datos comerciales viven en `commercial` (§4.2, §5). Lo crea **solo** el import del maestro de clientes de STORE SYS; los demás imports nunca crean clientes. (Un alta manual, si hiciera falta, se decide aparte.)
 | Columna | Tipo | Notas |
 |---|---|---|
 | id | bigint PK | |
@@ -272,7 +272,7 @@ Propuesta de configuración para zonas **nuevas**.
 #### price_lists
 Listas de precio de STORE SYS **con semántica**.
 `id`, `list_number` smallint UNIQUE, `code` UNIQUE, `name`, `description`, `kind` (`PRESALE_OFFICIAL`, `OUTLET`, `PROMO_VOLUME`, `SPECIAL`, `BANDERA`, `UNASSIGNED`), `commercially_relevant` bool, `active`, timestamps.
-Seed: 1 Precio oficial de preventa · 2 Boca de Expendio · 3 Promocional por 3 bultos o más · 4 Precios especiales · 5 Bandera · 6 y 7 `UNASSIGNED` (existen en el maestro, sin semántica definida). Una lista nueva se agrega como fila, sin tocar código.
+Seed: 1 Precio oficial de preventa · 2 Boca de Expendio · 3 Promocional por 3 bultos o más · 4 Precios especiales · 5 Bandera. Las listas 6 y 7 (esperadas según Enzo) se siembran `UNASSIGNED` solo si la muestra del maestro de artículos las confirma (ADR 014 S5). Una lista nueva se agrega como fila, sin tocar código.
 
 #### product_categories
 `id`, `code` UNIQUE, `name`, `default_product_kind`, `default_analytics_eligible` bool, `parent_id` FK self NULL (reservado; un nivel en Fase 1), `sort_order`, `active`. El listado inicial sale de los rubros reales (`GASEOSAS`, `VINOS`, `CERVEZAS`, `JUGOS`, `AGUAS`, `MERCADERIA`, `BEBIDAS BLANCAS` en la muestra) y se siembra con confirmación de Enzo.
@@ -316,7 +316,7 @@ Un SKU de STORE SYS. Campos **fuente** (se actualizan en cada import del maestro
 | category_origin | `SOURCE_MAPPING`, `MANUAL`, `NONE` |
 | product_kind | `PRODUCT`, `CONTAINER`, `CRATE`, `SERVICE`, `BONUS`, `COMBO`, `PROMO`, `MERCH`, `UNCLASSIFIED` |
 | analytics_eligible | bool NOT NULL DEFAULT false |
-| eligibility_origin | `CATEGORY_DEFAULT`, `MANUAL` |
+| eligibility_origin | `NONE` (sin categoría → `false`), `CATEGORY_DEFAULT`, `MANUAL` |
 | family_id | FK `product_families` NULL |
 | active | bool — estado en DistriCom |
 | first_seen_job_id, last_seen_job_id | FK `import_jobs` |
@@ -372,7 +372,6 @@ Un comprobante, **sin ítems** (la fuente no los trae).
 | customer_id | FK `public.customers` NULL — NULL si `codcli = 0` o sin mapping |
 | source_customer_code, source_customer_name | text |
 | net_amount | numeric(14,2) — `netosa` tal cual (sin signo en la fuente) |
-| signed_net_amount | numeric(14,2) — `net_amount × document_types.sign` |
 | total_amount | numeric(14,2) — `total` tal cual (con signo en la fuente) |
 | discount_amount | numeric(14,2) |
 | import_job_id | FK NOT NULL |
@@ -380,7 +379,7 @@ Un comprobante, **sin ítems** (la fuente no los trae).
 
 - **Universo comercial** = `document_types.commercial_universe`; `RETIRO PR.` queda fuera por configuración, no por código.
 - Reimport con el mismo `source_row_hash` → `duplicate`; con otro → fila rechazada + issue `document.changed` (nunca se pisa).
-- La clase y el signo se leen siempre del tipo vigente: reclasificar un tipo (admin, auditado) cambia su interpretación sin reescribir comprobantes.
+- La clase, el signo y el universo se leen **siempre** del tipo vigente: el neto con signo se calcula al leer (`net_amount × document_types.sign`), no se guarda. Reclasificar un tipo (admin, auditado) cambia su interpretación sin reescribir comprobantes.
 
 ### 6.2 sale_lines (Ventas artículos/clientes de STORE SYS)
 Unidades vendidas por cliente, producto y día. **Sin importe y sin vínculo a `documents`** (la fuente no trae número de comprobante).
@@ -438,10 +437,11 @@ El **framework** es de plataforma; los **tipos de import, adaptadores y códigos
 | warning_count, error_count | int |
 | snapshot_date | date NULL — fecha de la foto (maestros) |
 | period_from, period_to | date NULL — período cubierto (hechos) |
-| scope | jsonb NULL — scope declarado (`FULL` / `FILTERED` + descripción) y dimensiones observadas (vendedores, zonas, días) |
+| scope | jsonb NULL — scope declarado (`FULL` / `FILTERED` + descripción) y dimensiones observadas (vendedores, zonas, listas y días) |
 | reprocess_of_job_id, duplicate_of_job_id | FK self NULL |
 | metadata | jsonb — hoja, fila de encabezado, encoding, separador, firma de encabezados |
-| failure_reason | text NULL |
+| failure_reason | text NULL — código + detalle (`missing_columns`, `header_mismatch`, `unsupported_format`, `unexpected_error`) |
+| timestamps | `created_at`, `updated_at` |
 
 Duplicado exacto: mismo `sha256` + `import_type` que un job `completed`/`completed_with_warnings` → `duplicate` sin escritura. Reproceso deliberado: solo admin, job nuevo con `reprocess_of_job_id`.
 
@@ -454,9 +454,9 @@ Sin purga por defecto (`platform.imports.row_retention_days`); habilita auditor�
 | Columna | Notas |
 |---|---|
 | id | |
-| entity_type | texto validado por registro: `customer`, `employee` (plataforma); `commercial.product`, `commercial.zone` (módulo) |
+| entity_type | texto validado por registro: `customer`, `employee` (plataforma). Productos y zonas de STORE SYS se identifican en su propia tabla (§1); `commercial.product` / `commercial.zone` se usarán solo si otra fuente aporta códigos |
 | source_system_id | FK |
-| namespace | text — espacio de identificadores dentro del sistema (`customer`, `customer_name`, `seller`, `salesperson`, `product`, `zone`) |
+| namespace | text — espacio de identificadores dentro del sistema (`customer`, `customer_name`, `seller`, `salesperson`) |
 | external_id | text — código normalizado, o etiqueta normalizada si la fuente solo trae nombre |
 | external_label | text — tal cual vino (última vez) |
 | entity_id | bigint NULL — id en la tabla del dueño; NULL si pendiente |
@@ -521,7 +521,8 @@ Detalle en `docs/IMPORTS.md §5`.
 | Comprobante | `document_key` | mismo hash: `duplicate` · distinto: rechazo + issue (nunca se pisa) |
 | Línea de venta | sin clave natural segura | reemplazo por **período + scope**; si no es demostrable, la confirmación se detiene |
 | No‑compra | sin UNIQUE (ocurrencias legítimas) | estrategia a definir con el CSV real |
-| Identidad externa | `(entity_type, source_system, namespace, external_id)` | se reutiliza el mapping; nunca se cambia desde un import |
+| Identidad externa (clientes, empleados) | `(entity_type, source_system, namespace, external_id)` | se reutiliza el mapping; nunca se cambia desde un import |
+| Zona | `name_key` | se reutiliza; un nombre nuevo es otra zona |
 | Issue de calidad | `(code, dedupe_key)` abierto | suma ocurrencias |
 | Oportunidad abierta (Fase 6) | `dedup_key` con unique parcial | — |
 
@@ -544,7 +545,7 @@ Diseñados desde las queries previstas; se revisan con `EXPLAIN ANALYZE` al impl
 ## 12. Datos de prueba y demo (estrategia)
 
 - **Fixtures de tests:** archivos **sintéticos** con la estructura exacta de los exports reales (BIFF7 cp1252, encabezados crudos, placeholders de CUIT, filas repetidas, tipos de comprobante). Se generan con un script reproducible (`xlwt` solo en desarrollo) y se versionan en `backend/tests/fixtures/imports/`. **Nunca** datos reales de clientes.
-- **Demo:** el generador de datos ficticios (`scripts/seed_demo_data.py --seed 42`) **pasa por el pipeline de importación** generando esos mismos formatos. Los patrones para métricas se definen cuando se diseñen las fases de analítica.
+- **Demo (F1.8):** el generador de datos ficticios (`scripts/seed_demo_data.py --seed 42`) **pasa por el pipeline de importación** generando esos mismos formatos. Los patrones para métricas se definen cuando se diseñen las fases de analítica.
 - **Producción:** DistriCom empieza su historia el día de la puesta en marcha; la carga histórica es una decisión aparte (ADR 014 §2.13).
 
 ## 13. Rendiciones (`settlements`, R1–R9)

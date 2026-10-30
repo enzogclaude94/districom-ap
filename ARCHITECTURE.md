@@ -20,7 +20,7 @@ Sistemas fuente:
 
 La aplicación **no** reemplaza ni escribe en esos sistemas. La ingesta inicial es por archivos (XLSX/CSV); las APIs vendrán en el futuro.
 Usuarios iniciales: propietario, administración y dirección (pocos usuarios).
-Escala: 3 preventistas, 7 rutas, ~600 clientes, 500+ SKU, historia desde 2026-01-01.
+Escala estimada: 3 preventistas, zonas RUTA 01–08, ~820 clientes en el maestro de STORE SYS, 500+ SKU. La historia empieza en la puesta en marcha (ADR 014 §2.13).
 
 ## 2. Vista general
 
@@ -89,8 +89,8 @@ backend/app/
 │       ├── api.py         router montado en /api/v1/commercial
 │       ├── settings.py    parámetros commercial.* con defaults y etiquetas
 │       ├── public.py      [cuando otro módulo lo necesite] interfaz pública
-│       ├── masters/       [Fase 1] zonas y días, listas de precio, categorías, tipos de comprobante, motivos, productos, familias, precios
-│       ├── facts/         [Fase 1] asignaciones con historia, documents, sale_lines, no_purchase_events
+│       ├── masters/       [Fase 1] zonas y días, listas de precio, categorías, tipos de comprobante, motivos, productos, familias, precios, asignaciones con historia
+│       ├── facts/         [Fase 1] documents, sale_lines, no_purchase_events
 │       ├── imports/       [Fase 1] adaptadores por reporte STORE SYS / AXUM + tipos commercial.* (docs/IMPORTS.md)
 │       ├── analytics/     [Fase 2] REGISTRO ÚNICO de métricas (IDs = METRICS.md), filtros, períodos
 │       └── customer_status/  opportunities/  goals/  incentives/  reports/   [Fases 4–9]
@@ -137,7 +137,7 @@ Reglas que siguen vigentes:
 
 ### 4.3 Excepción analítica: lectura directa del modelo canónico
 
-Dentro de un módulo, los paquetes **operacionales** (en Comercial: `imports/`, `customer_status/`, `opportunities/`, `goals/`, `incentives/`…) mantienen encapsulación: son dueños de sus tablas, escriben solo a través de sus servicios y exponen interfaces Python.
+Dentro de un módulo, los paquetes **operacionales** (en Comercial: `masters/`, `facts/`, `imports/`, `customer_status/`, `opportunities/`, `goals/`, `incentives/`…) mantienen encapsulación: son dueños de sus tablas, escriben solo a través de sus servicios y exponen interfaces Python.
 
 `modules/commercial/analytics/` es la excepción explícita, para no sobrearquitecturar consultas BI:
 
@@ -235,8 +235,8 @@ SUBIR → DETECTAR → ANALIZAR (staging + resolución, nada canónico) → PREV
 El **framework** es de **plataforma** (`platform/imports`, `mappings`, `quality`): archivo original, job, staging, lectores por formato, registro de tipos, mappings externos e issues de calidad. Los **tipos de import, adaptadores y códigos de calidad** son de cada **módulo** y se registran en `ModuleSpec` (`commercial.store_sys.customers`, `.sales_lines`, `.documents`, `.products`, `commercial.axum.no_purchase`).
 
 1. **Subir:** límite `UPLOAD_MAX_SIZE_MB`; extensión permitida **y firma** del contenido; nombre sanitizado solo para mostrar; el original se guarda con nombre UUID bajo `UPLOAD_DIR` (volumen persistente con backup, hilo Servidor), nunca se modifica; SHA‑256.
-2. **Detectar:** el lector se elige **por firma** (OLE2 → XLS, ZIP → XLSX, texto → CSV), nunca por extensión; cada adaptador puntúa su firma de encabezados.
-3. **Analizar:** el adaptador normaliza y valida cada fila y resuelve entidades sin escribir datos canónicos; todo queda en `import_rows` (crudo, normalizado, mensajes). Mismo `sha256` + tipo ya importado → job `duplicate`.
+2. **Detectar:** el lector se elige **por firma** (OLE2 → XLS, ZIP → XLSX, texto → CSV), nunca por extensión; cada adaptador puntúa su firma de encabezados. Con el tipo conocido, mismo `sha256` + tipo ya importado → job `duplicate`, sin analizar.
+3. **Analizar:** el adaptador normaliza y valida cada fila y resuelve entidades sin escribir datos canónicos; todo queda en `import_rows` (crudo, normalizado, mensajes); mappings, zonas e issues solo se proponen y se crean al confirmar.
 4. **Preview:** contadores, filas rechazadas, warnings, pendientes de resolución y lo que se reemplazaría.
 5. **Confirmar:** `operator`; lock consultivo de PostgreSQL por tipo; **una transacción**; error estructural o inesperado → rollback total y job `failed`.
 6. **Auditar:** `platform.import.*` en `audit_events`; apertura y cierre de `data_quality_issues`.
@@ -285,7 +285,7 @@ Son procesos del módulo comercial. Se ejecutan como comandos CLI (`python -m ap
   - **Etapa 1 (R0, ADR 007):** tabla `user_module_roles(user_id, module_key, role)` con roles `viewer < operator < admin`. `users.role = admin` es el **administrador de plataforma** (usuarios, empleados, configuración general) y tiene `admin` en todos los módulos; los demás usuarios acceden solo a los módulos asignados. Todo endpoint de módulo usa `require_module_access("<módulo>", min_role)`; `GET /auth/me` devuelve `modules: [{key, name, role}]`. Asignación por CLI (`grant-module-role`, `revoke-module-role`).
   - **Áreas protegidas (R8‑1, ADR 010):** un módulo declara áreas con autorización propia en `ModuleSpec.protected_areas` (`ProtectedAreaSpec(key="<módulo>.<área>", name, explicit_grant_required)`). La capa central resuelve `area_role` / `require_area_access`: el área exige un rol en su módulo **y** un permiso propio (fila de `user_module_roles` con la clave del área); con `explicit_grant_required` el admin de plataforma no la hereda. Sin el área, 404 sin detalles; por debajo del rol, 403. `GET /auth/me` devuelve además `areas: [{key, name, role}]`. El admin de plataforma otorga y revoca (CLI o `PUT /auth/access-grants`, `POST /auth/access-grants/revoke`) sin poder leer el área antes. Primera área: `settlements.employee_finance` (Rendiciones › Empleados); segunda, `settlements.store_sys_import` (Rendiciones › Integración Store Sys, R9‑1, ADR 011).
   - **Etapa 2 (solo si hace falta):** permisos por acción como mapa en código rol → permisos.
-  - `admin` de plataforma: usuarios, empleados y configuración general. `admin` de módulo: imports, configuración, correcciones y aprobaciones del módulo. `operator`: operación diaria (en Rendiciones: cargar y cerrar rendiciones, acreditar pendientes, registrar pagos). `viewer`: lectura.
+  - `admin` de plataforma: usuarios, empleados y configuración general. `admin` de módulo: imports, configuración, correcciones y aprobaciones del módulo. `operator`: operación diaria (en Rendiciones: cargar y cerrar rendiciones, acreditar pendientes, registrar pagos; en Comercial: subir, analizar y confirmar imports y resolver mappings operativos, ADR 014 §2.12). `viewer`: lectura.
 - CSRF: `SameSite=Lax` + header custom obligatorio en métodos mutantes.
 - Rate limit simple en login (en memoria, por IP+usuario).
 - Validación estricta Pydantic en todos los endpoints; queries parametrizadas.
@@ -313,7 +313,7 @@ Son procesos del módulo comercial. Se ejecutan como comandos CLI (`python -m ap
 
 ## 12. Futuras integraciones y extensiones
 
-- APIs AXUM / STORE SYS → nuevos `SourceAdapter`.
+- APIs AXUM / STORE SYS → nuevos `ApiClient` + adaptador por reporte.
 - Asistente IA: consumirá el **registro de métricas** y las reglas estructuradas (no SQL libre ni UI).
 - ML (churn, propensión, next best product): puntos de extensión en `modules/commercial/customer_status/` y `opportunities/rules/` (una regla puede ser un modelo con el mismo contrato: inputs → score + motivos).
 - Market basket (support/confidence/lift) a partir de `sale_lines` (unidades por cliente, producto y día).

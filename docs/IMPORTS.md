@@ -20,7 +20,7 @@ SUBIR → DETECTAR → ANALIZAR ─────────────► PREVI
           │           │ import_rows (raw,        │                          una transacción,
           │           │ normalized, mensajes)    │                          lock por tipo
           │           └ nada canónico            └ cancelar → cancelled
-          └ mismo sha256 + tipo ya importado → duplicate
+          └ mismo sha256 + tipo ya importado → duplicate (antes de analizar)
 ```
 
 **Pasos:**
@@ -32,10 +32,11 @@ SUBIR → DETECTAR → ANALIZAR ─────────────► PREVI
 2. **Detectar.**
    - El lector arma las hojas y filas crudas.
    - Cada adaptador registrado puntúa su firma de encabezados: si uno solo supera el umbral, ese es el tipo; si no, elige el usuario.
-   - Si el usuario elige un tipo cuya firma no coincide, el job pasa a `failed` (`header_mismatch`).
+   - Con el tipo conocido se verifica el archivo idéntico (§5.1): si ya estaba importado, el job queda `duplicate` y no se analiza.
+   - Si el usuario elige un tipo cuya firma no coincide, el job pasa a `failed` con `failure_reason = header_mismatch` (no es un código de issue).
 3. **Analizar.**
    - El adaptador normaliza y valida cada fila.
-   - Se resuelven entidades **sin escribir** nada canónico.
+   - Se resuelven entidades **sin escribir** nada canónico: mappings, zonas nuevas e issues solo se **proponen** en `import_rows.normalized` y se crean al confirmar.
    - Se guardan `import_rows` y se calcula el resumen: filas detectadas, válidas, con warning, rechazadas, duplicadas, pendientes de resolución, nuevas, actualizadas y sin cambio.
 4. **Preview.**
    - Muestra el resumen, las filas rechazadas, los warnings y lo que la confirmación reemplazaría (§5.3).
@@ -77,7 +78,7 @@ SUBIR → DETECTAR → ANALIZAR ─────────────► PREVI
 
 **No son fuente:**
 - `clientes_por_zona.xlsx` y `clientes_por_vendedor.xlsx`: son informes derivados de `clientes.xls`, generados con openpyxl, con resúmenes, una hoja por zona o vendedor y columnas calculadas.
-- La subida los rechaza por firma de encabezados (`header_mismatch`).
+- La detección los rechaza por firma de encabezados (`failure_reason = header_mismatch`).
 
 ### 3.2 STORE SYS · Clientes (`commercial.store_sys.customers`)
 
@@ -157,7 +158,7 @@ SUBIR → DETECTAR → ANALIZAR ─────────────► PREVI
 | `nommov` | texto `"<TIPO> <LETRA> PPPP-NNNNNNNN"` | se separan tipo, letra, punto de venta y número; espacios colapsados | `source_type_name`, `letter`, `point_of_sale`, `number`, `document_key` |
 | `nombre` | texto | tal cual | `source_customer_name` |
 | `codcli` | número | entero → texto; `0` → sin cliente | mapping `customer/STORE_SYS/customer` (exacto) → `customer_id` |
-| `netosa` | número | `numeric(14,2)`, **sin signo** en la fuente | `net_amount` y `signed_net_amount = net_amount × sign` |
+| `netosa` | número | `numeric(14,2)`, **sin signo** en la fuente | `net_amount` (el neto con signo se calcula al leer: `net_amount × document_types.sign`) |
 | `total` | número | `numeric(14,2)`, **con signo** en la fuente | `total_amount` |
 | `descue` | número | `numeric(14,2)` | `discount_amount` |
 | `fechas` | fecha Excel | `date` | `business_date` |
@@ -172,7 +173,7 @@ SUBIR → DETECTAR → ANALIZAR ─────────────► PREVI
 | `DEVOLUCION X` | 11 (total negativo) | `RETURN` (signo −1) | Sí | A confirmar |
 | `COMP. INTERNO X` | 78 (incluye Consumidor Final) | `INVOICE` (comprobante interno) | Sí | A confirmar |
 | `RECIBOS X` | 72 (neto 0) | `RECEIPT` (cobranza) | No | A confirmar |
-| `VALE PERSONAL V` | 3 (neto 0; `codcli` de otro espacio) | `EMPLOYEE_VOUCHER` | No | A confirmar |
+| `VALE PERSONAL V` | 3 (neto 0; `codcli` que no coincide con el maestro, a confirmar en S3) | `EMPLOYEE_VOUCHER` | No | A confirmar |
 | `FACTURA` sin letra, punto de venta `0000` | 2 (neto 0, total > 0) | `UNCLASSIFIED` | No | A confirmar |
 
 **Reglas:**
@@ -226,7 +227,7 @@ Reglas aprobadas:
 | XLS (BIFF2–8) | `D0 CF 11 E0 A1 B1 1A E1` (OLE2) | `xlrd` 2.x | Las muestras de STORE SYS son **BIFF7** (Excel 5/95), que `openpyxl` no lee. Fechas con el `datemode` del libro; codepage del libro (cp1252: `Ñ` correcta). Códigos numéricos llegan como float y se convierten a entero‑texto. Los ceros a la izquierda no existen en la fuente |
 | XLSX | ZIP `PK\x03\x04` con `[Content_Types].xml` | `openpyxl` `read_only=True, data_only=True` | Sin evaluar fórmulas ni ejecutar macros; `.xlsm` rechazado; `defusedxml`; límite de descompresión |
 | CSV | texto | `csv` stdlib | Encoding UTF‑8 (con o sin BOM) → CP1252, o rechazo. Separador detectado entre `;`, `,` y tab. Decimales según la columna (`1.234,56` o `1234.56`) |
-| HTML / SpreadsheetML con extensión `.xls` | `<html`, `<?xml` | — | Rechazo con `unsupported_format` hasta que una muestra real lo justifique |
+| HTML / SpreadsheetML con extensión `.xls` | `<html`, `<?xml` | — | Rechazo con `failure_reason = unsupported_format` hasta que una muestra real lo justifique |
 
 El lector entrega `RawSheet` (filas de celdas `str | Decimal | date | datetime | None` con número de fila real). El adaptador no importa `xlrd`, `openpyxl` ni `csv`, y un contrato de import‑linter lo verifica.
 
@@ -260,7 +261,7 @@ El archivo no trae número de comprobante, y dos líneas idénticas pueden ser v
    - `FULL`: sin filtros, todos los vendedores y zonas;
    - `FILTERED`: con la descripción de los filtros usados.
    
-   Se guarda en `import_jobs.scope` junto con las dimensiones observadas: vendedores, zonas y listas presentes.
+   Se guarda en `import_jobs.scope` junto con las dimensiones observadas: vendedores, zonas, listas y días presentes.
 3. **Reemplazo automático.** Ocurre solo si:
    - el job nuevo **y** todos los jobs anteriores con líneas vigentes en esos días son `FULL`;
    - el nuevo cubre esos días completos.
@@ -292,8 +293,8 @@ La estrategia definitiva se valida con una muestra de varios días antes de F1.3
 | `customer / AXUM / customer` | código AXUM | No Compra | **No** (salvo regla D‑B habilitada) |
 | `employee / STORE_SYS / seller` | etiqueta normalizada | maestro de clientes, ventas | **No**; los pseudo‑vendedores se marcan `excluded` |
 | `employee / AXUM / salesperson` | lo que traiga AXUM | No Compra | **No** |
-| `commercial.zone / STORE_SYS / zone` | `name_key` | cualquier reporte con zona | Sí: la zona es configuración, se crea `UNCLASSIFIED` y se aplica la regla |
-| `commercial.product / STORE_SYS / product` | código | maestro de artículos | Sí |
+
+Zonas y productos **no usan mappings**: se identifican por `commercial.zones.name_key` y `commercial.products.source_code` (DATA_MODEL §1, excepción 2). Una zona nueva se crea `UNCLASSIFIED` al confirmar y recibe la regla que corresponda.
 
 **Orden de resolución:**
 1. mapping `confirmed` o `excluded`;
@@ -362,7 +363,7 @@ El admin de plataforma es admin del módulo (ARCHITECTURE §8).
 ## 9. Seguridad y privacidad
 
 - **Subida:**
-  - Límite `UPLOAD_MAX_SIZE_MB`; el reverse proxy deja pasar 30 MB.
+  - Límite `UPLOAD_MAX_SIZE_MB`; el límite del reverse proxy lo define el hilo Servidor (PR #54) y debe ser mayor o igual.
   - Lista blanca de extensión **y** firma.
   - Nombre original sanitizado, solo para mostrar.
   - En disco va con UUID bajo `UPLOAD_DIR`, nunca dentro del contenedor ni del webroot.

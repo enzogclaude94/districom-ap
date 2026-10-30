@@ -73,7 +73,7 @@ Cada fase empieza solo con aprobación explícita de Enzo y termina con un infor
 | F1.5 | Revisión manual de mappings (ambiguos, confirmación en lote, reasignación con motivo, re‑resolución) + pantalla Mapeos | PLANNED | F1.4 |
 | F1.6 | Calidad de datos completa + pantalla Calidad | PLANNED | F1.5 |
 | F1.7 | UI mínima de maestros (clientes, productos, zonas, vendedores, listas) | PLANNED | F1.6 |
-| F1.8 | Hardening: reproceso, recuperación, performance con volumen realista, documentación e informe de fase | PLANNED | F1.7 |
+| F1.8 | Hardening: reproceso, recuperación, performance con volumen realista, generador de demo por pipeline con seed fijo, documentación e informe de fase | PLANNED | F1.7 |
 
 Cada subfase es un PR propio que espera la aprobación de Enzo antes de la siguiente. Las migraciones se numeran desde el `main` vigente al abrir cada PR.
 
@@ -86,7 +86,7 @@ Cada subfase es un PR propio que espera la aprobación de Enzo antes de la sigui
 - Cambios manuales (mappings, configuración, categorías, elegibilidad, familias, asignaciones, reprocesos) auditados con quién, cuándo, antes, después y motivo.
 - RETIRO fuera del universo comercial; zonas con días configurables y Boca de Expendio sin visitas, sin `if` en código; producto sin clasificar con `analytics_eligible = false`.
 - Asignaciones de zona y vendedor con historia; nunca se destruye historia.
-- Fixtures sintéticos con la estructura real; ningún dato real en el repo.
+- Fixtures sintéticos con la estructura real; ningún dato real en el repo; demo generada por el mismo pipeline con seed fijo.
 
 ## Fase 2 — Dashboard general
 **Alcance:** filtros globales en URL, períodos y comparación, KPIs jerarquizados (ventas, preventa/boca, compradores, activos, sin compra, nuevos, cobertura, cumplimiento de visitas, conversión, ticket, SKU, categorías), variaciones, tendencias/sparklines, drill‑down básico.

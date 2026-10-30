@@ -62,7 +62,8 @@ Las muestras son de **formato**, no historia productiva, y no se commitean. El p
 
 ### 2.2 Pipeline en dos pasos (D‑F)
 `subir → detectar → analizar (staging + preview, sin escritura canónica) → confirmar (operator) → escribir en una transacción → auditar`.
-- Analizar **nunca** escribe datos canónicos.
+- Analizar **nunca** escribe datos canónicos. Mappings, zonas nuevas e issues solo se proponen en `import_rows.normalized` y se crean al confirmar.
+- Un archivo idéntico (`sha256` + tipo) se detecta apenas se conoce el tipo, antes de analizar (§2.7).
 - Los estados de `import_jobs` son `pending`, `processing`, `completed`, `completed_with_warnings`, `failed`, `duplicate` y `cancelled` (D‑E). Todo intento queda registrado.
 
 ### 2.3 Formatos
@@ -98,7 +99,7 @@ Los reportes son exports fijos.
   - una regla de equivalencia solo se habilita después de comprobarla con muestras reales y con aprobación de Enzo.
 - **Vendedor de STORE SYS (D‑C):**
   - Mapping `employee / STORE_SYS / seller`. Como el export trae nombre, `external_id` es la **etiqueta normalizada** y se confirma a mano.
-  - Comercial **lee** `employees.external_store_id` y **nunca lo escribe**.
+  - Comercial **no escribe ni usa** `employees.external_store_id` para resolver: ese campo es del área `settlements.store_sys_import`.
   - Los imports **nunca crean empleados**.
   - «BOCA DE EXPENDIO» y otros pseudo‑vendedores se marcan `excluded`.
 - **Cliente:**
@@ -118,8 +119,8 @@ Los reportes son exports fijos.
    - Si un comprobante existente llega con otro contenido, **no se pisa**: la fila se rechaza y se abre un issue.
 3. **Ventas artículos/clientes, reemplazo por período y scope (D‑G corregido):**
    - El archivo no trae filtros, así que el scope **no se puede deducir del archivo**. Lo declara el operador al analizar: «export completo, sin filtros» o «filtrado por…».
-   - Se guarda en `import_jobs.scope` junto con las dimensiones observadas (vendedores, zonas, fechas).
-   - **El reemplazo automático** solo ocurre si el job nuevo y el anterior declaran scope completo y el nuevo cubre los mismos días. Las líneas anteriores de esos días quedan `superseded`, nunca borradas.
+   - Se guarda en `import_jobs.scope` junto con las dimensiones observadas (vendedores, zonas, listas y días).
+   - **El reemplazo automático** solo ocurre si el job nuevo y todos los jobs anteriores con líneas vigentes en esos días declaran scope completo y el nuevo cubre esos días completos. Las líneas anteriores de esos días quedan `superseded`, nunca borradas.
    - **En cualquier otro caso** (scopes distintos o no comparables, solapamiento parcial ambiguo) la confirmación **se detiene**. Hace falta una decisión explícita de un admin, auditada.
    - Nada se reemplaza por suposición.
    - Las filas idénticas dentro de un archivo se conservan con su `occurrence`.
@@ -132,7 +133,7 @@ Los reportes son exports fijos.
 ### 2.8 Zonas y visitas (ajuste 2, D‑H, D‑J)
 - **Modelo:**
   - `commercial.zones` (nombre fuente, tipo, `requires_visit`) y `zone_visit_days` con vigencia reemplazan a `routes` y `route_schedules`.
-  - `zone_classification_rules` (patrón → tipo, visita y días) **solo propone** la configuración de una zona **la primera vez que aparece**. Después manda la configuración explícita de la zona y una regla nunca la pisa.
+  - `zone_classification_rules` (patrón → tipo, visita y días) se aplica **una sola vez, al crear la zona** la primera vez que aparece. Después manda la configuración explícita de la zona y una regla nunca la pisa.
 - **Reglas de negocio de Enzo** (Lumivi L/M/V, Majusa M/J/V, Bandera J, Boca de Expendio sin visita). Los alias reales observados en STORE SYS son:
   - `RUTA 01/02 - LUVI`;
   - `RUTA 04/06 - MAJU`;
@@ -149,7 +150,7 @@ Los reportes son exports fijos.
   - `RETIRO PR.` es `INTERNAL_MOVEMENT` y queda fuera del universo comercial (regla de Enzo);
   - un tipo nuevo entra `UNCLASSIFIED` y **fuera** del universo hasta que un admin lo clasifica;
   - la clasificación propuesta para los demás tipos observados es interpretación contable y **requiere confirmación de Enzo** (`CLAUDE.md §12`) antes de sembrarla.
-- El neto canónico con signo es `netosa × sign` del tipo. Si el signo de `total` lo contradice, queda un warning.
+- El neto canónico con signo es `netosa × sign` del tipo y **se calcula al leer**, no se guarda. Si el signo de `total` lo contradice, queda un warning.
 
 ### 2.10 Productos, listas de precio y familias (D‑D, D‑K)
 - **Campos fuente y canónicos separados en `products`:**
@@ -194,7 +195,7 @@ Todo bajo `require_module_access("commercial", …)`.
 |---|---|---|---|
 | S1 | Días de visita de las zonas MISA (`RUTA 03` y `RUTA 05`) | Enzo | F1.2 (siembra de reglas) |
 | S2 | `LUVI` = Lumivi y `MAJU` = Majusa | Enzo | F1.2 |
-| S3 | Clasificación contable de COMP. INTERNO X, RECIBOS X, DEVOLUCION X, VALE PERSONAL V y «FACTURA» sin letra con neto 0 | Enzo | F1.2 (siembra de `document_types`) |
+| S3 | Clasificación contable de todos los tipos observados salvo RETIRO PR.: FACTURA A/B, NOTA DE CREDITO A, COMP. INTERNO X, RECIBOS X, DEVOLUCION X, VALE PERSONAL V y «FACTURA» sin letra con neto 0 | Enzo | F1.2 (siembra de `document_types`) |
 | S4 | Si STORE SYS puede exportar *Ventas artículos/clientes* con código de cliente (eliminaría el mapping por nombre) | Enzo / STORE SYS | F1.3 |
 | S5 | Formato, encoding, columnas y listas 1–7 del maestro de artículos | Muestra real | F1.3 (adaptador de artículos) |
 | S6 | Estructura del CSV AXUM No Compra y estrategia de ocurrencias | Muestra real | F1.4 |
