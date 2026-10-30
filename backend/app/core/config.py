@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     cookie_secure: bool = True
     session_idle_hours: int = Field(default=8, gt=0)
     session_absolute_days: int = Field(default=7, gt=0)
+    # A session's `last_seen_at` is written at most once per this many seconds (R9-5-1): the idle expiry is then up to
+    # this much earlier than exact tracking, never later.
+    session_touch_seconds: int = Field(default=60, gt=0, le=60)
     login_max_attempts: int = Field(default=5, gt=0)
     login_window_seconds: int = Field(default=300, gt=0)
     # "test" lowers the Argon2 cost so a test suite does not spend minutes hashing; only allowed with APP_ENV=test
