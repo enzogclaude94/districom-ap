@@ -16,11 +16,24 @@ DbSession = Annotated[Session, Depends(get_db)]
 AppSettings = Annotated[Settings, Depends(get_settings)]
 
 
-def current_user(request: Request, db: DbSession, settings: AppSettings) -> User:
+def session_user(request: Request, db: DbSession, settings: AppSettings) -> User:
+    """The user of a valid session, even one who still has to replace a temporary password.
+
+    Only `/auth/me`, `/auth/password` and `/auth/logout` use it directly; everything else goes through
+    `current_user`, so a new endpoint is closed to a temporary password by default."""
     token = request.cookies.get(SESSION_COOKIE)
     user = resolve_session(db, token, settings) if token else None
     if user is None:
         raise AppError(401, "unauthorized", "Iniciá sesión para continuar.")
+    return user
+
+
+SessionUser = Annotated[User, Depends(session_user)]
+
+
+def current_user(user: SessionUser) -> User:
+    if user.must_change_password:
+        raise AppError(403, "password_change_required", "Tenés que cambiar la contraseña temporal para continuar.")
     return user
 
 

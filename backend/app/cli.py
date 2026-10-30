@@ -3,6 +3,9 @@
 Module access (ARCHITECTURE.md §8): `grant-module-role --email ... --module settlements --role operator`,
 `revoke-module-role --email ... --module settlements`. The same commands grant a protected area (ADR 010):
 `--module settlements.employee_finance`; a platform admin needs that grant too to read the area.
+
+`reset-password --email ...` (S2) gives a user a temporary password and closes all their sessions: the way back in
+when nobody who can administer users can log in. The password is printed once on stdout, never logged.
 """
 
 import argparse
@@ -13,14 +16,15 @@ from collections.abc import Generator, Iterator
 from contextlib import contextmanager
 from typing import cast
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.db.session import get_db
-from app.platform.auth.models import MODULE_ROLES
+from app.platform.auth.models import MODULE_ROLES, User
 from app.platform.auth.module_roles import ModuleRoleError, grant_module_role, revoke_module_role
-from app.platform.auth.service import create_user
+from app.platform.auth.service import create_user, set_temporary_password
 
 logger = logging.getLogger("app.cli")
 
@@ -79,6 +83,19 @@ def _revoke(args: argparse.Namespace) -> int:
     return 0
 
 
+def _reset_password(args: argparse.Namespace) -> int:
+    with _session() as db:
+        user = db.scalar(select(User).where(User.email == args.email))
+        if user is None:
+            logger.error("reset_password_failed", extra={"reason": "unknown user"})
+            return 1
+        password = set_temporary_password(db, user, get_settings(), by=None)
+        logger.info("password_reset", extra={"user_id": user.id})
+    # The one place the temporary password appears: the terminal of whoever ran the command.
+    sys.stdout.write(f"Contraseña temporal (vence en {get_settings().temporary_password_hours} h): {password}\n")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     configure_logging(get_settings().log_level)
     parser = argparse.ArgumentParser(prog="app.cli")
@@ -100,6 +117,11 @@ def main(argv: list[str] | None = None) -> int:
     revoke.add_argument("--email", required=True)
     revoke.add_argument("--module", required=True, choices=modules)
     revoke.set_defaults(func=_revoke)
+    reset = sub.add_parser(
+        "reset-password", help="Dar una contraseña temporal a un usuario y cerrar sus sesiones (se muestra una vez)"
+    )
+    reset.add_argument("--email", required=True)
+    reset.set_defaults(func=_reset_password)
     args = parser.parse_args(argv)
     result: int = args.func(args)
     return result
