@@ -9,22 +9,23 @@ import { login } from "./helpers";
 
 const NEW_PASSWORD = "mi-frase-nueva-y-larga";
 
-test("a platform admin administers a user end to end", async ({ page, browser, isMobile }, testInfo) => {
+test("a platform admin administers a user end to end", async ({ page, browser }, testInfo) => {
   const email = `e2e-user-${testInfo.project.name}-${Date.now()}@districom.local`;
   await login(page, "/usuarios");
   await expect(page.getByRole("heading", { name: "Usuarios" })).toBeVisible();
 
   await page.getByRole("button", { name: "Nuevo usuario" }).click();
-  await page.getByLabel("Nombre y apellido").fill("Usuario E2E");
-  await page.getByLabel("Email").fill(email);
-  await page.getByRole("button", { name: "Crear usuario" }).click();
-  const temporary = (await page.getByLabel("Contraseña temporal").textContent())!.trim();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByLabel("Nombre y apellido").fill("Usuario E2E");
+  await dialog.getByLabel("Email").fill(email);
+  await dialog.getByRole("button", { name: "Crear usuario" }).click();
+  const temporary = (await dialog.getByLabel("Contraseña temporal").textContent())!.trim();
   expect(temporary).toMatch(/^[A-Za-z0-9]{4}(-[A-Za-z0-9]{4}){3}$/);
-  await page.getByRole("link", { name: "Asignar accesos" }).click();
+  await dialog.getByRole("link", { name: "Asignar accesos" }).click();
   await expect(page.getByRole("heading", { name: "Usuario E2E" })).toBeVisible();
-  await expect(page.getByLabel("Empleados")).toBeDisabled(); // an area needs its module
-  await page.getByLabel("Inteligencia Comercial").selectOption("viewer");
-  await expect(page.getByLabel("Inteligencia Comercial")).toHaveValue("viewer");
+  await expect(page.getByRole("combobox", { name: "Empleados", exact: true })).toBeDisabled(); // an area needs its module
+  await page.getByRole("combobox", { name: "Inteligencia Comercial", exact: true }).selectOption("viewer");
+  await expect(page.getByRole("combobox", { name: "Inteligencia Comercial", exact: true })).toHaveValue("viewer");
 
   // The person: temporary password, forced change, then the module.
   const person = await browser.newContext();
@@ -63,8 +64,7 @@ test("a platform admin administers a user end to end", async ({ page, browser, i
   await expect(page.getByRole("list", { name: "Actividad de la cuenta" })).toContainText("Usuario desactivado");
   await person.close();
 
-  if (isMobile) await page.getByRole("button", { name: "Abrir menú" }).click();
-  await page.getByRole("link", { name: "Usuarios" }).click();
+  await page.getByRole("main").getByRole("link", { name: "Usuarios" }).click();
   await expect(page).toHaveURL(/\/usuarios$/);
 });
 
