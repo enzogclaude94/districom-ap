@@ -4,6 +4,12 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Changed — R9‑5‑2: límites de request, timeouts de PostgreSQL y no‑store
+- **Cuerpo máximo de 1 MiB en bytes reales** (`REQUEST_MAX_BODY_BYTES`): 413 `request_too_large` en el formato estándar. Con `Content-Length` mayor, sin leer el cuerpo; sin él (chunked) o si el encabezado subestima, se cuenta lo recibido y se corta en el primer bloque que pasa el límite. Los archivos (`multipart/form-data`) usan `UPLOAD_MAX_SIZE_MB`. El lote Store Sys más grande posible (200 registros con todos los campos al máximo) pesa 89 KB.
+- **Timeouts solo en las conexiones del backend** (opciones de conexión del engine; sin `ALTER ROLE`, sin migración): `statement_timeout` 30 s, `lock_timeout` 10 s, `idle_in_transaction_session_timeout` 60 s (`DB_*_TIMEOUT_MS`). Excederlos responde 503 `database_timeout` o `database_busy`; los commits que traducían cualquier error de base a un 409 de reglas ahora dejan pasar los timeouts, y en Store Sys el registro afectado vuelve con `database_timeout`. `migrate`, backups, restores y dumps no cambian.
+- **`Cache-Control: no-store` en todas las respuestas del backend**, de forma centralizada.
+- **R9‑5‑1 DONE** (aprobada por Enzo el 2026-10-30, PR #55).
+
 ### Changed — R9‑5‑1: sesiones y límite de login
 - **`last_seen_at` como mucho una vez por minuto por sesión** (`SESSION_TOUCH_SECONDS`, 60, máximo 60). Cada request valida revocación, usuario activo, expiración absoluta e inactividad con el valor guardado; solo si todo pasa y ya pasaron 60 s, un `UPDATE` condicional (`last_seen_at <= now − 60 s`, sesión no revocada, no vencida, no inactiva y usuario activo) lo actualiza y hace commit. Si no encuentra la fila, una relectura de solo lectura con el mismo `now` decide: otro request la tocó primero (sigue autenticado) o la sesión dejó de ser válida en el medio (este mismo request da 401). Con requests simultáneos uno solo escribe; los demás no hacen commit. La relectura solo ocurre en esa carrera, nunca dentro de la ventana. Medido: de 1 commit y 1 `UPDATE` por request a 0 dentro de la ventana (`/auth/me` 3 → 2 queries, Cajas 5 → 4). Duración máxima, inactividad, logout, revocación, cookies, CSRF y permisos sin cambios; la inactividad puede vencer hasta 60 s antes, nunca después.
 - **Límite de login:** las claves IP+email cuyas fallas salieron de la ventana se descartan (y preguntar por una clave ya no la guarda), así la memoria no crece sin límite. Mismos `LOGIN_MAX_ATTEMPTS`, `LOGIN_WINDOW_SECONDS` y clave IP+email.
