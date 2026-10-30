@@ -29,6 +29,8 @@ if [ "${1:-}" = clean ]; then
 fi
 
 mkdir -p "$ROOT/deploy/state"
+# Monitor state left by an earlier run (how long a repository has been behind) would skew this one.
+rm -f "$ROOT"/deploy/state/wal-behind-repo*
 : > "$REPORT"
 pass=0 failed=0
 result() { # result PASS|FAIL "name" "detail"
