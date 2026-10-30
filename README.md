@@ -84,7 +84,7 @@ uv run python -m app.cli grant-module-role --email ... --module settlements --ro
 uv run python -m app.cli revoke-module-role --email ... --module settlements
 uv run python -m app.cli reset-password --email ...                # contraseña temporal (se muestra una vez); cierra sus sesiones
 ```
-Cada usuario cambia su contraseña y ve o cierra sus sesiones abiertas en **Mi cuenta** (`/cuenta`). Con una contraseña temporal, la app solo deja elegir una nueva (ADR 015).
+Lo mismo se hace desde la pantalla **Usuarios** (`/usuarios`, administradores de plataforma): alta con contraseña temporal, roles por módulo, áreas, reseteo, desactivación y sesiones. Cada usuario cambia su contraseña y ve o cierra sus sesiones abiertas en **Mi cuenta** (`/cuenta`). Con una contraseña temporal, la app solo deja elegir una nueva (ADR 015).
 Módulos: `commercial` (Inteligencia Comercial) y `settlements` (Rendiciones). Detalle en `ARCHITECTURE.md §8`.
 
 **Áreas protegidas.** Rendiciones > Empleados (`settlements.employee_finance`: cuenta interna y condición salarial) no se hereda de ningún rol, tampoco del administrador de plataforma: requiere un permiso explícito (`viewer | operator | admin`) además de un rol en Rendiciones. Sin él, el menú no aparece y la API responde 404. El administrador de plataforma otorga y revoca el área (a sí mismo o a otros) sin poder leerla antes:
