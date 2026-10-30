@@ -1,0 +1,150 @@
+# Production override for the DistriCom server (ADR 013, docs/OPERATIONS.md). Always used through deploy/bin/dc:
+#   docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml ...
+# docker-compose.yml (development and CI) is not changed by this file.
+#
+# What changes in production:
+# - Caddy is the only service with published ports (80 redirects, 443 serves); backend, frontend and db publish none.
+# - PostgreSQL runs with pgBackRest and continuous WAL archiving (archive_timeout) to a local and an off-site repo.
+# - Migrations are an explicit step (deploy/bin/migrate), never a side effect of starting the backend.
+# - The backend trusts X-Forwarded-For only from Caddy's fixed address.
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  db:
+    build: ./deploy/postgres
+    image: districom/db:current
+    env_file:
+      - path: deploy/pgbackrest.env
+        required: false
+    environment:
+      # pgBackRest connects through the local socket as the cluster's owner role.
+      PGBACKREST_PG1_USER: ${POSTGRES_USER:-districom}
+    command:
+      - postgres
+      - -c
+      - wal_level=replica
+      - -c
+      - archive_mode=on
+      - -c
+      - archive_command=pgbackrest --stanza=districom archive-push %p
+      - -c
+      - archive_timeout=${ARCHIVE_TIMEOUT_SECONDS:-60}
+      - -c
+      - max_wal_size=2GB
+    ports: !reset []
+    volumes: !override
+      - db-data:/var/lib/postgresql/data
+      - ${BACKUP_ROOT:-/srv/districom-backup}/pgbackrest:/var/lib/pgbackrest
+      - ${BACKUP_ROOT:-/srv/districom-backup}/dumps:/var/lib/districom-dumps
+      - pgbackrest-spool:/var/spool/pgbackrest
+      - pgbackrest-log:/var/log/pgbackrest
+    shm_size: 256mb
+    stop_grace_period: 60s
+    logging: *logging
+
+  backend:
+    image: districom/backend:current
+    # Same server as the image's CMD, without `alembic upgrade head`: deploy/bin/update migrates after a backup.
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]
+    environment:
+      APP_ENV: production
+      COOKIE_SECURE: "true"
+      CORS_ORIGINS: ""
+      # uvicorn reads it: only Caddy may tell the backend who the client is.
+      FORWARDED_ALLOW_IPS: ${CADDY_INTERNAL_IP:-172.30.0.10}
+      # Imported files of Comercial (Fase 1): a persistent volume, copied off-site by files-sync.
+      UPLOAD_DIR: /data/uploads
+    ports: !reset []
+    volumes:
+      - uploads:/data/uploads
+    logging: *logging
+
+  frontend:
+    image: districom/frontend:current
+    ports: !reset []
+    logging: *logging
+
+  caddy:
+    build: ./deploy/caddy
+    image: districom/caddy:current
+    restart: unless-stopped
+    # Only Caddy sees the DNS API token (CLOUDFLARE_API_TOKEN): never in .env, which the backend also reads.
+    env_file:
+      - path: deploy/caddy.env
+        required: false
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+    environment:
+      DISTRICOM_HOST: ${DISTRICOM_HOST:?set DISTRICOM_HOST in .env}
+      CADDY_TLS_MODE: ${CADDY_TLS_MODE:-cloudflare}
+      ACME_CA: ${ACME_CA:-https://acme-v02.api.letsencrypt.org/directory}
+      CADDY_MAX_BODY: ${CADDY_MAX_BODY:-30MB}
+    # 0.0.0.0 on purpose: binding to the Tailscale address would fail at boot if Tailscale starts after Docker and
+    # leave the LAN without service too. Who may reach these ports is decided by the DOCKER-USER firewall rules
+    # (deploy/host/firewall.sh): the LAN subnet and the tailscale0 interface only. The router forwards nothing.
+    ports:
+      - "${CADDY_BIND_IP:-0.0.0.0}:80:80"
+      - "${CADDY_BIND_IP:-0.0.0.0}:443:443"
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      default:
+        ipv4_address: ${CADDY_INTERNAL_IP:-172.30.0.10}
+    logging: *logging
+
+  # Optional split DNS (profile "dns"): see deploy/coredns/Corefile.
+  dns:
+    image: coredns/coredns:1.12.1
+    profiles: ["dns"]
+    restart: unless-stopped
+    network_mode: host
+    command: ["-conf", "/etc/coredns/Corefile"]
+    environment:
+      DISTRICOM_HOST: ${DISTRICOM_HOST:?set DISTRICOM_HOST in .env}
+      DNS_LAN_BIND_IP: ${DNS_LAN_BIND_IP:-127.0.0.1}
+      LAN_SERVER_IP: ${LAN_SERVER_IP:-127.0.0.1}
+      DNS_TAILSCALE_BIND_IP: ${DNS_TAILSCALE_BIND_IP:-127.0.0.2}
+      TAILSCALE_SERVER_IP: ${TAILSCALE_SERVER_IP:-127.0.0.2}
+      DNS_UPSTREAM: ${DNS_UPSTREAM:-1.1.1.1 9.9.9.9}
+    volumes:
+      - ./deploy/coredns/Corefile:/etc/coredns/Corefile:ro
+    logging: *logging
+
+  # Copies imported files and the nightly logical dumps to the backup disk and, if configured, off-site
+  # (encrypted). Run by a timer every 5 minutes (deploy/systemd), never as a long-running service.
+  files-sync:
+    image: rclone/rclone:1.70
+    profiles: ["ops"]
+    env_file:
+      - path: deploy/offsite.env
+        required: false
+    entrypoint: ["sh", "/deploy/files-sync.sh"]
+    volumes:
+      - ./deploy/rclone/files-sync.sh:/deploy/files-sync.sh:ro
+      - uploads:/data/uploads:ro
+      - ${BACKUP_ROOT:-/srv/districom-backup}/dumps:/data/dumps:ro
+      - ${BACKUP_ROOT:-/srv/districom-backup}/files:/backup/files
+      - ${BACKUP_ROOT:-/srv/districom-backup}/state:/backup/state
+    logging: *logging
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${DOCKER_SUBNET:-172.30.0.0/24}
+
+volumes:
+  uploads:
+  caddy-data:
+  caddy-config:
+  pgbackrest-spool:
+  pgbackrest-log:

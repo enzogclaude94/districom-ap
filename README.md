@@ -128,13 +128,17 @@ CI (GitHub Actions) corre todo lo anterior más un smoke test de Docker Compose 
 
 Llegan en la Fase 1 (XLSX/CSV de AXUM y STORE SYS, con mapping de columnas, preview, errores e idempotencia). Ver `ROADMAP.md`.
 
-## Backups
+## Servidor de producción
+
+El servidor propio de la distribuidora (HTTPS, acceso por la LAN y remoto por Tailscale, backups continuos dentro y fuera del local, actualización y reversión) se instala y opera con `deploy/` según [`docs/OPERATIONS.md`](docs/OPERATIONS.md) (ADR 013). Requisitos del equipo: [`docs/SERVER_REQUIREMENTS.md`](docs/SERVER_REQUIREMENTS.md).
+
+## Backups (desarrollo)
 
 ```bash
 scripts/backup.sh                         # pg_dump comprimido en ./backups
 scripts/restore.sh backups/<archivo>.dump # restaura en una base aparte para validarlo
 ```
-Recomendado: backup diario por cron, retención 14 diarios + 8 semanales, copia fuera del servidor y **restore de prueba mensual**. Un backup nunca restaurado no es una estrategia.
+En producción los backups son de pgBackRest (`docs/OPERATIONS.md §4–5`).
 
 ## Troubleshooting
 

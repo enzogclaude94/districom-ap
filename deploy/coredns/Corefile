@@ -1,0 +1,29 @@
+# Optional split DNS for DistriCom (compose profile "dns", ADR 013).
+# The same name answers with the LAN address on the LAN interface and with the Tailscale address on the
+# Tailscale interface. Tailscale's split DNS sends only this domain here, so no public record points at a
+# private address (public answers with 100.64.0.0/10 or RFC 1918 addresses are dropped by resolvers with
+# DNS-rebinding protection).
+{$DISTRICOM_HOST}:53 {
+	bind {$DNS_LAN_BIND_IP}
+	hosts {
+		{$LAN_SERVER_IP} {$DISTRICOM_HOST}
+	}
+	errors
+}
+
+{$DISTRICOM_HOST}:53 {
+	bind {$DNS_TAILSCALE_BIND_IP}
+	hosts {
+		{$TAILSCALE_SERVER_IP} {$DISTRICOM_HOST}
+	}
+	errors
+}
+
+# LAN clients may use this server as their resolver (only if the router cannot hold a local record):
+# everything else is forwarded upstream. Tailscale clients never reach this block.
+.:53 {
+	bind {$DNS_LAN_BIND_IP}
+	forward . {$DNS_UPSTREAM}
+	cache 300
+	errors
+}

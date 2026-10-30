@@ -1,0 +1,60 @@
+# DistriCom's only entry point (ADR 013): the same name, certificate and origin from the LAN and from Tailscale.
+# Every value comes from the environment (.env on the server); see deploy/production.env.example.
+{
+	admin off
+	acme_ca {$ACME_CA:https://acme-v02.api.letsencrypt.org/directory}
+	servers {
+		protocols h1 h2
+	}
+}
+
+# Certificate modes, chosen with CADDY_TLS_MODE:
+#   cloudflare  public Let's Encrypt certificate by DNS-01 through the Cloudflare API (production)
+#   internal    Caddy's own CA (tests, or a fallback before the domain exists; its root must be trusted by clients)
+(tls-cloudflare) {
+	tls {
+		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+		resolvers 1.1.1.1 9.9.9.9
+	}
+}
+(tls-internal) {
+	tls internal
+}
+
+{$DISTRICOM_HOST} {
+	import tls-{$CADDY_TLS_MODE:cloudflare}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+
+	request_body {
+		max_size {$CADDY_MAX_BODY:30MB}
+	}
+
+	# The API goes straight to the backend: one hop less, and X-Forwarded-For set by Caddy (the only proxy the
+	# backend trusts, FORWARDED_ALLOW_IPS) carries the real client IP. Caddy ignores X-Forwarded-For sent by clients.
+	handle /api/* {
+		# The API docs are a development aid: not served by the production entry point.
+		@apidocs path /api/docs /api/docs/* /api/v1/openapi.json
+		respond @apidocs 404
+		reverse_proxy backend:8000
+	}
+	handle {
+		reverse_proxy frontend:3000
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}
+
+# Any other name (an IP, a guessed host, a DNS rebinding attempt) gets nothing.
+http:// {
+	abort
+}

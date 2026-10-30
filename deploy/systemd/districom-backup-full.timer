@@ -1,0 +1,10 @@
+[Unit]
+Description=DistriCom: weekly full backup (Sunday 03:00)
+
+[Timer]
+OnCalendar=Sun *-*-* 03:00:00
+Persistent=true
+Unit=districom-backup@full.service
+
+[Install]
+WantedBy=timers.target

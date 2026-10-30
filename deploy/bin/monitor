@@ -1,0 +1,151 @@
+#!/usr/bin/env bash
+# Health of the server in one pass (every 5 minutes by timer). Prints one line per check; exit 1 on any FAIL.
+# Alerts: when something fails, the report goes to ALERT_COMMAND (stdin) if set, else only to the journal.
+# shellcheck source=lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+now=$(date +%s)
+report=()
+fail=0
+declare -A repo_state=()
+ok() { report+=("OK    $*"); }
+warn() { report+=("WARN  $*"); }
+bad() { report+=("FAIL  $*"); fail=1; }
+age_of() { [ -f "$1" ] && echo $((now - $(cat "$1"))) || echo 999999999; }
+
+# 1. The app answers through the same door users use.
+if caddy_curl -f "https://$DISTRICOM_HOST/api/v1/health" > /dev/null 2>&1; then ok "app answers over HTTPS"; else bad "app does not answer over HTTPS"; fi
+
+# 2. Disks. The backup disk first: mounted and prepared, or every local backup goes nowhere (or to the system disk).
+problem="$(backup_disk_problem)"
+if [ -z "$problem" ] && dc ps --status running -q db | grep -q . \
+    && ! dc exec -T db test -f "/var/lib/pgbackrest/$BACKUP_MARKER" 2> /dev/null; then
+    problem="the running database does not see the backup disk (unmounted or replaced after it started)"
+fi
+if [ -n "$problem" ]; then
+    # The database keeps running on purpose (no shutdown during operations); the alert says what still protects it.
+    degraded="$problem"
+    bad "backup disk: $problem"
+elif [ "${BACKUP_REQUIRE_MOUNTPOINT:-1}" = 0 ]; then
+    warn "backup disk: mount point check disabled (BACKUP_REQUIRE_MOUNTPOINT=0, test environments only)"
+else
+    ok "backup disk mounted at $BACKUP_ROOT"
+fi
+for path in / "$BACKUP_ROOT"; do
+    used=$(df -P "$path" | awk 'NR==2 {gsub("%", "", $5); print $5}')
+    if [ "$used" -ge 90 ]; then bad "disk $path at ${used}%"; elif [ "$used" -ge 80 ]; then warn "disk $path at ${used}%"; else ok "disk $path at ${used}%"; fi
+done
+
+# 3. RAID (Linux software RAID): an underscore in [UU] means a missing disk.
+if [ -r /proc/mdstat ] && grep -q '^md' /proc/mdstat; then
+    if grep -q '\[U*_[U_]*\]' /proc/mdstat; then bad "RAID degraded (/proc/mdstat)"; else ok "RAID complete"; fi
+fi
+
+# 4. WAL archiving: no failure newer than the last success, and nothing waiting longer than 15 minutes.
+archiver=$(psql_db -XtA -F' ' -c "SELECT coalesce(extract(epoch FROM last_archived_time)::bigint, 0),
+    coalesce(extract(epoch FROM last_failed_time)::bigint, 0),
+    (SELECT count(*) FROM pg_ls_archive_statusdir() WHERE name LIKE '%.ready'),
+    coalesce(extract(epoch FROM (SELECT min(modification) FROM pg_ls_archive_statusdir() WHERE name LIKE '%.ready'))::bigint, 0)
+    FROM pg_stat_archiver" 2>/dev/null || echo "x")
+if [ "$archiver" = x ]; then
+    bad "cannot read the WAL archiver status"
+else
+    read -r last_ok last_failed ready oldest_ready <<< "$archiver"
+    if [ "$ready" -gt 0 ] && [ $((now - oldest_ready)) -gt 900 ]; then
+        bad "WAL not archived for $(((now - oldest_ready) / 60)) min ($ready segments waiting): RPO at risk"
+    elif [ "$last_failed" -gt "$last_ok" ]; then
+        warn "last WAL archive attempt failed (retrying; $ready waiting)"
+    else
+        ok "WAL archiving up to date ($ready waiting)"
+    fi
+fi
+
+# 4b. WAL in each repository: how many closed segments it lacks, and since when (an unreachable off-site repo
+# does not always reach pg_stat_archiver: pgBackRest accepts the WAL once the backup disk has it).
+current=$(psql_db -XtA -c "SELECT pg_walfile_name(pg_current_wal_lsn())" 2>/dev/null || echo "")
+for repo in $(repos); do
+    max=$(pgbr --repo="$repo" info --output=json 2>/dev/null | python3 -c 'import json,sys
+a=json.load(sys.stdin)[0].get("archive", [])
+print(max((x.get("max") or "" for x in a), default=""))' 2>/dev/null || echo "")
+    behind=$(python3 -c 'import sys
+def segno(n): return int(n[8:16], 16) * 256 + int(n[16:24], 16)
+cur, mx = sys.argv[1], sys.argv[2]
+print(max(segno(cur) - segno(mx) - 1, 0) if cur and mx else -1)' "$current" "$max")
+    since_file="$STATE_DIR/wal-behind-repo$repo"
+    if [ "$behind" -eq 0 ]; then
+        rm -f "$since_file"
+        repo_state[$repo]="receiving WAL"
+        ok "repo$repo: WAL up to date"
+    else
+        # Behind, or unreachable (an Internet cut for repo2): a warning first, a failure after 15 minutes.
+        [ -f "$since_file" ] || echo "$now" > "$since_file"
+        lag=$((now - $(cat "$since_file")))
+        if [ "$behind" -lt 0 ]; then what="unreachable"; else what="behind by $behind segments"; fi
+        repo_state[$repo]="WAL $what for $((lag / 60)) min"
+        if [ "$lag" -gt 900 ]; then
+            bad "repo$repo: WAL $what for $((lag / 60)) min: RPO at risk"
+        else
+            warn "repo$repo: WAL $what for $((lag / 60)) min"
+        fi
+    fi
+done
+
+# 4c. WAL dropped by pgBackRest (archive queue full during a long outage): a hole no later check fills.
+gap="$(wal_gap 2> /dev/null || true)"
+if [ -n "$gap" ]; then
+    read -r gap_when gap_segment gap_repos <<< "$gap"
+    bad "WAL GAP: pgBackRest dropped WAL (newest: $gap_segment) at $(date -d "@$gap_when" '+%Y-%m-%d %H:%M') (archive queue full); \
+restores past that moment are impossible from: $gap_repos. Take a full backup now: deploy/bin/backup full 'after WAL gap'"
+else
+    ok "no WAL dropped since the last full backup"
+fi
+
+# 5. Backups: the newest one of each repository.
+for repo in $(repos); do
+    stop=$(pgbr --repo="$repo" info --output=json 2>/dev/null | python3 -c 'import json,sys
+b=json.load(sys.stdin)[0].get("backup", [])
+print(b[-1]["timestamp"]["stop"] if b else 0)' 2>/dev/null || echo 0)
+    hours=$(((now - stop) / 3600))
+    if [ "$stop" -eq 0 ]; then bad "repo$repo has no backup"; elif [ "$hours" -gt 30 ]; then bad "repo$repo: last backup ${hours} h ago"; else ok "repo$repo: last backup ${hours} h ago"; fi
+done
+
+# 6. Files outside the database (copied every 5 minutes).
+local_age=$(age_of "$BACKUP_ROOT/state/files-sync-local.ok")
+if [ "$local_age" -gt 1800 ]; then bad "files-sync to the backup disk: last success $((local_age / 60)) min ago"; else ok "files-sync to the backup disk"; fi
+if [ -f "$ROOT/deploy/offsite.env" ] && grep -q '^RCLONE_CONFIG_OFFSITECRYPT_TYPE=' "$ROOT/deploy/offsite.env"; then
+    offsite_age=$(age_of "$BACKUP_ROOT/state/files-sync-offsite.ok")
+    if [ "$offsite_age" -gt 1800 ]; then bad "files-sync off-site: last success $((offsite_age / 60)) min ago"; else ok "files-sync off-site"; fi
+fi
+
+# 7. Certificate.
+expiry=$(echo | openssl s_client -connect 127.0.0.1:443 -servername "$DISTRICOM_HOST" 2>/dev/null | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2)
+if [ "${CADDY_TLS_MODE:-cloudflare}" = internal ]; then
+    if [ -n "$expiry" ]; then ok "certificate from Caddy's internal CA (short-lived, renewed by Caddy)"; else bad "cannot read the HTTPS certificate"; fi
+elif [ -z "$expiry" ]; then
+    bad "cannot read the HTTPS certificate"
+else
+    days=$((($(date -d "$expiry" +%s) - now) / 86400))
+    if [ "$days" -lt 14 ]; then bad "certificate expires in $days days"; else ok "certificate valid for $days days"; fi
+fi
+
+# 8. Tailscale (remote access), when installed.
+if command -v tailscale > /dev/null 2>&1; then
+    state=$(tailscale status --json 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("BackendState", "?"))' 2>/dev/null || echo "?")
+    if [ "$state" = Running ]; then ok "Tailscale running"; else bad "Tailscale state: $state (remote access down; the LAN still works)"; fi
+fi
+
+# Backup disk lost while the database runs: one critical line on top that says what still protects the data.
+if [ -n "${degraded:-}" ]; then
+    states="" receiving=""
+    for repo in $(repos); do
+        states="$states repo$repo: ${repo_state[$repo]:-unknown};"
+        # repo1 lives on the backup disk that is in doubt: only the other repositories count for the RPO.
+        [ "$repo" = 1 ] || [ "${repo_state[$repo]:-}" != "receiving WAL" ] || receiving="$receiving repo$repo"
+    done
+    if [ -n "$receiving" ]; then rpo="RPO kept only through$receiving"; else rpo="RPO NOT MET: no repository is receiving WAL"; fi
+    report=("FAIL  CRITICAL: BACKUP PROTECTION DEGRADED: $degraded. The database keeps running (no automatic shutdown).$states $rpo." "${report[@]}")
+fi
+printf '%s\n' "${report[@]}" | tee "$STATE_DIR/monitor.txt"
+if [ "$fail" -ne 0 ] && [ -n "${ALERT_COMMAND:-}" ]; then
+    { echo "DistriCom ($DISTRICOM_HOST) — monitor $(date -Is)"; printf '%s\n' "${report[@]}"; } | sh -c "$ALERT_COMMAND" || log "ALERT_COMMAND failed"
+fi
+exit "$fail"

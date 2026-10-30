@@ -1,0 +1,10 @@
+[Unit]
+Description=DistriCom: nightly differential backup (Monday to Saturday 03:00)
+
+[Timer]
+OnCalendar=Mon..Sat *-*-* 03:00:00
+Persistent=true
+Unit=districom-backup@diff.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Prints the open WAL gap ("<epoch> <first dropped segment> <repositories>"), or nothing (deploy/bin/lib.sh, wal_gap).
+# shellcheck source=lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+wal_gap

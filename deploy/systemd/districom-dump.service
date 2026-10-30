@@ -1,0 +1,9 @@
+[Unit]
+Description=DistriCom: nightly logical dump (pg_dump)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=@ROOT@
+ExecStart=@ROOT@/deploy/bin/dump

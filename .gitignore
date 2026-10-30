@@ -34,3 +34,10 @@ data/private/
 .idea/
 .vscode/*
 !.vscode/extensions.json
+
+# Server (deploy/): secrets and local state never enter Git
+deploy/pgbackrest.env
+deploy/offsite.env
+deploy/caddy.env
+deploy/state/
+deploy/tests/.certs/

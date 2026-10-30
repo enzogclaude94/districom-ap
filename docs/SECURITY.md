@@ -29,7 +29,8 @@ Línea base de Fase 0 (detalle en `ARCHITECTURE.md §8` y ADR 004).
 ## Pendiente (fases siguientes)
 - Archivos subidos (Fase 1): límite de tamaño, extensión + MIME + firma, nombre sanitizado, sin macros ni fórmulas.
 - Rate limit compartido si el backend se escala a más de una instancia.
-- TLS terminado en el reverse proxy (Caddy) al desplegar.
+- Despliegue (ADR 013, S1 hecho; se activa en S3): TLS en Caddy con certificado público por DNS‑01; acceso remoto solo por Tailscale (MFA, aprobación de dispositivos, solo 443 al servidor); nada publicado en Internet; filtro `DOCKER-USER` para 80/443 (LAN y Tailscale); IP real solo desde Caddy; backups cifrados dentro y fuera del local; secretos del servidor en archivos fuera de Git, cada uno leído solo por el servicio que lo usa.
+- Administración de usuarios, contraseñas y sesiones desde la app (S2 del hilo Servidor); verificación de `Origin` en métodos mutantes.
 - Auditoría de dependencias en CI (`pip-audit`, `pnpm audit`).
 
 ## Reporte
