@@ -48,7 +48,7 @@ from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.clock import business_today
-from app.core.errors import AppError
+from app.core.errors import AppError, database_timeout
 from app.modules.settlements.delivery import idempotency
 from app.modules.settlements.delivery.service import money
 from app.modules.settlements.employee_finance import payrolls
@@ -577,6 +577,8 @@ def commit(db: Session) -> None:
         db.commit()
     except DBAPIError as exc:
         db.rollback()
+        if (timeout := database_timeout(exc)) is not None:
+            raise timeout from exc
         raise _rejected(exc) from exc
 
 

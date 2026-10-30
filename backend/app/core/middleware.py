@@ -1,4 +1,4 @@
-"""Request correlation, access logging and CSRF guard."""
+"""Request correlation, access logging, CSRF guard, no-store and the request body limit."""
 
 import logging
 import re
@@ -9,7 +9,9 @@ from collections.abc import Awaitable, Callable
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 
-from app.core.errors import error_body
+from app.core.body_limit import BodySizeLimit
+from app.core.config import get_settings
+from app.core.errors import NO_STORE, error_body
 from app.core.logging import request_id_var
 
 logger = logging.getLogger("app.access")
@@ -20,6 +22,14 @@ CSRF_HEADER = "X-Requested-With"
 
 
 def register_middleware(app: FastAPI) -> None:
+    # Innermost of these: the guards and the request context below see its 413 like any other response.
+    settings = get_settings()
+    app.add_middleware(
+        BodySizeLimit,
+        max_bytes=settings.request_max_body_bytes,
+        upload_max_bytes=settings.upload_max_size_mb * 1024 * 1024,
+    )
+
     @app.middleware("http")
     async def _csrf_guard(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
         # Mutating API calls must carry a custom header. Browsers cannot add it
@@ -42,6 +52,8 @@ def register_middleware(app: FastAPI) -> None:
             response = await call_next(request)
             status = response.status_code
             response.headers["X-Request-ID"] = request_id
+            # Every response, whatever the endpoint: JSON, CSV, errors, sessions, health (R9-5-2).
+            response.headers.update(NO_STORE)
             return response
         finally:
             # Path only: query strings may carry filters with customer identifiers.

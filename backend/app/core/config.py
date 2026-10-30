@@ -31,6 +31,13 @@ class Settings(BaseSettings):
     argon2_profile: Literal["standard", "test"] = "standard"
 
     upload_max_size_mb: int = Field(default=25, gt=0)
+    # Largest request body the API reads, in real bytes (R9-5-2); file uploads (multipart) use upload_max_size_mb.
+    request_max_body_bytes: int = Field(default=1024 * 1024, gt=0)
+    # Limits of the backend's own database connections only (R9-5-2): migrations, backups, restores and dumps open
+    # their own connections and keep the server's defaults.
+    db_statement_timeout_ms: int = Field(default=30_000, gt=0)
+    db_lock_timeout_ms: int = Field(default=10_000, gt=0)
+    db_idle_in_transaction_timeout_ms: int = Field(default=60_000, gt=0)
     business_timezone: str = "America/Argentina/Buenos_Aires"
     log_level: str = "INFO"
 

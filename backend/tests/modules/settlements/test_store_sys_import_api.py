@@ -422,3 +422,24 @@ def test_the_import_is_audited_without_the_employee_code(
     ).scalar_one()
     assert "LIQ-1" in payload
     assert "R-01" not in payload
+
+
+def test_a_batch_of_200_records_with_the_longest_fields_fits_the_body_limit(store: Callable[[], TestClient]) -> None:
+    """R9-5-2: the largest batch the contract allows, every field at its longest, is far under 1 MB and goes in."""
+    import json
+
+    from app.core.config import get_settings
+
+    rows = [
+        {
+            **record(f"{n:03d}-" + "R" * 96, "999999999999.99", code="C" * 100, sequence=n + 1),
+            "reported_at": "2026-10-29T23:59:59.999999-03:00",
+        }
+        for n in range(200)
+    ]
+    body = {"source": "STORE_SYS", "client_request_id": "6f1c2b9e-0d4e-4b8a-9b1f-3c2d1e0f9a8b", "records": rows}
+    size = len(json.dumps(body).encode())
+    assert size < get_settings().request_max_body_bytes / 10
+    response = store().post("/api/v1/settlements/imports/store-sys/expected-amounts", json=body)
+    assert response.status_code == 200, response.text
+    assert len(response.json()["results"]) == 200
