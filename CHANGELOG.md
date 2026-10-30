@@ -4,6 +4,14 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Docs — Fase 1 de Inteligencia Comercial: diseño de importación y maestros (F1.1a)
+- **F1.0 aprobado por Enzo el 2026-10-30** con las decisiones D‑A…D‑K y los ajustes 1–3. Sin código ni migraciones en este cambio.
+- **ADR 014** (nuevo): framework de importación en plataforma (archivo original, jobs con estados `pending`…`duplicate`/`cancelled`, lectores CSV/XLSX/**XLS BIFF**, staging, mappings, calidad); análisis en dos pasos; vínculos externos solo en `external_entity_mappings`; AXUM y STORE SYS como espacios de IDs independientes; vendedor de STORE SYS por mapping (Comercial no escribe `employees.external_store_id`); zonas con días configurables en lugar de rutas de AXUM; RETIRO fuera del universo comercial por configuración; productos con campos fuente y canónicos, `analytics_eligible`, familias explícitas y listas de precio con semántica; idempotencia de ventas por período **y scope**; no‑compras sin UNIQUE; visitas, programación y pedidos fuera de Fase 1. Reemplaza las plantillas de columnas de ADR 003 y la definición de rutas de ADR 006.
+- **`docs/IMPORTS.md`** (nuevo): qué fuente alimenta qué entidad, perfil de formato de las muestras reales de STORE SYS (clientes, ventas y comprobantes: XLS BIFF7, cp1252), reglas por reporte, exclusiones, idempotencia, mappings, errores, calidad, reproceso, permisos y seguridad.
+- **`DATA_MODEL.md` v0.4:** tablas de Fase 1 rediseñadas (§0, §1, §2, §4–§7, §10–§12); `localities`, `customer_types`, `brands`, `sales_channels`, `visits`, `scheduled_visits`, `orders` pasan a futuras.
+- **`ARCHITECTURE.md` §6** (pipeline), estructura de paquetes y ADRs; **`ROADMAP.md`** con Fase 1 IN_PROGRESS y subfases F1.0–F1.8; **`PLAN.md`** con riesgos y decisiones actualizados con las muestras; **`docs/DATA_INTAKE.md`** con el estado de las muestras; **`docs/SECURITY.md`** con los controles de subida diseñados.
+- Deuda declarada: `METRICS.md` no cambia en Fase 1, pero `visit.conversion_order` y el denominador de `visit.conversion_invoiced` suponen visitas que hoy no tienen fuente.
+
 ### Changed — CI más rápido (CI‑1, CI‑2, CI‑3, aprobados por Enzo el 2026-10-29)
 - **CI‑1:** E2E y el smoke de Docker Compose dependen solo del job Frontend y corren en paralelo con el Backend. Todos los jobs siguen siendo requeridos y con el mismo nombre.
 - **CI‑2:** la limpieza entre tests es un `TRUNCATE` sin `CASCADE` de una lista exacta (suma cuentas, bocas, responsables, bancos, empleados, sus funciones y combustible de cierre, que antes vaciaba el `CASCADE`). Dos tests mantienen la lista completa y prueban que el reset repone las semillas.

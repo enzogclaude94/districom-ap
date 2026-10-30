@@ -1,7 +1,7 @@
 # PLAN — DistriCom · Plataforma de Inteligencia Comercial
 
-> Estado del documento: **v0.4 — Fase 0 DONE; preparación modular (P0) en curso; Fase 1 en preparación (análisis de datos reales)**
-> Última actualización: 2026-10-03
+> Estado del documento: **v0.5 — Fase 0 DONE; plataforma modular DONE; Fase 1 de Comercial IN_PROGRESS (F1.0 aprobado, F1.1a en revisión)**
+> Última actualización: 2026-10-30 (secciones de Comercial; las de Rendiciones las mantiene su hilo)
 > Fuente de requisitos: prompt maestro adjunto por Enzo (`message.md`, 165 secciones).
 
 ---
@@ -26,9 +26,9 @@
 
 **Fase 0 — DONE.** Aprobada por Enzo el 2026-10-02; PR #1 mergeado a `main`. Los 16 criterios en PASS (§10).
 
-**Plataforma modular — P0 aprobados por Enzo el 2026-10-03, en curso** (ADR 006, §12). Antes de la Fase 1.
+**Plataforma modular — DONE** (PR #3, 2026-10-04; ADR 006, §12).
 
-**Fase 1 — en preparación: análisis de datos reales.** No se implementan importadores ni mappings hasta recibir y analizar exportaciones reales de AXUM y STORE SYS y que Enzo apruebe la propuesta resultante. Pedido de archivos, período y validaciones en `docs/DATA_INTAKE.md`; pasos en §11.
+**Fase 1 — IN_PROGRESS.** Diseño F1.0 aprobado por Enzo el 2026-10-30 (ADR 014, `docs/IMPORTS.md`); se implementa por subfases, cada una con su PR y aprobación (§11, `ROADMAP.md`).
 
 ---
 
@@ -51,13 +51,16 @@ En preventa, el pedido se toma el día de la visita y la **factura suele emitirs
 - `visit.conversion_order` — visita con pedido registrado en AXUM (métrica principal si AXUM exporta pedidos/resultado).
 - `visit.conversion_invoiced` — visita con factura válida en ventana `[visit_date, visit_date + conversion_window_days]`, default **2 días**, configurable.
 **A confirmar:** desfase real pedido → factura.
+**Actualización 2026-10-30 (ADR 014):** no hay fuente de visitas ni de pedidos AXUM; `visits` y `orders` no se crean en Fase 1 y `visit.conversion_order` queda sin fuente. Antes de la fase de métricas se redefine el denominador de `visit.conversion_invoiced` (deuda declarada; `METRICS.md` no cambia en Fase 1).
 
 ### R2 — Identidad de clientes entre AXUM y STORE SYS (ALTO)
 Es el mayor riesgo de integración. No sabemos si ambos sistemas comparten un código de cliente.
 **Supuesto:** cliente canónico propio con IDs externos separados; matching automático solo por clave exacta (código compartido o CUIT normalizado); todo lo demás queda **pendiente de revisión manual**. Nunca fuzzy matching irreversible.
+**Actualización 2026-10-30 (D‑B, ADR 014):** AXUM y STORE SYS son espacios de IDs independientes (`commercial.axum_customer_code_matches_store_sys = false`). Además, *Ventas artículos/clientes* de STORE SYS trae el cliente por **nombre** (no código) y el maestro tiene nombres repetidos: esos vínculos se proponen y se confirman a mano.
 
 ### R3 — Semántica de notas de crédito y devoluciones (ALTO, requiere confirmación)
 El prompt pide confirmación antes de decisiones contables. **Supuesto provisional:** documentos separados con `document_type` (INVOICE, CREDIT_NOTE, DEBIT_NOTE) e importes **con signo** (NC negativa); `net_sales` = suma de importes con signo, sin impuestos. Se valida con el primer export real antes de cerrar Fase 1.
+**Actualización 2026-10-30:** *Comprobantes emitidos* trae NC y devoluciones como comprobantes separados, `netosa` sin signo y `total` con signo, sin IVA desglosado. La clasificación de cada tipo (incluidos COMP. INTERNO X, RECIBOS X, VALE PERSONAL V) va en `document_types` y la confirma Enzo (ADR 014 S3).
 
 ### R4 — "Cliente nuevo" con historia que empieza en 2026 (MEDIO)
 Con datos desde enero 2026, todo cliente parecería "nuevo" en sus primeras semanas.
@@ -78,6 +81,7 @@ Los preventistas no usan esta app, así que nadie marca "trabajada" en campo.
 ### R8 — Canal preventa vs. boca de expendio (MEDIO)
 No sabemos si STORE SYS trae un campo de canal. Puede deducirse por punto de venta, serie de comprobante o vendedor.
 **Supuesto:** el mapping de importación permite derivar el canal por regla configurable; si no se puede determinar → `OTRO` y aparece en Calidad de datos.
+**Actualización 2026-10-30:** las muestras muestran señales candidatas (zona `RUTA 08 - BOCA DE EXPENDIO`, vendedor «BOCA DE EXPENDIO», lista 2, Consumidor Final). Se decide en la fase que lo use, sobre `zone_type`.
 
 ### R9 — Cliente genérico "Consumidor Final" en boca de expendio (MEDIO)
 Las ventas de mostrador suelen ir a un cliente genérico. Contarlo como "comprador" distorsiona penetración, ticket y estados.
@@ -86,6 +90,7 @@ Las ventas de mostrador suelen ir a un cliente genérico. Contarlo como "comprad
 ### R10 — Atribución de ventas a preventista / ruta (MEDIO)
 La factura puede traer un vendedor distinto del preventista asignado (rotaciones, reemplazos).
 **Decisión:** `sales.salesperson_id` y `sales.route_id` guardan la atribución **resuelta**, con `attribution_source ∈ {DOCUMENT, ASSIGNMENT_AT_DATE, UNKNOWN}`. Regla: si el documento trae vendedor mapeable se usa; si no, la asignación vigente en la fecha de negocio.
+**Actualización 2026-10-30:** ningún export de STORE SYS trae vendedor por documento; el vendedor y la zona de *Ventas* son la asignación del maestro. La atribución será por asignación vigente en la fecha (`customer_*_assignments`, ADR 014).
 
 ### R11 — Período de comparación para presets de calendario (BAJO)
 "N días inmediatamente anteriores" es claro para rangos; para "mes actual" (incompleto) compararlo con 30 días previos mezcla calendarios.
@@ -93,6 +98,7 @@ La factura puede traer un vendedor distinto del preventista asignado (rotaciones
 
 ### R12 — Disponibilidad de horario en ventas de boca (BAJO)
 El heatmap día × hora solo existe si STORE SYS exporta hora. Se detecta en el import; si no hay hora, el módulo lo dice explícitamente.
+**Actualización 2026-10-30:** *Comprobantes emitidos* trae fecha y hora (`fechor`).
 
 ---
 
@@ -100,7 +106,7 @@ El heatmap día × hora solo existe si STORE SYS exporta hora. Se detecta en el 
 
 | # | Recomendación del prompt | Propuesta | Por qué |
 |---|---|---|---|
-| M1 | Pandas o Polars para imports | **Sin librería de dataframes en V1**: `openpyxl` (read‑only) + `csv` estándar + validación por fila con Pydantic. | Volumen chico (decenas de miles de filas/mes). La validación es por fila y necesita errores con número de fila; un dataframe no aporta y agrega una dependencia pesada. Se reevalúa si un import supera ~1 M filas. |
+| M1 | Pandas o Polars para imports | **Sin librería de dataframes en V1**: `xlrd` (XLS BIFF de STORE SYS) + `openpyxl` (read‑only) + `csv` estándar + validación por fila con Pydantic. | Volumen chico (decenas de miles de filas/mes). La validación es por fila y necesita errores con número de fila; un dataframe no aporta y agrega una dependencia pesada. Se reevalúa si un import supera ~1 M filas. |
 | M2 | JWT implícito | **Sesiones server‑side** en PostgreSQL con cookie `HttpOnly; Secure; SameSite=Lax`. | Pocos usuarios, revocación inmediata, sin manejo de refresh tokens. |
 | M3 | CORS restrictivo | Next.js hace **rewrite** de `/api/*` al backend → mismo origen en producción; CORS solo para desarrollo. | Elimina toda una clase de problemas de cookies cross‑site. |
 | M4 | `customer.salesperson_id` evitado | Además de las tablas de asignación con historia, se mantiene una **vista** `customer_current_assignment`. | Simplifica queries frecuentes sin duplicar datos. |
@@ -118,9 +124,9 @@ Ninguna modificación cambia el alcance funcional.
 | ID | Pregunta | Default mientras tanto | Bloquea |
 |---|---|---|---|
 | D1 | ~~¿Repo nuevo o existente?~~ **Resuelto:** `districom-ap`. | — | — |
-| D2 | Exports reales de AXUM y STORE SYS. Lista, período y validaciones en `docs/DATA_INTAKE.md`. | Ninguno: la Fase 1 espera las muestras. | **Inicio** de la implementación de Fase 1. |
-| D3 | ¿AXUM y STORE SYS comparten código de cliente / producto? | Asumir que no. | Diseño de matching (Fase 1). |
-| D4 | ¿Cómo se registran NC y devoluciones en STORE SYS? ¿Importes con o sin IVA? | NC separadas, signo negativo, neto sin IVA. | Definición final de `sales.net_total`. |
+| D2 | Exports reales de AXUM y STORE SYS. | **Parcial (2026-10-30):** recibidos clientes, ventas y comprobantes de STORE SYS; faltan maestro de artículos y AXUM No Compra. | F1.3 (artículos) y F1.4 (AXUM). |
+| D3 | ¿AXUM y STORE SYS comparten código de cliente / producto? | **Decidido (D‑B, 2026-10-30):** espacios independientes hasta comprobarlo con muestras. | — |
+| D4 | ¿Cómo se registran NC y devoluciones en STORE SYS? ¿Importes con o sin IVA? | Comprobantes separados; `netosa` sin signo y `total` con signo; signo canónico por `document_types`. **Pendiente:** clasificación de cada tipo (ADR 014 S3). | Siembra de `document_types` (F1.2). |
 | D5 | Desfase típico pedido → factura en preventa. | 2 días. | Conversión facturada. |
 | D6 | ¿Cómo se distingue boca de expendio en STORE SYS? | Regla configurable de mapping. | Fase 1/10. |
 | D7 | Hosting objetivo (VPS propio, cloud, on‑premise). | Docker Compose en un VPS. | Fase 0 (deploy), no bloquea desarrollo local. |
@@ -250,21 +256,26 @@ Verificado en el entorno de desarrollo (PostgreSQL 16 local; Docker no disponibl
 
 ---
 
-## 11. Fase 1 — Preparación (análisis de datos reales)
+## 11. Fase 1 — Importación y maestros
 
-Estado: **esperando muestras de Enzo.** Implementación sustancial no autorizada todavía.
+Estado: **IN_PROGRESS.** Diseño F1.0 aprobado por Enzo el 2026-10-30 con las decisiones D‑A…D‑K y los ajustes 1–3 (ADR 014). Implementación por subfases (`ROADMAP.md`); cada una es un PR propio y se detiene a esperar aprobación.
 
 | Paso | Estado |
 |---|---|
-| 1. Pedir exportaciones reales con período y validaciones (`docs/DATA_INTAKE.md`) | Hecho (2026-10-02) |
-| 2. Recibir muestras de AXUM (A1–A5) y STORE SYS (S1–S3) | Pendiente (Enzo) |
-| 3. Perfilar cada archivo y registrar hallazgos | Pendiente |
-| 4. Proponer respuestas a D3–D6, mappings por archivo y ajustes a `DATA_MODEL.md` | Pendiente |
-| 5. Aprobación de Enzo y autorización explícita para implementar | Pendiente |
+| Pedido de exportaciones (`docs/DATA_INTAKE.md`) | Hecho (2026-10-02) |
+| Muestras de formato STORE SYS: clientes, ventas, comprobantes | Recibidas y perfiladas (2026-10-30, `docs/IMPORTS.md §3`) |
+| Muestras: maestro de artículos y AXUM No Compra | **Pendiente (Enzo)** — necesarias para F1.3 / F1.4 |
+| F1.0 diseño técnico | Aprobado (2026-10-30) |
+| F1.1a documentación | En revisión (este PR) |
+| F1.1b – F1.8 | Pendientes de aprobación sucesiva |
 
-Gate de inicio de implementación: pasos 2–5 completos. Los criterios de cierre de la Fase 1 siguen siendo los de `ROADMAP.md`.
+**Confirmaciones pendientes de Enzo** (ADR 014 §3), ninguna bloquea F1.1b:
+- S1 días de visita de las zonas `RUTA 03` y `RUTA 05` (MISA) · S2 `LUVI` = Lumivi y `MAJU` = Majusa → antes de sembrar reglas (F1.2).
+- S3 clasificación de los tipos de comprobante observados → antes de sembrar `document_types` (F1.2).
+- S4 si *Ventas artículos/clientes* puede exportarse con código de cliente · S7 muestra de ventas de varios días · S8 si los `.xls` pasaron por Excel → antes de F1.3.
+- Confirmar que `clientes_por_zona.xlsx` y `clientes_por_vendedor.xlsx` son informes derivados y no un export de STORE SYS.
 
----
+**Dependencias de otros hilos:** `UPLOAD_DIR` como volumen persistente con backup (hilo Servidor, PR #54); numeración de migraciones desde el `main` vigente (Rendiciones y Servidor también migran); `employees.external_store_id` es de Rendiciones y Comercial solo lo lee.
 
 ## 12. Preparación de la plataforma modular (P0)
 
