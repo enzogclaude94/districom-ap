@@ -2,7 +2,8 @@
 passed with the persisted value, with a conditional UPDATE that one request wins and that never revives a session."""
 
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -33,14 +34,18 @@ def session_client(login) -> TestClient:  # type: ignore[no-untyped-def]
     return login("admin")  # type: ignore[no-any-return]
 
 
-def _change(session_id: int, change: str, **params: Any) -> None:
-    """Another client of the database (its own engine, so the counters below do not see it) changes the session."""
+def _run(statement: str, **params: Any) -> None:
+    """Another client of the database (its own engine, so the counters below do not see it) writes and commits."""
     engine = create_engine(get_settings().database_url)
     try:
         with engine.begin() as conn:
-            conn.execute(text(f"UPDATE user_sessions SET {change} WHERE id = :id"), {"id": session_id, **params})  # noqa: S608
+            conn.execute(text(statement), params)
     finally:
         engine.dispose()
+
+
+def _change(session_id: int, change: str, **params: Any) -> None:
+    _run(f"UPDATE user_sessions SET {change} WHERE id = :id", id=session_id, **params)  # noqa: S608
 
 
 def _row(db: Session, client: TestClient) -> Any:
@@ -61,14 +66,17 @@ def clock(db: Session, session_client: TestClient, monkeypatch: pytest.MonkeyPat
 
 @pytest.fixture
 def writes() -> Iterator[dict[str, int]]:
-    """Session UPDATEs sent, rows they changed, and commits, on the app's engine."""
-    counts = {"updates": 0, "rows": 0, "commits": 0}
+    """Session UPDATEs sent, rows they changed, read-only rechecks after an UPDATE that matched nothing, and
+    commits, on the app's engine."""
+    counts = {"updates": 0, "rows": 0, "rechecks": 0, "commits": 0}
     engine = get_engine()
 
     def _after(conn: Any, cursor: Any, statement: str, *args: Any) -> None:
         if statement.startswith("UPDATE user_sessions"):
             counts["updates"] += 1
             counts["rows"] += cursor.rowcount
+        elif statement.startswith("SELECT user_sessions.id \nFROM user_sessions") and "EXISTS" in statement:
+            counts["rechecks"] += 1
 
     def _commit(conn: Any) -> None:
         counts["commits"] += 1
@@ -85,7 +93,7 @@ def test_first_request_after_the_window_touches_once(
 ) -> None:
     clock.at += timedelta(seconds=61)
     assert session_client.get("/api/v1/auth/me").status_code == 200
-    assert writes == {"updates": 1, "rows": 1, "commits": 1}
+    assert writes == {"updates": 1, "rows": 1, "rechecks": 0, "commits": 1}
     assert _row(db, session_client).last_seen_at == clock.at
 
 
@@ -96,7 +104,7 @@ def test_requests_within_60_seconds_do_not_write(
     for seconds in (0, 1, 30, 59):
         clock.at = persisted + timedelta(seconds=seconds)
         assert session_client.get("/api/v1/auth/me").status_code == 200
-    assert writes == {"updates": 0, "rows": 0, "commits": 0}
+    assert writes == {"updates": 0, "rows": 0, "rechecks": 0, "commits": 0}
     assert _row(db, session_client).last_seen_at == persisted
 
 
@@ -151,7 +159,7 @@ def test_an_idle_expired_session_is_never_revived(
     clock.at = persisted + IDLE + timedelta(hours=1)
     assert session_client.get("/api/v1/auth/me").status_code == 401
     assert session_client.get("/api/v1/auth/me").status_code == 401
-    assert writes == {"updates": 0, "rows": 0, "commits": 0}
+    assert writes == {"updates": 0, "rows": 0, "rechecks": 0, "commits": 0}
     assert _row(db, session_client).last_seen_at == persisted
 
 
@@ -181,28 +189,58 @@ def test_a_revoked_session_is_never_touched(
     assert db.execute(text("SELECT last_seen_at FROM user_sessions")).scalar_one() == persisted
 
 
-@pytest.mark.parametrize("change", ["revoked_at = now()", "expires_at = :past", "last_seen_at = :stale"])
-def test_the_touch_does_not_match_a_session_that_changed_after_it_was_read(
-    db: Session, session_client: TestClient, clock: Clock, writes: dict[str, int], change: str
-) -> None:
-    """Between the checks and the UPDATE another transaction revokes or expires the session: the conditional
-    UPDATE matches nothing, so the session is not revived."""
-    row = _row(db, session_client)
-    clock.at += timedelta(seconds=61)
+@contextmanager
+def _race(write: Callable[[], None]) -> Iterator[None]:
+    """`write` runs from another transaction right before the app's touch UPDATE: after the checks, before it."""
     engine = get_engine()
 
     def _before(conn: Any, cursor: Any, statement: str, *args: Any) -> None:
         if statement.startswith("UPDATE user_sessions"):
-            _change(row.id, change, past=clock.at - timedelta(seconds=1), stale=clock.at - IDLE)
+            write()
 
     event.listen(engine, "before_cursor_execute", _before)
     try:
-        assert session_client.get("/api/v1/auth/me").status_code == 200  # it passed the checks before the change
+        yield
     finally:
         event.remove(engine, "before_cursor_execute", _before)
-    assert writes == {"updates": 1, "rows": 0, "commits": 0}
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        "UPDATE user_sessions SET revoked_at = now() WHERE id = :id",
+        "UPDATE user_sessions SET expires_at = :past WHERE id = :id",
+        "UPDATE user_sessions SET last_seen_at = :stale WHERE id = :id",
+        "UPDATE users SET active = false WHERE id = (SELECT user_id FROM user_sessions WHERE id = :id)",
+    ],
+    ids=["revoked", "absolute-expired", "idle-expired", "user-inactive"],
+)
+def test_a_session_invalidated_after_it_was_read_rejects_this_request(
+    db: Session, session_client: TestClient, clock: Clock, writes: dict[str, int], change: str
+) -> None:
+    """Between the checks and the UPDATE another transaction revokes or expires the session, or deactivates its
+    user: the conditional UPDATE matches nothing, the read-only recheck (same `now`) finds it invalid, and this very
+    request is rejected. Nothing is touched or committed."""
+    row = _row(db, session_client)
+    clock.at += timedelta(seconds=61)
+    with _race(lambda: _run(change, id=row.id, past=clock.at - timedelta(seconds=1), stale=clock.at - IDLE)):
+        assert session_client.get("/api/v1/auth/me").status_code == 401
+    assert writes == {"updates": 1, "rows": 0, "rechecks": 1, "commits": 0}
     assert _row(db, session_client).last_seen_at != clock.at
     assert session_client.get("/api/v1/auth/me").status_code == 401
+
+
+def test_a_request_that_loses_the_touch_to_another_valid_one_stays_authenticated(
+    db: Session, session_client: TestClient, clock: Clock, writes: dict[str, int]
+) -> None:
+    """Another request touched the session between this one's checks and its UPDATE: the UPDATE matches nothing,
+    the recheck finds the session still valid, and this request goes on without committing."""
+    row = _row(db, session_client)
+    clock.at += timedelta(seconds=61)
+    with _race(lambda: _change(row.id, "last_seen_at = :at", at=clock.at)):
+        assert session_client.get("/api/v1/auth/me").status_code == 200
+    assert writes == {"updates": 1, "rows": 0, "rechecks": 1, "commits": 0}
+    assert _row(db, session_client).last_seen_at == clock.at
 
 
 def test_concurrent_requests_make_at_most_one_touch(
@@ -237,4 +275,6 @@ def test_concurrent_requests_make_at_most_one_touch(
     assert results == [True] * 10
     assert writes["rows"] == 1
     assert writes["commits"] == 1
+    # every other request that reached the UPDATE matched nothing and rechecked: the session was still valid
+    assert writes["rechecks"] == writes["updates"] - 1
     assert _row(db, session_client).last_seen_at == clock.at
