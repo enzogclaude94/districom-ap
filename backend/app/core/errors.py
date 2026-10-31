@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import DBAPIError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.core.logging import request_id_var
+from app.core.logging import db_error_fields, request_id_var
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +83,7 @@ def register_error_handlers(app: FastAPI) -> None:
         timeout = database_timeout(exc)
         if timeout is None:
             raise exc  # any other database error stays an unhandled 500, as before
-        logger.warning("database_timeout", extra={"sqlstate": getattr(exc.orig, "sqlstate", None)})
+        logger.warning("database_timeout", extra=db_error_fields(exc))
         return JSONResponse(status_code=503, content=error_body(timeout.code, timeout.message))
 
     @app.exception_handler(Exception)
