@@ -1,6 +1,6 @@
 # ADR 015 — Administración de usuarios, contraseñas, sesiones y verificación de `Origin`
 
-- Estado: Propuesto · 2026-10-30 (S2 del hilo «Districom Servidor», aprobada por Enzo el 2026-10-30)
+- Estado: Aceptado · 2026-10-31 (S2 del hilo «Districom Servidor»; aprobada por Enzo el 2026-10-30, integrada en `main` con los PR #59 y #60 el 2026-10-31)
 - Amplía: ADR 004 (sesiones server‑side), ADR 006 (plataforma modular), ADR 007 (roles por módulo), ADR 010 (áreas protegidas) y ADR 013 (servidor, IP real). No los reemplaza.
 - Alcance: plataforma (`app/platform/auth`, `app/core/middleware.py`) y sus pantallas. No cambia reglas de negocio, el ledger ni ningún módulo.
 
