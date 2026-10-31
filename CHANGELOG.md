@@ -4,6 +4,14 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Added — R9‑5‑4: health live/ready y validación de producción
+- **`GET /api/v1/health/live`:** el proceso responde; no consulta la base ni nada externo, así sigue en 200 con PostgreSQL caído.
+- **`GET /api/v1/health/ready`:** PostgreSQL responde y su migración (`alembic_version`) es exactamente el head del código que corre, leído de los scripts de Alembic (nunca un número escrito a mano). Base caída, migración atrasada (`behind`) o desconocida/adelantada (`unknown`) es 503 con `status: not_ready`.
+- **`GET /api/v1/health` sin cambios** (proceso + base): lo siguen usando los healthchecks de Docker, el smoke y el monitor de S1. Pasar a `/ready` es un handoff a S1.
+- **Con `APP_ENV=production` la app no arranca** con una configuración insegura: `COOKIE_SECURE` distinto de true, `CORS_ORIGINS` no vacío, `ARGON2_PROFILE` distinto de standard, `LOG_LEVEL` DEBUG, o `SECRET_KEY` y la contraseña de la base (`POSTGRES_PASSWORD`, en `DATABASE_URL`) vacías, de ejemplo, placeholders o no aleatorias (la contraseña, además, con al menos 16 caracteres). Lista todos los problemas juntos, por variable, sin imprimir valores. Development y test no cambian.
+- **Los errores de configuración ya no muestran el valor rechazado** (`hide_input_in_errors`): antes un `SECRET_KEY` corto o el `ARGON2_PROFILE` mal puesto imprimían el valor, y el segundo toda la configuración, `DATABASE_URL` incluida.
+- R9‑5‑3 **DONE** (PR #58, 2026-10-31).
+
 ### Changed — R9‑5‑3: logs sin datos personales y access log
 - **Las excepciones se loguean sin su mensaje:** clase, cadena de clases y frames. El mensaje de un error de base traía el `DETAIL` de PostgreSQL («Failing row contains (…)») y los parámetros de la sentencia: CUIT, nombres, teléfonos, emails. Un error de base suma `sqlstate`, `constraint`, `schema`, `table`, `column` y `db_error_class`; los rechazos 409 de Rendiciones también los registran.
 - **uvicorn** («Exception in ASGI application») escribe por el mismo formatter JSON: ya no hay una copia en texto plano del error.

@@ -8,10 +8,15 @@ from typing import Annotated, Literal
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import ArgumentError
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=("../.env", ".env"), env_file_encoding="utf-8", extra="ignore")
+    # hide_input_in_errors: a rejected setting is reported by name, never with its value (secrets, DATABASE_URL).
+    model_config = SettingsConfigDict(
+        env_file=("../.env", ".env"), env_file_encoding="utf-8", extra="ignore", hide_input_in_errors=True
+    )
 
     app_env: Literal["development", "test", "production"] = "development"
     database_url: str
@@ -65,3 +70,83 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+# --- production (R9-5-4, O8) --------------------------------------------------------------------------------------
+
+# Values of .env.example, CI, the tests and the docs, and the usual placeholders. Compared case-insensitively.
+KNOWN_SECRETS = frozenset(
+    {
+        "change-me",
+        "changeme",
+        "ci-password",
+        "ci-only-secret-key-not-used-anywhere-else-0123456789",
+        "test-secret-key-0123456789abcdef0123456789",
+        "districom",
+        "postgres",
+        "password",
+        "secret",
+    }
+)
+PLACEHOLDER_MARKERS = ("change-me", "changeme", "change_me", "example", "placeholder", "replace", "dummy", "ci-only")
+MIN_DB_PASSWORD_LENGTH = 16
+# A random secret has many distinct characters; "aaaa…" or "0123012301…" do not.
+MIN_DISTINCT_CHARACTERS = 10
+
+
+class InsecureProductionConfigError(RuntimeError):
+    """APP_ENV=production with a setting that is not safe to serve with. The message names the variables and why,
+    never their values."""
+
+
+def _weak_secret(value: str) -> str | None:
+    lowered = value.lower()
+    if lowered in KNOWN_SECRETS:
+        return "es un valor de ejemplo conocido"
+    if any(marker in lowered for marker in PLACEHOLDER_MARKERS):
+        return "parece un placeholder"
+    if len(set(value)) < MIN_DISTINCT_CHARACTERS:
+        return "no parece aleatorio"
+    return None
+
+
+def production_problems(settings: Settings) -> list[str]:
+    """Why `settings` must not start a production server, one line per variable; empty when it may. Only for
+    APP_ENV=production: development and test keep their own settings (insecure cookies, CORS, the test Argon2)."""
+    if settings.app_env != "production":
+        return []
+    problems: list[str] = []
+    if not settings.cookie_secure:
+        problems.append("COOKIE_SECURE debe ser true: la cookie de sesión solo puede viajar por HTTPS.")
+    if settings.cors_origins:
+        problems.append("CORS_ORIGINS debe estar vacío: en producción el navegador usa el mismo origen (Caddy).")
+    if settings.argon2_profile != "standard":
+        problems.append("ARGON2_PROFILE debe ser standard.")
+    if settings.log_level.strip().upper() in ("DEBUG", "NOTSET"):
+        problems.append("LOG_LEVEL no puede ser DEBUG: usá INFO o superior.")
+    if (reason := _weak_secret(settings.secret_key)) is not None:
+        problems.append(f"SECRET_KEY usa un valor inseguro: {reason}.")
+    try:
+        password = make_url(settings.database_url).password
+    except ArgumentError:  # its message quotes the whole URL, password included
+        problems.append("DATABASE_URL no es una URL de base de datos válida.")
+        return problems
+    if not password:
+        problems.append("La contraseña de la base (POSTGRES_PASSWORD, en DATABASE_URL) está vacía.")
+    elif (reason := _weak_secret(str(password))) is not None:
+        problems.append(
+            f"La contraseña de la base (POSTGRES_PASSWORD, en DATABASE_URL) usa un valor inseguro: {reason}."
+        )
+    elif len(str(password)) < MIN_DB_PASSWORD_LENGTH:
+        problems.append(
+            f"La contraseña de la base (POSTGRES_PASSWORD, en DATABASE_URL) es demasiado corta: "
+            f"mínimo {MIN_DB_PASSWORD_LENGTH} caracteres."
+        )
+    return problems
+
+
+def check_production(settings: Settings) -> None:
+    if problems := production_problems(settings):
+        raise InsecureProductionConfigError(
+            "Configuración insegura para APP_ENV=production; el servidor no arranca:\n- " + "\n- ".join(problems)
+        )
