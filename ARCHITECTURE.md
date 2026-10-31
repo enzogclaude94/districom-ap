@@ -292,7 +292,7 @@ Son procesos del módulo comercial. Se ejecutan como comandos CLI (`python -m ap
 ## 9. Observabilidad
 
 - Logging JSON estructurado (stdlib `logging` + formatter JSON) con `request_id` (header `X-Request-ID`) e `import_batch_id`.
-- `/api/v1/health` (liveness + DB).
+- `/api/v1/health` (proceso + DB, para los healthchecks existentes), `/api/v1/health/live` (solo el proceso) y `/api/v1/health/ready` (DB + migración igual al head del código; si no, 503) (R9‑5‑4).
 - Métricas de import en `import_batches` (duración, filas, errores).
 - Hook de error tracking preparado (Sentry opcional por variable de entorno, desactivado por defecto).
 

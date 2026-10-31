@@ -34,6 +34,10 @@ cd frontend && pnpm e2e
 - `backend/tests/unit/test_settlements_test_days.py` lo garantiza: prueba con el reloj movido a través de la medianoche que `today()` cambia entre dos llamadas, y recorre con `ast` cada archivo de `tests/modules/settlements/` fallando si algo que corre al importar (asignaciones de módulo, defaults, decoradores, cuerpos de clase) lee el reloj (`business_today`, `date.today`, `datetime.now` o un helper de `days.py`, directo o a través de una función local).
 - E2E: `businessDay(offset)` de `frontend/e2e/helpers.ts` se llama al usarlo (`const today = () => businessDay()`), nunca como constante del spec ni con el reloj local de la máquina (`cash`, `delivery` y `fuel` pasaron a `businessDay`).
 
+## R9‑5‑4 (health y configuración de producción)
+- `tests/integration/test_health.py`: `live` 200 con la base sana y caída (engine de la app a un puerto cerrado y toda conexión rechazada); `ready` 200 en el head, 503 con la base caída, con la migración anterior (`behind`), con una revisión que el código no conoce (`unknown`) y sin versión; `/health` legacy igual; `no-store` en todos. El head del código se compara con el que surge de leer los archivos de `migrations/versions/`.
+- `tests/unit/test_production_config.py`: una configuración de producción válida pasa; cada configuración insegura (cookie, CORS, DEBUG, `SECRET_KEY` de CI/tests/placeholder/no aleatoria, contraseña de ejemplo, corta o ausente, URL inválida) frena el arranque nombrando la variable y sin su valor; todos los problemas juntos; development y test no quedan atados; un error de configuración no muestra el valor; y en un proceso nuevo, `import app.main` (lo que hace uvicorn) falla con la configuración insegura sin imprimir secretos y arranca con la válida.
+
 ## R9‑5‑3 (logs sin PII)
 - `tests/integration/test_safe_logs.py`, con la configuración real de logging (y la de uvicorn aplicada antes, como en producción): una violación de `CHECK` con CUIT, teléfono, email y nombre (cuyo mensaje crudo sí los trae, test de control) llega al log como `IntegrityError`/`CheckViolation`, `23514`, constraint y tabla, sin ninguno de esos valores ni `DETAIL`, `[SQL:` o `[parameters:`; el reporte propio de uvicorn también y sin handler de texto plano; cualquier excepción sin su mensaje; el access log con `user_id`, `queries` y sin email ni query string.
 - `backend/perf/log_audit.py` (no corre en CI): lecturas, Store Sys y caminos de error contra una copia del dataset realista, y busca en el log cada nombre, teléfono, CUIT y email.
@@ -244,7 +248,7 @@ Los números entre corchetes en los docstrings son los 29 tests pedidos por Enzo
 
 ## Fase 0
 - `test_migrations.py`: upgrade → downgrade → upgrade desde base vacía, una sola head, `source_systems` sembrado.
-- `test_health.py`: DB ok (200) y caída (503).
+- `test_health.py`: DB ok (200) y caída (503); desde R9‑5‑4 también `live` y `ready`.
 - `test_auth.py`: login, cookie HttpOnly/SameSite, token guardado hasheado, credenciales inválidas sin revelar existencia, usuario inactivo, 401/403, logout revoca, Argon2id, rate limit, CSRF, contraseña ausente de logs.
 - `test_errors.py`: formato `{code, message, details, request_id}`, sin eco de datos enviados.
 - `test_settings.py`: variables obligatorias, secret corto, CORS, driver.
