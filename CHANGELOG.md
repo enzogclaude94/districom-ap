@@ -4,6 +4,9 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Changed — S2 DONE
+- S2 integrada en `main` (PR #59 `d814b8d`, PR #60 `c902f64`); ADR 015 aceptado. S3 sigue pendiente en el hardware real.
+
 ### Added — S2‑2: administración de usuarios (ADR 015)
 - **Pantalla «Usuarios»** (`/usuarios`, solo administradores de plataforma) y ficha de cada usuario: alta con contraseña temporal (se muestra una vez), edición de nombre, email y rol de plataforma, activación y desactivación, reseteo de contraseña, rol por módulo, permisos de áreas protegidas, sesiones abiertas con IP y red (cerrar una o todas) y actividad de la cuenta.
 - **API** `/api/v1/users` (`require_role("admin")`, cerrada también para un admin con contraseña temporal): `GET` (filtros y búsqueda), `POST`, `GET/PATCH /{id}`, `/{id}/activate`, `/{id}/deactivate`, `/{id}/reset-password`, `PUT /{id}/access`, `/{id}/sessions/{sid}/revoke`, `/{id}/sessions/revoke-all`, `GET /access-catalog`. Los cuerpos rechazan campos extra (`extra="forbid"`): no se puede colar `active`, `password`, `must_change_password` ni roles inexistentes.
