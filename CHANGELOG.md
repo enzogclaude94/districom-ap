@@ -22,6 +22,14 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 - Migración `0032` (plataforma): columnas nuevas en `users` y `user_sessions`, sin tocar datos; los usuarios y sesiones existentes siguen igual.
 - Docs: ADR 015, SECURITY, ARCHITECTURE §8, OPERATIONS, README; ROADMAP: **S1 DONE** (PR #54, `5d1d3f5`), S2 en curso, S3 pendiente en el hardware real.
 
+### Changed — R9‑5‑3: logs sin datos personales y access log
+- **Las excepciones se loguean sin su mensaje:** clase, cadena de clases y frames. El mensaje de un error de base traía el `DETAIL` de PostgreSQL («Failing row contains (…)») y los parámetros de la sentencia: CUIT, nombres, teléfonos, emails. Un error de base suma `sqlstate`, `constraint`, `schema`, `table`, `column` y `db_error_class`; los rechazos 409 de Rendiciones también los registran.
+- **uvicorn** («Exception in ASGI application») escribe por el mismo formatter JSON: ya no hay una copia en texto plano del error.
+- **Access log:** suma `user_id` (nunca el email) y `queries` (sentencias del request).
+- Auditoría con el dataset realista (`backend/perf/log_audit.py`): 0 de 68 nombres, teléfonos, CUIT y emails en 544 líneas; con el formatter anterior, 4.
+- Handoff a S1 (sin tocar `deploy/`): `log_error_verbosity=terse` y `log_min_error_statement=panic` en la base de producción.
+- **R9‑5‑2 DONE** (aprobada por Enzo el 2026-10-30, PR #57).
+
 ### Changed — R9‑5‑2: límites de request, timeouts de PostgreSQL y no‑store
 - **Cuerpo máximo de 1 MiB en bytes reales** (`REQUEST_MAX_BODY_BYTES`): 413 `request_too_large` en el formato estándar. Con `Content-Length` mayor, sin leer el cuerpo; sin él (chunked) o si el encabezado subestima, se cuenta lo recibido y se corta en el primer bloque que pasa el límite. Los archivos (`multipart/form-data`) usan `UPLOAD_MAX_SIZE_MB`. El lote Store Sys más grande posible (200 registros con todos los campos al máximo) pesa 89 KB.
 - **Timeouts solo en las conexiones del backend** (opciones de conexión del engine; sin `ALTER ROLE`, sin migración): `statement_timeout` 30 s, `lock_timeout` 10 s, `idle_in_transaction_session_timeout` 60 s (`DB_*_TIMEOUT_MS`). Excederlos responde 503 `database_timeout` o `database_busy`; los commits que traducían cualquier error de base a un 409 de reglas ahora dejan pasar los timeouts, y en Store Sys el registro afectado vuelve con `database_timeout`. `migrate`, backups, restores y dumps no cambian.

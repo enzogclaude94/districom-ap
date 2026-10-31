@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 from app.core.body_limit import BodySizeLimit
 from app.core.config import get_settings
 from app.core.errors import NO_STORE, error_body
-from app.core.logging import request_id_var
+from app.core.logging import query_count_var, request_id_var
 
 logger = logging.getLogger("app.access")
 
@@ -99,6 +99,8 @@ def register_middleware(app: FastAPI) -> None:
         # Not reset on exit: each request runs in its own context, and the
         # outermost 500 handler still needs the id after this middleware returns.
         request_id_var.set(request_id)
+        queries = [0]
+        query_count_var.set(queries)
         start = time.perf_counter()
         status = 500
         try:
@@ -109,7 +111,7 @@ def register_middleware(app: FastAPI) -> None:
             response.headers.update(NO_STORE)
             return response
         finally:
-            # Path only: query strings may carry filters with customer identifiers.
+            # Path only: query strings may carry filters with customer identifiers. The user by id, never by email.
             logger.info(
                 "request",
                 extra={
@@ -117,5 +119,7 @@ def register_middleware(app: FastAPI) -> None:
                     "path": request.url.path,
                     "status": status,
                     "duration_ms": round((time.perf_counter() - start) * 1000, 1),
+                    "user_id": getattr(request.state, "user_id", None),
+                    "queries": queries[0],
                 },
             )
