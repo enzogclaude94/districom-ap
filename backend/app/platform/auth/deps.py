@@ -25,6 +25,7 @@ def session_user(request: Request, db: DbSession, settings: AppSettings) -> User
     user = resolve_session(db, token, settings) if token else None
     if user is None:
         raise AppError(401, "unauthorized", "Iniciá sesión para continuar.")
+    request.state.user_id = user.id  # for the access log: the id, never the email
     return user
 
 

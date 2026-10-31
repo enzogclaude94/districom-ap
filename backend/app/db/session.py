@@ -1,10 +1,12 @@
 from collections.abc import Iterator
 from functools import lru_cache
+from typing import Any
 
-from sqlalchemy import Engine, create_engine
+from sqlalchemy import Engine, create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import get_settings
+from app.core.logging import query_count_var
 
 
 @lru_cache
@@ -19,7 +21,15 @@ def get_engine() -> Engine:
             f"-c idle_in_transaction_session_timeout={settings.db_idle_in_transaction_timeout_ms}",
         )
     )
-    return create_engine(settings.database_url, pool_pre_ping=True, connect_args={"options": options})
+    engine = create_engine(settings.database_url, pool_pre_ping=True, connect_args={"options": options})
+    event.listen(engine, "before_cursor_execute", _count_query)
+    return engine
+
+
+def _count_query(*_: Any) -> None:
+    count = query_count_var.get()
+    if count is not None:
+        count[0] += 1
 
 
 @lru_cache
