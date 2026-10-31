@@ -4,6 +4,16 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Added — S2‑1: contraseñas, sesiones y verificación de `Origin` (ADR 015)
+- **Cambio de contraseña propio** (`POST /auth/password`, pantalla «Mi cuenta» en `/cuenta`): pide la actual, valida mínimo 12 / máximo 256, no solo espacios ni el propio email, distinta de la actual; los fallos cuentan como intentos de login. Cierra todas las otras sesiones del usuario.
+- **Contraseña temporal con cambio obligatorio:** `users.must_change_password` y `temporary_password_expires_at` (vence a las `TEMPORARY_PASSWORD_HOURS`, 72). Hasta reemplazarla, la API responde `403 password_change_required` a todo salvo `/auth/me`, `/auth/password` y `/auth/logout` (bloqueo central en `current_user`) y la app muestra solo «Elegí tu contraseña». CLI `reset-password --email ...`: genera una temporal, la muestra una vez, guarda solo el hash y cierra todas las sesiones del usuario.
+- **Sesiones propias:** `GET /auth/sessions`, `POST /auth/sessions/{id}/revoke`, `POST /auth/sessions/revoke-others`; «Mi cuenta» las lista con dispositivo, IP, red, inicio y última actividad. Las sesiones de otro usuario no existen para estos endpoints (404).
+- **IP real y origen, solo auditoría:** `user_sessions.access_origin` (`lan`, `tailscale`, `local`, `other`) y los eventos `LOGIN` y `platform.login.failed` (nuevo: motivo, IP y origen, sin el email tipeado) los registran. Nunca autorizan.
+- **Verificación de `Origin`** en todo método mutante de `/api` (`403 origin_not_allowed`), además de `X-Requested-With`. Variable nueva `TRUSTED_ORIGINS` (vacía en producción; en desarrollo, sin definir, `http://localhost:3000`; el E2E la define para su puerto).
+- Auditoría: `platform.password.changed`, `platform.password.reset`, `platform.session.revoked`, `platform.sessions.revoked`; las sesiones cerradas guardan `revoked_reason` y `revoked_by`.
+- Migración `0032` (plataforma): columnas nuevas en `users` y `user_sessions`, sin tocar datos; los usuarios y sesiones existentes siguen igual.
+- Docs: ADR 015, SECURITY, ARCHITECTURE §8, OPERATIONS, README; ROADMAP: **S1 DONE** (PR #54, `5d1d3f5`), S2 en curso, S3 pendiente en el hardware real.
+
 ### Changed — R9‑5‑3: logs sin datos personales y access log
 - **Las excepciones se loguean sin su mensaje:** clase, cadena de clases y frames. El mensaje de un error de base traía el `DETAIL` de PostgreSQL («Failing row contains (…)») y los parámetros de la sentencia: CUIT, nombres, teléfonos, emails. Un error de base suma `sqlstate`, `constraint`, `schema`, `table`, `column` y `db_error_class`; los rechazos 409 de Rendiciones también los registran.
 - **uvicorn** («Exception in ASGI application») escribe por el mismo formatter JSON: ya no hay una copia en texto plano del error.

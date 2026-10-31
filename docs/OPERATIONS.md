@@ -49,7 +49,7 @@ Requisitos de hardware y de red en `docs/SERVER_REQUIREMENTS.md`.
    - **Al arrancar, PostgreSQL no inicia sin el disco.** La marca también queda dentro de `pgbackrest/`, la única parte del disco que ve el contenedor de la base, y su punto de entrada (`deploy/postgres/districom-entrypoint.sh`) se niega a iniciar PostgreSQL sin ella (código 78, mensaje «backup disk not mounted or not prepared» en `deploy/bin/dc logs db`). Vale para cualquier arranque: `up`, un reinicio del servidor y la política de reinicio de Docker. La app queda sin base hasta montar el disco; después, `deploy/bin/dc restart db` (o el reintento de Docker) la levanta sola.
    - **Si el disco se pierde con la base funcionando, la base sigue funcionando.** No hay apagado automático durante la operación. El monitor pone primero una línea **«FAIL CRITICAL: BACKUP PROTECTION DEGRADED»** que dice la causa, el estado de cada repositorio y si el RPO se sostiene: solo cuenta `repo2`, porque `repo1` vive en el disco perdido. Si `repo2` tampoco recibe WAL, dice «RPO NOT MET». La alerta va a `ALERT_COMMAND` en cada pasada (cada 5 minutos) hasta que vuelva el disco.
 7. `deploy/bin/up`: construye las imágenes, levanta la base, crea el *stanza* de pgBackRest en los dos repositorios, migra, levanta la app, hace el primer backup completo y corre el smoke test.
-8. Crear el primer administrador: `deploy/bin/dc exec backend python -m app.cli create-admin --email ... --name ...` (la contraseña se lee de stdin). Hasta S2, los roles por módulo se asignan con `grant-module-role` (ver `CLAUDE.md §2`).
+8. Crear el primer administrador: `deploy/bin/dc exec backend python -m app.cli create-admin --email ... --name ...` (la contraseña se lee de stdin). Hasta el panel de usuarios (S2‑2), los roles por módulo se asignan con `grant-module-role` (ver `CLAUDE.md §2`). Cada usuario cambia su contraseña y ve o cierra sus sesiones en «Mi cuenta».
 9. **[S3]** DNS: registro local en el router (`DISTRICOM_HOST` → `LAN_SERVER_IP`) y split DNS en la consola de Tailscale (dominio → `TAILSCALE_SERVER_IP`, con `COMPOSE_PROFILES=dns` en `.env` y `deploy/bin/dc up -d dns`).
 10. Verificar con `deploy/bin/smoke` y `deploy/bin/monitor`, y hacer un simulacro de restauración (§5).
 
@@ -58,6 +58,7 @@ Requisitos de hardware y de red en `docs/SERVER_REQUIREMENTS.md`.
 | Qué | Cómo |
 |---|---|
 | Estado | `deploy/bin/dc ps` · `deploy/bin/monitor` (también corre cada 5 min y alerta) |
+| Alguien olvidó su contraseña y nadie puede administrar usuarios desde la app | `deploy/bin/dc exec backend python -m app.cli reset-password --email ...`: muestra **una vez** una contraseña temporal (vence en 72 h), cierra todas las sesiones de esa persona y le exige elegir una nueva al ingresar (ADR 015). Entregarla en persona o por un canal distinto del email |
 | Logs | `deploy/bin/dc logs -f --tail=100 backend` (Caddy, backend, frontend, db) |
 | Reiniciar la app | `deploy/bin/dc restart backend frontend` |
 | Apagar el servidor | `deploy/bin/dc stop` y después `shutdown`; al volver la luz Docker levanta todo solo |

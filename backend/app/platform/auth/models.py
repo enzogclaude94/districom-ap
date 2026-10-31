@@ -19,11 +19,24 @@ from app.db.base import Base, IdMixin, TimestampMixin
 
 ROLES = ("admin", "viewer")  # platform roles: `admin` administers the platform and every module
 MODULE_ROLES = ("viewer", "operator", "admin")  # per-module roles, from least to most privileged
+# Where a session was opened from, by the real client IP (app/platform/auth/network.py). Audit only, never access.
+ACCESS_ORIGINS = ("lan", "tailscale", "local", "other")
+SESSION_REVOKE_REASONS = (
+    "logout",
+    "revoked_by_user",
+    "revoked_by_admin",
+    "password_changed",
+    "password_reset",
+    "user_deactivated",
+)
 
 
 class User(IdMixin, TimestampMixin, Base):
     __tablename__ = "users"
-    __table_args__ = (CheckConstraint("role IN ('admin', 'viewer')", name="role"),)
+    __table_args__ = (
+        CheckConstraint("role IN ('admin', 'viewer')", name="role"),
+        CheckConstraint("must_change_password OR temporary_password_expires_at IS NULL", name="temporary_password"),
+    )
 
     email: Mapped[str] = mapped_column(CITEXT, unique=True)
     password_hash: Mapped[str | None] = mapped_column(Text)
@@ -31,6 +44,10 @@ class User(IdMixin, TimestampMixin, Base):
     role: Mapped[str] = mapped_column(String(20))
     active: Mapped[bool] = mapped_column(Boolean, server_default="true")
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # A temporary password only lets its holder choose a new one (S2), until it expires.
+    must_change_password: Mapped[bool] = mapped_column(Boolean, server_default="false")
+    temporary_password_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    password_changed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # Loaded with the user (few rows) so access checks need no extra query per endpoint.
     module_roles: Mapped[list["UserModuleRole"]] = relationship(lazy="selectin", foreign_keys="UserModuleRole.user_id")
@@ -55,6 +72,14 @@ class UserSession(IdMixin, Base):
     """Server-side session. Only a SHA-256 of the cookie token is stored."""
 
     __tablename__ = "user_sessions"
+    __table_args__ = (
+        CheckConstraint("access_origin IN ('lan', 'tailscale', 'local', 'other')", name="access_origin"),
+        CheckConstraint(
+            "revoked_reason IN ('logout', 'revoked_by_user', 'revoked_by_admin', 'password_changed', "
+            "'password_reset', 'user_deactivated')",
+            name="revoked_reason",
+        ),
+    )
 
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), index=True)
     token_hash: Mapped[bytes] = mapped_column(LargeBinary, unique=True)
@@ -64,3 +89,6 @@ class UserSession(IdMixin, Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     ip: Mapped[str | None] = mapped_column(String(64))
     user_agent: Mapped[str | None] = mapped_column(String(300))
+    access_origin: Mapped[str | None] = mapped_column(String(20))
+    revoked_reason: Mapped[str | None] = mapped_column(String(30))
+    revoked_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"))
