@@ -20,6 +20,12 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
   - el generador de datos de prueba corre como `development`: desde R9‑5‑4 la validación de producción no lo dejaba arrancar con el `.env` del stack de prueba.
 - Docs: OPERATIONS §3.1, §3.2, §6 y §8; SECURITY.
 
+### Added — R9‑5‑5: CSP en Report‑Only y receptor de reportes
+- **Todas las páginas envían `Content-Security-Policy-Report-Only`** con la política de la propuesta R9‑5 (`default-src 'self'`; scripts y estilos `'self' 'unsafe-inline'`; imágenes `'self' data:`; fuentes y conexiones `'self'`; `frame-ancestors`, `object-src` `'none'`; `base-uri` y `form-action` `'self'`) y `report-uri /api/v1/csp-report`. El navegador no bloquea nada todavía: informa lo que bloquearía. `'unsafe-eval'` solo en `next dev`. Enforce en R9‑5‑6.
+- **`POST /api/v1/csp-report`:** sin sesión ni header CSRF (única excepción, por ruta exacta), cuerpo máximo 16 KiB (413 si lo supera), 204 ante cualquier cuerpo, sin guardar nada. Loguea solo la directiva, una categoría de lo bloqueado (`inline`, `eval`, `data`, `same-origin`, `external`…, nunca la URL), la disposición y el formato; como mucho 60 líneas por minuto por proceso. Acepta el formato `report-uri` y el de la Reporting API.
+- **Zod sin la sonda `new Function`:** los esquemas importan `z` de `@/lib/zod`, que activa `jitless`. Sin esto, cada página violaba `script-src` (`eval`), lo que habría impedido pasar a enforce.
+- R9‑5‑4 **DONE** (PR #61, 2026-11-01).
+
 ### Changed — S2 DONE
 - S2 integrada en `main` (PR #59 `d814b8d`, PR #60 `c902f64`); ADR 015 aceptado. S3 sigue pendiente en el hardware real.
 

@@ -20,6 +20,9 @@ logger = logging.getLogger("app.access")
 _SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 _REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9\-]{8,64}$")
 CSRF_HEADER = "X-Requested-With"
+# Mutating paths a browser posts to on its own, without the CSRF header or a session: CSP violation reports
+# (R9-5-5). They only write a capped log line (app/api/v1/csp.py), so a forged one changes nothing.
+CSRF_EXEMPT_PATHS = frozenset({"/api/v1/csp-report"})
 _DEFAULT_PORTS = {"http": 80, "https": 443}
 
 
@@ -83,7 +86,11 @@ def register_middleware(app: FastAPI) -> None:
     async def _csrf_guard(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
         # Mutating API calls must carry a custom header. Browsers cannot add it
         # cross-site without a CORS preflight, which our CORS policy rejects.
-        is_mutating_api_call = request.method not in _SAFE_METHODS and request.url.path.startswith("/api/")
+        is_mutating_api_call = (
+            request.method not in _SAFE_METHODS
+            and request.url.path.startswith("/api/")
+            and request.url.path not in CSRF_EXEMPT_PATHS
+        )
         if is_mutating_api_call and not request.headers.get(CSRF_HEADER):
             return JSONResponse(status_code=403, content=error_body("csrf_header_missing", "Solicitud rechazada."))
         if is_mutating_api_call and (reason := origin_rejection(request)):
