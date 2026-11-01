@@ -161,7 +161,9 @@ expect "certificate names $HOST ($cert_cn)" sh -c "echo '$cert_cn' | grep -q 'DN
 section "T5 Fictitious data (backend/perf generator through the app's own API)"
 pw="$(sed -n 's/^POSTGRES_PASSWORD=//p' "$ROOT/.env")"
 gen_log="$ROOT/deploy/state/s1-generator.log"
-expect "generator: 20 business days of Rendiciones" env -i PATH="$PATH" HOME="$HOME" sh -c "cd '$ROOT/backend' && PERF_DATABASE_URL='postgresql+psycopg://districom:$pw@127.0.0.1:55432/districom_perf_s1' uv run --frozen python -m perf.generate --scale 1 --workers 1 --days 20 --seed 11 > '$gen_log' 2>&1"
+# The generator runs the app in its own process with the stack's .env (APP_ENV=production): it is a test tool, not
+# the server, so it runs as development (since R9-5-4 production refuses the generator's in-process settings).
+expect "generator: 20 business days of Rendiciones" env -i PATH="$PATH" HOME="$HOME" APP_ENV=development sh -c "cd '$ROOT/backend' && PERF_DATABASE_URL='postgresql+psycopg://districom:$pw@127.0.0.1:55432/districom_perf_s1' uv run --frozen python -m perf.generate --scale 1 --workers 1 --days 20 --seed 11 > '$gen_log' 2>&1"
 entries="$(q 'SELECT count(*) FROM settlements.ledger_entries')"
 expect "ledger has fictitious entries ($entries)" test "${entries:-0}" -gt 100
 
