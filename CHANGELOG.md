@@ -9,6 +9,9 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 - **Misma identidad visual:** son los archivos que servía Google Fonts, generados desde las fuentes oficiales de google/fonts (Inter 4.001 con el tamaño óptico fijo en 14 y el peso variable; Manrope 4.505 SemiBold). Comparados glifo por glifo con lo que servía Google: contornos y anchos idénticos en 400, 500 y 600. Capturas antes/después del login y de una muestra de todos los pesos y tamaños: 0 píxeles distintos. Mismas variables (`--font-inter`, `--font-manrope`), tokens y pesos.
 - Licencias SIL OFL 1.1 junto a los archivos; origen, hashes y cómo regenerarlos en `frontend/src/app/fonts/README.md`. Test `frontend/tests/fonts.test.ts`: ningún archivo vuelve a cargar fuentes de Google.
 
+### Changed — S2 DONE
+- S2 integrada en `main` (PR #59 `d814b8d`, PR #60 `c902f64`); ADR 015 aceptado. S3 sigue pendiente en el hardware real.
+
 ### Added — R9‑5‑4: health live/ready y validación de producción
 - **`GET /api/v1/health/live`:** el proceso responde; no consulta la base ni nada externo, así sigue en 200 con PostgreSQL caído.
 - **`GET /api/v1/health/ready`:** PostgreSQL responde y su migración (`alembic_version`) es exactamente el head del código que corre, leído de los scripts de Alembic (nunca un número escrito a mano). Base caída, migración atrasada (`behind`) o desconocida/adelantada (`unknown`) es 503 con `status: not_ready`.
