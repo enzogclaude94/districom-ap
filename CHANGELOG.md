@@ -4,6 +4,11 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Changed — Fuentes locales: el build no depende de Google Fonts
+- **Inter y Manrope se sirven desde el repositorio** con `next/font/local` (`frontend/src/app/fonts/`), en lugar de `next/font/google`. El build de Next descargaba las fuentes de Google en cada compilación, y el 31/10 el CI falló tres veces porque el runner no las consiguió; un build sin Internet (el servidor propio) fallaba igual.
+- **Misma identidad visual:** son los archivos que servía Google Fonts, generados desde las fuentes oficiales de google/fonts (Inter 4.001 con el tamaño óptico fijo en 14 y el peso variable; Manrope 4.505 SemiBold). Comparados glifo por glifo con lo que servía Google: contornos y anchos idénticos en 400, 500 y 600. Capturas antes/después del login y de una muestra de todos los pesos y tamaños: 0 píxeles distintos. Mismas variables (`--font-inter`, `--font-manrope`), tokens y pesos.
+- Licencias SIL OFL 1.1 junto a los archivos; origen, hashes y cómo regenerarlos en `frontend/src/app/fonts/README.md`. Test `frontend/tests/fonts.test.ts`: ningún archivo vuelve a cargar fuentes de Google.
+
 ### Added — R9‑5‑4: health live/ready y validación de producción
 - **`GET /api/v1/health/live`:** el proceso responde; no consulta la base ni nada externo, así sigue en 200 con PostgreSQL caído.
 - **`GET /api/v1/health/ready`:** PostgreSQL responde y su migración (`alembic_version`) es exactamente el head del código que corre, leído de los scripts de Alembic (nunca un número escrito a mano). Base caída, migración atrasada (`behind`) o desconocida/adelantada (`unknown`) es 503 con `status: not_ready`.
