@@ -1,4 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
+import type { Page } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 import { formatMoney } from "../src/lib/format";
 import { adminEmail, adminPassword, businessDay, login } from "./helpers";
