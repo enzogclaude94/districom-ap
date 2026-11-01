@@ -34,6 +34,20 @@ cd frontend && pnpm e2e
 - `backend/tests/unit/test_settlements_test_days.py` lo garantiza: prueba con el reloj movido a través de la medianoche que `today()` cambia entre dos llamadas, y recorre con `ast` cada archivo de `tests/modules/settlements/` fallando si algo que corre al importar (asignaciones de módulo, defaults, decoradores, cuerpos de clase) lee el reloj (`business_today`, `date.today`, `datetime.now` o un helper de `days.py`, directo o a través de una función local).
 - E2E: `businessDay(offset)` de `frontend/e2e/helpers.ts` se llama al usarlo (`const today = () => businessDay()`), nunca como constante del spec ni con el reloj local de la máquina (`cash`, `delivery` y `fuel` pasaron a `businessDay`).
 
+## R9‑5‑4 (health y configuración de producción)
+- `tests/integration/test_health.py`: `live` 200 con la base sana y caída (engine de la app a un puerto cerrado y toda conexión rechazada); `ready` 200 en el head, 503 con la base caída, con la migración anterior (`behind`), con una revisión que el código no conoce (`unknown`) y sin versión; `/health` legacy igual; `no-store` en todos. El head del código se compara con el que surge de leer los archivos de `migrations/versions/`.
+- `tests/unit/test_production_config.py`: una configuración de producción válida pasa; cada configuración insegura (cookie, CORS, DEBUG, `SECRET_KEY` de CI/tests/placeholder/no aleatoria, contraseña de ejemplo, corta o ausente, URL inválida) frena el arranque nombrando la variable y sin su valor; todos los problemas juntos; development y test no quedan atados; un error de configuración no muestra el valor; y en un proceso nuevo, `import app.main` (lo que hace uvicorn) falla con la configuración insegura sin imprimir secretos y arranca con la válida.
+
+## R9‑5‑3 (logs sin PII)
+- `tests/integration/test_safe_logs.py`, con la configuración real de logging (y la de uvicorn aplicada antes, como en producción): una violación de `CHECK` con CUIT, teléfono, email y nombre (cuyo mensaje crudo sí los trae, test de control) llega al log como `IntegrityError`/`CheckViolation`, `23514`, constraint y tabla, sin ninguno de esos valores ni `DETAIL`, `[SQL:` o `[parameters:`; el reporte propio de uvicorn también y sin handler de texto plano; cualquier excepción sin su mensaje; el access log con `user_id`, `queries` y sin email ni query string.
+- `backend/perf/log_audit.py` (no corre en CI): lecturas, Store Sys y caminos de error contra una copia del dataset realista, y busca en el log cada nombre, teléfono, CUIT y email.
+
+## R9‑5‑2 (límites, timeouts y no‑store)
+- `tests/unit/test_body_limit.py` (ASGI, cuenta lo que se lee del cliente): un `Content-Length` mayor al límite se rechaza sin leer un byte; hasta el límite pasa; sin `Content-Length` un cuerpo infinito se corta en el primer bloque que lo supera; un `Content-Length` que subestima no se cree; el límite es en bytes (600 «ñ» = 1.200 bytes); `multipart/form-data` usa su propio límite.
+- `tests/integration/test_request_limits.py`: 413 `request_too_large` estándar por la app entera, con `Content-Length` y chunked; un cuerpo de exactamente 1 MiB se lee; `Cache-Control: no-store` en health, 401, 404, 422, login/me/logout y en un 500 no manejado. El CSV del Cierre del día lo verifica en `test_daily_close_api.py`; el lote Store Sys de 200 registros con campos al máximo en `test_store_sys_import_api.py`.
+- `tests/integration/test_db_timeouts.py`: las conexiones del backend (y cada conexión nueva del pool) tienen los tres límites; una conexión común y la del `env.py` de Alembic conservan los valores del servidor y no hay `pg_db_role_setting`; un statement o un lock excedidos son 503 estándar y después el pool sigue sano y sin `SET LOCAL` filtrado; una transacción ociosa cerrada por el servidor no deja una conexión rota en el pool.
+- `tests/modules/settlements/test_lock_timeout_api.py`: un pago que espera el lock de la caja más de 10 s (real, sin bajar el límite) es 503 `database_busy`, no registra nada, y el pago siguiente pasa.
+
 ## R9‑5‑1 (sesiones y límite de login)
 - `tests/integration/test_session_touch.py`: con el reloj de la app inyectado, el primer request pasado el minuto escribe una vez; dentro de los 60 s no hay `UPDATE` ni commit; a los 60 s exactos escribe y la ventana vuelve a empezar; la inactividad cuenta desde el valor guardado (un request dentro de la ventana no suma tiempo de sesión); una sesión vencida por inactividad o por expiración absoluta, o revocada, nunca se toca; si otra transacción la revoca, la vence, la deja inactiva o desactiva al usuario entre la validación y el `UPDATE`, el `UPDATE` no la encuentra, la relectura la da por inválida y ese mismo request da 401; si otro request válido la tocó primero, el request sigue con 200 sin commit; diez requests simultáneos con conexiones propias producen un solo `UPDATE` efectivo y un solo commit. Las mutaciones de cada condición del `UPDATE`, del chequeo previo y del commit condicional hacen fallar al menos un test.
 - `tests/unit/test_rate_limit.py`: misma ventana y mismo límite; preguntar por una clave no la guarda; 5.000 claves que fallaron una vez se descartan al salir de la ventana; una clave reciente sobrevive.
@@ -234,7 +248,7 @@ Los números entre corchetes en los docstrings son los 29 tests pedidos por Enzo
 
 ## Fase 0
 - `test_migrations.py`: upgrade → downgrade → upgrade desde base vacía, una sola head, `source_systems` sembrado.
-- `test_health.py`: DB ok (200) y caída (503).
+- `test_health.py`: DB ok (200) y caída (503); desde R9‑5‑4 también `live` y `ready`.
 - `test_auth.py`: login, cookie HttpOnly/SameSite, token guardado hasheado, credenciales inválidas sin revelar existencia, usuario inactivo, 401/403, logout revoca, Argon2id, rate limit, CSRF, contraseña ausente de logs.
 - `test_errors.py`: formato `{code, message, details, request_id}`, sin eco de datos enviados.
 - `test_settings.py`: variables obligatorias, secret corto, CORS, driver.

@@ -12,6 +12,49 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 - **`ARCHITECTURE.md` §6** (pipeline), estructura de paquetes y ADRs; **`ROADMAP.md`** con Fase 1 IN_PROGRESS y subfases F1.0–F1.8; **`PLAN.md`** con riesgos y decisiones actualizados con las muestras; **`docs/DATA_INTAKE.md`** con el estado de las muestras; **`docs/SECURITY.md`** con los controles de subida diseñados.
 - Deuda declarada: `METRICS.md` no cambia en Fase 1, pero `visit.conversion_order` y el denominador de `visit.conversion_invoiced` suponen visitas que hoy no tienen fuente.
 
+### Changed — S2 DONE
+- S2 integrada en `main` (PR #59 `d814b8d`, PR #60 `c902f64`); ADR 015 aceptado. S3 sigue pendiente en el hardware real.
+
+### Added — R9‑5‑4: health live/ready y validación de producción
+- **`GET /api/v1/health/live`:** el proceso responde; no consulta la base ni nada externo, así sigue en 200 con PostgreSQL caído.
+- **`GET /api/v1/health/ready`:** PostgreSQL responde y su migración (`alembic_version`) es exactamente el head del código que corre, leído de los scripts de Alembic (nunca un número escrito a mano). Base caída, migración atrasada (`behind`) o desconocida/adelantada (`unknown`) es 503 con `status: not_ready`.
+- **`GET /api/v1/health` sin cambios** (proceso + base): lo siguen usando los healthchecks de Docker, el smoke y el monitor de S1. Pasar a `/ready` es un handoff a S1.
+- **Con `APP_ENV=production` la app no arranca** con una configuración insegura: `COOKIE_SECURE` distinto de true, `CORS_ORIGINS` no vacío, `ARGON2_PROFILE` distinto de standard, `LOG_LEVEL` DEBUG, o `SECRET_KEY` y la contraseña de la base (`POSTGRES_PASSWORD`, en `DATABASE_URL`) vacías, de ejemplo, placeholders o no aleatorias (la contraseña, además, con al menos 16 caracteres). Lista todos los problemas juntos, por variable, sin imprimir valores. Development y test no cambian.
+- **Los errores de configuración ya no muestran el valor rechazado** (`hide_input_in_errors`): antes un `SECRET_KEY` corto o el `ARGON2_PROFILE` mal puesto imprimían el valor, y el segundo toda la configuración, `DATABASE_URL` incluida.
+- R9‑5‑3 **DONE** (PR #58, 2026-10-31).
+
+### Added — S2‑2: administración de usuarios (ADR 015)
+- **Pantalla «Usuarios»** (`/usuarios`, solo administradores de plataforma) y ficha de cada usuario: alta con contraseña temporal (se muestra una vez), edición de nombre, email y rol de plataforma, activación y desactivación, reseteo de contraseña, rol por módulo, permisos de áreas protegidas, sesiones abiertas con IP y red (cerrar una o todas) y actividad de la cuenta.
+- **API** `/api/v1/users` (`require_role("admin")`, cerrada también para un admin con contraseña temporal): `GET` (filtros y búsqueda), `POST`, `GET/PATCH /{id}`, `/{id}/activate`, `/{id}/deactivate`, `/{id}/reset-password`, `PUT /{id}/access`, `/{id}/sessions/{sid}/revoke`, `/{id}/sessions/revoke-all`, `GET /access-catalog`. Los cuerpos rechazan campos extra (`extra="forbid"`): no se puede colar `active`, `password`, `must_change_password` ni roles inexistentes.
+- **Protecciones:** nadie cambia su propio rol de plataforma, su estado ni resetea su contraseña desde el panel (409 `own_account`); siempre queda al menos un administrador de plataforma activo, también con dos administradores degradándose a la vez (bloqueo de las filas de administradores; 409 `last_admin`); un área protegida exige un rol en su módulo (409 `area_requires_module`) y quitar el módulo quita sus áreas; el acceso a un módulo nunca da sus áreas; un administrador de plataforma no lleva filas de módulo (ya es admin en todos) pero sí áreas explícitas. Ningún usuario se borra: se desactiva.
+- **Sesiones:** desactivar o resetear cierra todas las sesiones del usuario (`user_deactivated`, `password_reset`); el administrador también puede cerrarlas (`revoked_by_admin`). Cambiar roles no cierra sesiones: los permisos se leen en cada request.
+- **Auditoría:** `platform.user.created`, `platform.user.updated` (solo qué campos cambiaron; el rol con antes y después), `platform.user.activated`, `platform.user.deactivated`, `platform.user.sessions_revoked`, más los existentes `platform.module_role.granted/revoked` y `platform.password.reset`. Sin emails, nombres ni contraseñas en el payload.
+- Sin migraciones nuevas: usa las columnas de `0032` (S2‑1).
+
+### Added — S2‑1: contraseñas, sesiones y verificación de `Origin` (ADR 015)
+- **Cambio de contraseña propio** (`POST /auth/password`, pantalla «Mi cuenta» en `/cuenta`): pide la actual, valida mínimo 12 / máximo 256, no solo espacios ni el propio email, distinta de la actual; los fallos cuentan como intentos de login. Cierra todas las otras sesiones del usuario.
+- **Contraseña temporal con cambio obligatorio:** `users.must_change_password` y `temporary_password_expires_at` (vence a las `TEMPORARY_PASSWORD_HOURS`, 72). Hasta reemplazarla, la API responde `403 password_change_required` a todo salvo `/auth/me`, `/auth/password` y `/auth/logout` (bloqueo central en `current_user`) y la app muestra solo «Elegí tu contraseña». CLI `reset-password --email ...`: genera una temporal, la muestra una vez, guarda solo el hash y cierra todas las sesiones del usuario.
+- **Sesiones propias:** `GET /auth/sessions`, `POST /auth/sessions/{id}/revoke`, `POST /auth/sessions/revoke-others`; «Mi cuenta» las lista con dispositivo, IP, red, inicio y última actividad. Las sesiones de otro usuario no existen para estos endpoints (404).
+- **IP real y origen, solo auditoría:** `user_sessions.access_origin` (`lan`, `tailscale`, `local`, `other`) y los eventos `LOGIN` y `platform.login.failed` (nuevo: motivo, IP y origen, sin el email tipeado) los registran. Nunca autorizan.
+- **Verificación de `Origin`** en todo método mutante de `/api` (`403 origin_not_allowed`), además de `X-Requested-With`. Variable nueva `TRUSTED_ORIGINS` (vacía en producción; en desarrollo, sin definir, `http://localhost:3000`; el E2E la define para su puerto).
+- Auditoría: `platform.password.changed`, `platform.password.reset`, `platform.session.revoked`, `platform.sessions.revoked`; las sesiones cerradas guardan `revoked_reason` y `revoked_by`.
+- Migración `0032` (plataforma): columnas nuevas en `users` y `user_sessions`, sin tocar datos; los usuarios y sesiones existentes siguen igual.
+- Docs: ADR 015, SECURITY, ARCHITECTURE §8, OPERATIONS, README; ROADMAP: **S1 DONE** (PR #54, `5d1d3f5`), S2 en curso, S3 pendiente en el hardware real.
+
+### Changed — R9‑5‑3: logs sin datos personales y access log
+- **Las excepciones se loguean sin su mensaje:** clase, cadena de clases y frames. El mensaje de un error de base traía el `DETAIL` de PostgreSQL («Failing row contains (…)») y los parámetros de la sentencia: CUIT, nombres, teléfonos, emails. Un error de base suma `sqlstate`, `constraint`, `schema`, `table`, `column` y `db_error_class`; los rechazos 409 de Rendiciones también los registran.
+- **uvicorn** («Exception in ASGI application») escribe por el mismo formatter JSON: ya no hay una copia en texto plano del error.
+- **Access log:** suma `user_id` (nunca el email) y `queries` (sentencias del request).
+- Auditoría con el dataset realista (`backend/perf/log_audit.py`): 0 de 68 nombres, teléfonos, CUIT y emails en 544 líneas; con el formatter anterior, 4.
+- Handoff a S1 (sin tocar `deploy/`): `log_error_verbosity=terse` y `log_min_error_statement=panic` en la base de producción.
+- **R9‑5‑2 DONE** (aprobada por Enzo el 2026-10-30, PR #57).
+
+### Changed — R9‑5‑2: límites de request, timeouts de PostgreSQL y no‑store
+- **Cuerpo máximo de 1 MiB en bytes reales** (`REQUEST_MAX_BODY_BYTES`): 413 `request_too_large` en el formato estándar. Con `Content-Length` mayor, sin leer el cuerpo; sin él (chunked) o si el encabezado subestima, se cuenta lo recibido y se corta en el primer bloque que pasa el límite. Los archivos (`multipart/form-data`) usan `UPLOAD_MAX_SIZE_MB`. El lote Store Sys más grande posible (200 registros con todos los campos al máximo) pesa 89 KB.
+- **Timeouts solo en las conexiones del backend** (opciones de conexión del engine; sin `ALTER ROLE`, sin migración): `statement_timeout` 30 s, `lock_timeout` 10 s, `idle_in_transaction_session_timeout` 60 s (`DB_*_TIMEOUT_MS`). Excederlos responde 503 `database_timeout` o `database_busy`; los commits que traducían cualquier error de base a un 409 de reglas ahora dejan pasar los timeouts, y en Store Sys el registro afectado vuelve con `database_timeout`. `migrate`, backups, restores y dumps no cambian.
+- **`Cache-Control: no-store` en todas las respuestas del backend**, de forma centralizada.
+- **R9‑5‑1 DONE** (aprobada por Enzo el 2026-10-30, PR #55).
+
 ### Added — S1: infraestructura del servidor propio (ADR 013)
 - **Sin despliegue productivo ni cambios de código de la app**: `docker-compose.yml`, Dockerfiles, workflows, reglas de negocio y migraciones intactos. Todo lo nuevo está en `deploy/` y en docs.
 - `deploy/docker-compose.prod.yml`:

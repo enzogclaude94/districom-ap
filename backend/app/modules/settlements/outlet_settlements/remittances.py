@@ -40,7 +40,8 @@ from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.core.errors import AppError
+from app.core.errors import AppError, database_timeout
+from app.core.logging import db_error_fields
 from app.modules.settlements.delivery import idempotency, service
 from app.modules.settlements.delivery.models import Settlement
 from app.modules.settlements.ledger import service as ledger
@@ -452,11 +453,13 @@ def commit(db: Session) -> None:
         db.commit()
     except DBAPIError as exc:
         db.rollback()
+        if (timeout := database_timeout(exc)) is not None:
+            raise timeout from exc
         raise _rejected(exc) from exc
 
 
 def _rejected(exc: DBAPIError) -> AppError:
-    logger.warning("outlet_remittance_rejected", extra={"sqlstate": getattr(exc.orig, "sqlstate", None)})
+    logger.warning("outlet_remittance_rejected", extra=db_error_fields(exc))
     return AppError(
         409,
         "invalid_outlet_remittance",

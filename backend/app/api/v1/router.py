@@ -11,11 +11,13 @@ from app.platform.outlets import router as outlets
 from app.platform.parties import router as employees
 from app.platform.settings import router as settings
 from app.platform.third_parties import router as third_parties
+from app.platform.users import router as users
 from app.platform.vehicles import router as vehicles
 
 api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(health.router)
 api_router.include_router(auth.router)
+api_router.include_router(users.router)
 api_router.include_router(settings.router)
 api_router.include_router(employees.router)
 api_router.include_router(banks.router)

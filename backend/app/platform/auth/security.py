@@ -30,6 +30,28 @@ def _dummy_hash() -> str:
 
 
 MIN_PASSWORD_LENGTH = 12
+MAX_PASSWORD_LENGTH = 256
+# Temporary passwords: no characters that are easy to misread when dictated or copied by hand (0/O, 1/l/I).
+_TEMPORARY_ALPHABET = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+
+def new_temporary_password() -> str:
+    """Four groups of four characters (about 92 bits): shown once to whoever gives it, stored only as its hash."""
+    groups = ("".join(secrets.choice(_TEMPORARY_ALPHABET) for _ in range(4)) for _ in range(4))
+    return "-".join(groups)
+
+
+def password_problem(password: str, *, email: str) -> str | None:
+    """Why a new password is not acceptable, as a message for the user, or None."""
+    if len(password) < MIN_PASSWORD_LENGTH:
+        return f"La contraseña debe tener al menos {MIN_PASSWORD_LENGTH} caracteres."
+    if len(password) > MAX_PASSWORD_LENGTH:
+        return f"La contraseña puede tener como mucho {MAX_PASSWORD_LENGTH} caracteres."
+    if not password.strip():
+        return "La contraseña no puede ser solo espacios."
+    if password.strip().lower() == email.strip().lower():
+        return "La contraseña no puede ser tu email."
+    return None
 
 
 def hash_password(password: str) -> str:

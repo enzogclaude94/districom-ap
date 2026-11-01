@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.router import api_router
-from app.core.config import get_settings
+from app.core.config import check_production, get_settings
 from app.core.errors import register_error_handlers
 from app.core.logging import configure_logging
 from app.core.middleware import CSRF_HEADER, register_middleware
@@ -10,6 +10,8 @@ from app.core.middleware import CSRF_HEADER, register_middleware
 
 def create_app() -> FastAPI:
     settings = get_settings()
+    # Refuses to start, before serving anything, with an unsafe production setting (R9-5-4, O8).
+    check_production(settings)
     configure_logging(settings.log_level)
 
     app = FastAPI(

@@ -39,7 +39,8 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 from app.core.clock import business_today
-from app.core.errors import AppError
+from app.core.errors import AppError, database_timeout
+from app.core.logging import db_error_fields
 from app.modules.settlements.cheques import schemas as s
 from app.modules.settlements.cheques import terms
 from app.modules.settlements.cheques.models import (
@@ -758,7 +759,9 @@ def commit(db: Session) -> None:
         db.commit()
     except DBAPIError as exc:
         db.rollback()
-        logger.warning("cheque_cycle_commit_rejected", extra={"sqlstate": getattr(exc.orig, "sqlstate", None)})
+        if (timeout := database_timeout(exc)) is not None:
+            raise timeout from exc
+        logger.warning("cheque_cycle_commit_rejected", extra=db_error_fields(exc))
         raise AppError(
             409, "invalid_cheque_operation", "El movimiento del cheque no cumple sus reglas y no se registró."
         ) from exc

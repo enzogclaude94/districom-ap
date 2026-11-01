@@ -26,7 +26,8 @@ from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.clock import business_today
-from app.core.errors import AppError
+from app.core.errors import AppError, database_timeout
+from app.core.logging import db_error_fields
 from app.modules.settlements.delivery import denominations, idempotency
 from app.modules.settlements.delivery import schemas as s
 from app.modules.settlements.delivery.models import CashCountLine, Settlement
@@ -116,7 +117,9 @@ def commit(db: Session) -> None:
         db.commit()
     except DBAPIError as exc:
         db.rollback()
-        logger.warning("settlement_commit_rejected", extra={"sqlstate": getattr(exc.orig, "sqlstate", None)})
+        if (timeout := database_timeout(exc)) is not None:
+            raise timeout from exc
+        logger.warning("settlement_commit_rejected", extra=db_error_fields(exc))
         raise AppError(
             409,
             "invalid_settlement_change",

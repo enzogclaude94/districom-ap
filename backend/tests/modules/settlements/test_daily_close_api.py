@@ -644,6 +644,7 @@ def test_17_the_csv_is_the_same_view_for_a_spanish_spreadsheet(
     response = client.get(f"{DAILY}.csv", params={"on": yesterday().isoformat()})
     assert response.status_code == 200, response.text
     assert response.headers["content-type"].startswith("text/csv")
+    assert response.headers["Cache-Control"] == "no-store"  # R9-5-2
     assert f'filename="cierre-del-dia-{yesterday().isoformat()}.csv"' in response.headers["content-disposition"]
     content = response.content.decode("utf-8")
     assert content.startswith("﻿Cierre del día;")
