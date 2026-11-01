@@ -68,6 +68,7 @@ PY
 fi
 
 log "rollback: stopping the app"
+maintenance_begin "rollback to $previous"
 dc stop caddy frontend backend
 
 if [ "$restore_db" -eq 1 ]; then
@@ -104,4 +105,5 @@ if [ "$restore_db" -eq 1 ]; then
     rm -f "$STATE_DIR/rollback-backup-label" "$STATE_DIR/rollback-fingerprint.txt" "$STATE_DIR/rollback-backup-time"
 fi
 printf '%s rollback to %s (restore-db=%s) ok\n' "$(date -Is)" "$previous" "$restore_db" >> "$STATE_DIR/updates.log"
+maintenance_end
 log "rollback: done, running $previous"

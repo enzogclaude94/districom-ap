@@ -12,8 +12,47 @@ warn() { report+=("WARN  $*"); }
 bad() { report+=("FAIL  $*"); fail=1; }
 age_of() { [ -f "$1" ] && echo $((now - $(cat "$1"))) || echo 999999999; }
 
-# 1. The app answers through the same door users use.
-if caddy_curl -f "https://$DISTRICOM_HOST/api/v1/health" > /dev/null 2>&1; then ok "app answers over HTTPS"; else bad "app does not answer over HTTPS"; fi
+# 1. The app answers through the same door users use (/api/v1/health), and is ready (/api/v1/health/ready):
+# down (app or database) and up-with-the-wrong-schema are different alerts with different fixes.
+maintenance="$(maintenance_state)"
+if caddy_curl -f --max-time "${HEALTH_TIMEOUT_SECONDS:-10}" "https://$DISTRICOM_HOST/api/v1/health" > /dev/null 2>&1; then
+    health=ok
+else
+    health=down
+fi
+readiness="$(app_readiness)"
+case "$maintenance" in
+    active*)
+        # deploy/bin/update or rollback stopped the app on purpose: no alert while the window lasts.
+        read -r _ minutes reason <<< "$maintenance"
+        warn "MAINTENANCE for $minutes min ($reason): app $health, readiness $readiness; alerts resume after ${MAINTENANCE_MAX_MINUTES:-60} min"
+        ;;
+    *)
+        if [ -n "$maintenance" ]; then
+            read -r _ minutes reason <<< "$maintenance"
+            bad "maintenance window open for $minutes min ($reason): the update or rollback did not finish; see deploy/state/updates.log"
+        fi
+        case "$readiness" in
+            ready) ok "app ready over HTTPS (database answers, migrations match the code)" ;;
+            database_down) bad "DATABASE DOWN: the app answers over HTTPS but cannot reach PostgreSQL" ;;
+            migrations_behind) bad "MIGRATION MISMATCH: the app is up but the database is at an older migration than the code (run deploy/bin/migrate, or roll back)" ;;
+            migrations_unknown) bad "MIGRATION MISMATCH: the app is up but the database is at a migration the code does not know (a rollback without --restore-db?)" ;;
+            not_available) if [ "$health" = ok ]; then ok "app answers over HTTPS (this version has no /api/v1/health/ready)"; else bad "APP DOWN: /api/v1/health fails over HTTPS"; fi ;;
+            no_answer) bad "APP DOWN: no answer over HTTPS within ${HEALTH_TIMEOUT_SECONDS:-10} s (backend, frontend or Caddy)" ;;
+            *) if [ "$health" = ok ]; then bad "app answers /api/v1/health but /api/v1/health/ready gave an unexpected answer"; else bad "APP DOWN: /api/v1/health fails over HTTPS"; fi ;;
+        esac
+        ;;
+esac
+
+# 1b. PostgreSQL logs at their safe level (docs/OPERATIONS.md): a raised level ends when its time runs out.
+log_detail="$("$ROOT/deploy/bin/db-log-detail" expire 2> /dev/null || echo "unknown")"
+case "$log_detail" in
+    off) ok "PostgreSQL logs without personal data (terse, no statements)" ;;
+    on*) warn "PostgreSQL detailed logs ON (incident): ${log_detail#on }" ;;
+    restored*) warn "PostgreSQL detailed logs: time ran out, safe level restored (${log_detail#restored })" ;;
+    unsafe*) bad "PostgreSQL logs above the safe level without deploy/bin/db-log-detail (${log_detail#unsafe }): personal data can reach the log; run deploy/bin/db-log-detail off" ;;
+    *) warn "cannot read the PostgreSQL log level (database not answering?)" ;;
+esac
 
 # 2. Disks. The backup disk first: mounted and prepared, or every local backup goes nowhere (or to the system disk).
 problem="$(backup_disk_problem)"

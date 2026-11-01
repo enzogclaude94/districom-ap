@@ -29,6 +29,8 @@ git checkout --quiet --detach "$ref"
 dc build ${UPDATE_BUILD_SERVICES:-}
 
 log "update: stopping the app (no writes from now on)"
+# The monitor reports maintenance instead of alerting until this update ends (or MAINTENANCE_MAX_MINUTES pass).
+maintenance_begin "update to $ref"
 dc stop caddy frontend backend
 "$ROOT/deploy/bin/backup" full "pre-update $ref" || die "pre-update backup failed: the app stays stopped; run deploy/bin/rollback"
 pgbr --repo=1 info --output=json | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["backup"][-1]["label"])' > "$STATE_DIR/rollback-backup-label"
@@ -49,4 +51,5 @@ if ! "$ROOT/deploy/bin/smoke"; then
     die "smoke test failed after the update: run deploy/bin/rollback --restore-db"
 fi
 printf '%s update %s -> %s ok\n' "$(date -Is)" "$previous" "$ref" >> "$STATE_DIR/updates.log"
+maintenance_end
 log "update: done ($ref). Rollback stays possible until the next update."

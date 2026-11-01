@@ -458,6 +458,117 @@ mv "$TEST_ROOT/backup-root-marker" "$TEST_ROOT/backup/$BACKUP_MARKER"
 sleep 3
 expect "with the disk back, no critical line" sh -c "! '$ROOT/deploy/bin/monitor' 2> /dev/null | grep -q CRITICAL"
 
+# ---------------------------------------------------------------- T18 readiness, smoke, monitor, maintenance
+section "T18 Readiness (/api/v1/health/ready) in smoke and monitor: down and wrong schema are different alerts"
+monitor_line() { "$ROOT/deploy/bin/monitor" 2> /dev/null | grep -E '^(OK|WARN|FAIL)  .*(app|APP|DATABASE DOWN|MIGRATION|MAINTENANCE|maintenance)' | head -n1; }
+ready_and_smoke() { [ "$(app_readiness)" = ready ] && "$ROOT/deploy/bin/smoke" 2> /dev/null; }
+wait_ready() { local i; for i in $(seq 1 45); do [ "$(app_readiness)" = ready ] && return 0; sleep 2; done; return 1; }
+expect "update and rollback left no maintenance window open" test ! -f "$MAINTENANCE_FILE"
+head_rev="$(q 'SELECT version_num FROM alembic_version')"
+parent_rev="$(dc exec -T backend alembic show "$head_rev" 2> /dev/null | sed -n 's/^Parent: *//p' | tr -d '\r')"
+expect "ready at the head ($head_rev): readiness $(app_readiness)" test "$(app_readiness)" = ready
+ready_body="$(caddy_curl "https://$DISTRICOM_HOST/api/v1/health/ready" 2> /dev/null)"
+expect "ready body says database and migrations ok ($ready_body)" sh -c "echo '$ready_body' | grep -q '\"migrations\":\"ok\"' && echo '$ready_body' | grep -q '\"db\":\"ok\"'"
+expect "the response names no revision" sh -c "! echo '$ready_body' | grep -q '$head_rev'"
+expect "monitor: app ready ($(monitor_line))" sh -c "'$ROOT/deploy/bin/monitor' 2> /dev/null | grep -q '^OK    app ready over HTTPS'"
+
+q "UPDATE alembic_version SET version_num = '$parent_rev'" > /dev/null
+expect "migration behind ($parent_rev): readiness migrations_behind" test "$(app_readiness)" = migrations_behind
+expect "migration behind: /api/v1/health still 200 (why ready is needed)" caddy_curl -f "https://$DISTRICOM_HOST/api/v1/health"
+expect "migration behind: smoke FAILS" sh -c "! '$ROOT/deploy/bin/smoke' 2> /dev/null"
+line="$(monitor_line)"
+expect "migration behind: monitor says MIGRATION MISMATCH, older ($line)" sh -c "echo '$line' | grep -q '^FAIL  MIGRATION MISMATCH: .*older migration'"
+q "UPDATE alembic_version SET version_num = '0999'" > /dev/null
+expect "unknown migration (0999): readiness migrations_unknown" test "$(app_readiness)" = migrations_unknown
+line="$(monitor_line)"
+expect "unknown migration: monitor says MIGRATION MISMATCH, unknown ($line)" sh -c "echo '$line' | grep -q '^FAIL  MIGRATION MISMATCH: .*does not know'"
+expect "unknown migration: smoke FAILS" sh -c "! '$ROOT/deploy/bin/smoke' 2> /dev/null"
+q "UPDATE alembic_version SET version_num = '$head_rev'" > /dev/null
+expect "back at the head: ready again, smoke passes" ready_and_smoke
+
+dc stop db > /dev/null 2>&1
+expect "database stopped: /api/v1/health/live still 200" caddy_curl -f --max-time 10 "https://$DISTRICOM_HOST/api/v1/health/live"
+expect "database stopped: readiness database_down" test "$(app_readiness)" = database_down
+line="$(monitor_line)"
+expect "database stopped: monitor says DATABASE DOWN ($line)" sh -c "echo '$line' | grep -q '^FAIL  DATABASE DOWN'"
+dc start db > /dev/null 2>&1
+wait_healthy db
+expect "database back: ready again" wait_ready
+
+docker pause "$(dc ps -q backend)" > /dev/null
+start_s=$(date +%s)
+hung="$(HEALTH_TIMEOUT_SECONDS=3 app_readiness)"
+took=$(($(date +%s) - start_s))
+expect "backend hung: readiness gives up after its timeout ($hung in ${took}s, limit 3 s)" sh -c "[ '$hung' = no_answer ] && [ $took -le 8 ]"
+start_s=$(date +%s)
+HEALTH_TIMEOUT_SECONDS=3 "$ROOT/deploy/bin/smoke" > /dev/null 2>&1
+took=$(($(date +%s) - start_s))
+docker unpause "$(dc ps -q backend)" > /dev/null
+expect "backend hung: smoke ends in bounded time (${took}s)" test "$took" -le 120
+
+dc stop backend > /dev/null 2>&1
+line="$(monitor_line)"
+expect "backend stopped: monitor says APP DOWN ($line)" sh -c "echo '$line' | grep -q '^FAIL  APP DOWN'"
+maintenance_begin "S1 test window"
+expect "inside a maintenance window: monitor reports MAINTENANCE and no app FAIL ($(monitor_line))" sh -c "'$ROOT/deploy/bin/monitor' 2> /dev/null > '$TEST_ROOT/monitor-maint.txt'; grep -q '^WARN  MAINTENANCE for 0 min (S1 test window)' '$TEST_ROOT/monitor-maint.txt' && ! grep -qE '^FAIL  (APP|DATABASE|MIGRATION)' '$TEST_ROOT/monitor-maint.txt'"
+line="$(MAINTENANCE_MAX_MINUTES=0 monitor_line)"
+expect "window older than MAINTENANCE_MAX_MINUTES: monitor FAILS again ($line)" sh -c "MAINTENANCE_MAX_MINUTES=0 '$ROOT/deploy/bin/monitor' 2> /dev/null | grep -q '^FAIL  maintenance window open'"
+maintenance_end
+dc up -d --no-build backend > /dev/null 2>&1
+wait_healthy backend
+expect "backend back: ready, smoke passes" ready_and_smoke
+backend_hc="$(docker inspect -f '{{json .Config.Healthcheck.Test}}' "$(dc ps -q backend)")"
+hc_is_health() { echo "$backend_hc" | grep -q '/api/v1/health' && ! echo "$backend_hc" | grep -qE 'health/(ready|live)'; }
+expect "Docker's backend healthcheck is still /api/v1/health ($backend_hc)" hc_is_health
+
+# ---------------------------------------------------------------- T19 PostgreSQL logs without personal data
+section "T19 PostgreSQL logs: an error keeps its message, not the row or the statement (fictitious personal data)"
+expect "safe log settings in force ($(q "SELECT string_agg(name || '=' || setting, ' ' ORDER BY name) FROM pg_settings WHERE name IN ('log_error_verbosity','log_min_error_statement','log_statement','log_min_duration_statement','log_min_duration_sample','log_transaction_sample_rate','log_duration','log_parameter_max_length','log_parameter_max_length_on_error')"))" \
+    test "$(q "SELECT string_agg(setting, ' ' ORDER BY name) FROM pg_settings WHERE name IN ('log_error_verbosity','log_min_error_statement','log_statement','log_min_duration_statement','log_min_duration_sample','log_transaction_sample_rate','log_duration','log_parameter_max_length','log_parameter_max_length_on_error')")" = "off terse panic -1 -1 0 0 none 0"
+expect "no module that logs plans or statements is loaded ($(q 'SHOW shared_preload_libraries'))" sh -c "! echo '$(q 'SHOW shared_preload_libraries')' | grep -qiE 'auto_explain|pgaudit'"
+pii_insert="INSERT INTO third_parties (name, name_key, tax_id, notes, created_by, updated_by)
+    VALUES ('Prueba PII Nombre', '', '30712345671', 'tel 11-5555-1234 pii@example.com', (SELECT min(id) FROM users), (SELECT min(id) FROM users))"
+db_log_since() { docker logs --since "$1" "$(dc ps -q db)" 2>&1; }
+leaks() { grep -oE 'Prueba PII Nombre|30712345671|11-5555-1234|pii@example\.com|Failing row|STATEMENT:' | sort -u | tr '\n' ' '; }
+run_pii() { # run_pii [SET ...;] -> the db log written meanwhile
+    local since
+    since="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    sleep 1
+    dc exec -T -u postgres db psql -XqtA -U districom -d districom_perf_s1 -c "${1:-} $pii_insert" > /dev/null 2>&1
+    sleep 1
+    db_log_since "$since"
+}
+out="$(run_pii)"
+logged_constraint() { echo "$out" | grep -q 'ERROR: .*violates check constraint "ck_third_parties'; }
+expect "the error is logged with its constraint" logged_constraint
+expect "the db log holds none of the personal data (found: $(echo "$out" | leaks))" test -z "$(echo "$out" | leaks)"
+out="$(run_pii "SET log_error_verbosity = default; SET log_min_error_statement = error;")"
+expect "control: with the old defaults the same error leaks (found: $(echo "$out" | leaks)): the check sees a leak" test -n "$(echo "$out" | leaks)"
+
+section "T19b Incident procedure: deploy/bin/db-log-detail raises the detail for a limited time"
+expect "status: off" test "$("$ROOT/deploy/bin/db-log-detail" status)" = off
+expect "on refuses more than DB_LOG_DETAIL_MAX_MINUTES" sh -c "! '$ROOT/deploy/bin/db-log-detail' on 500 'too long' 2> /dev/null"
+expect "on refuses no reason" sh -c "! '$ROOT/deploy/bin/db-log-detail' on 5 2> /dev/null"
+since_on=$(date +%s)
+expect "on 5 min with a reason" sh -c "'$ROOT/deploy/bin/db-log-detail' on 5 'S1 test incident' | grep -q '^on until'"
+expect "the change is in deploy/state/db-log-detail.log" sh -c "tail -n1 '$STATE_DIR/db-log-detail.log' | grep -q 'on for 5 min: S1 test incident'"
+expect "the app's idle connections were reopened" test "$(q "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND backend_type = 'client backend' AND state = 'idle' AND backend_start < to_timestamp($since_on)")" = 0
+expect "the app keeps answering (ready)" wait_ready
+out="$(run_pii)"
+expect "while on, a new session logs DETAIL and the statement (found: $(echo "$out" | leaks))" sh -c "echo '$(echo "$out" | leaks)' | grep -q 'Failing row'"
+line="$("$ROOT/deploy/bin/monitor" 2> /dev/null | grep 'PostgreSQL')"
+expect "monitor warns that detailed logs are on ($line)" sh -c "echo '$line' | grep -q '^WARN  PostgreSQL detailed logs ON'"
+sed -i "s/^[0-9]* /$(($(date +%s) - 1)) /" "$STATE_DIR/db-log-detail"
+line="$("$ROOT/deploy/bin/monitor" 2> /dev/null | grep 'PostgreSQL')"
+expect "time ran out: the monitor restores the safe level ($line)" sh -c "echo '$line' | grep -q 'time ran out, safe level restored' && [ \"\$('$ROOT/deploy/bin/db-log-detail' status)\" = off ]"
+out="$(run_pii)"
+expect "after the restore no personal data reaches the log (found: $(echo "$out" | leaks))" test -z "$(echo "$out" | leaks)"
+q "ALTER ROLE districom IN DATABASE districom_perf_s1 SET log_error_verbosity = 'verbose'" > /dev/null
+line="$("$ROOT/deploy/bin/monitor" 2> /dev/null | grep 'PostgreSQL')"
+expect "a level raised by hand (not through db-log-detail) is a monitor FAIL ($line)" sh -c "echo '$line' | grep -q '^FAIL  PostgreSQL logs above the safe level'"
+expect "off puts it back" sh -c "'$ROOT/deploy/bin/db-log-detail' off | grep -qx off"
+expect "the app is ready after all of it" wait_ready
+
 # ---------------------------------------------------------------- summary
 printf '\n%s passed, %s failed\n' "$pass" "$failed" | tee -a "$REPORT"
 [ "$failed" -eq 0 ]
