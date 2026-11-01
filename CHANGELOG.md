@@ -20,6 +20,9 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
   - el generador de datos de prueba corre como `development`: desde R9‑5‑4 la validación de producción no lo dejaba arrancar con el `.env` del stack de prueba.
 - Docs: OPERATIONS §3.1, §3.2, §6 y §8; SECURITY.
 
+### Changed — S2 DONE
+- S2 integrada en `main` (PR #59 `d814b8d`, PR #60 `c902f64`); ADR 015 aceptado. S3 sigue pendiente en el hardware real.
+
 ### Added — R9‑5‑4: health live/ready y validación de producción
 - **`GET /api/v1/health/live`:** el proceso responde; no consulta la base ni nada externo, así sigue en 200 con PostgreSQL caído.
 - **`GET /api/v1/health/ready`:** PostgreSQL responde y su migración (`alembic_version`) es exactamente el head del código que corre, leído de los scripts de Alembic (nunca un número escrito a mano). Base caída, migración atrasada (`behind`) o desconocida/adelantada (`unknown`) es 503 con `status: not_ready`.
