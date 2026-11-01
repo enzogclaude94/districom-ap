@@ -9,6 +9,12 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 - **Misma identidad visual:** son los archivos que servía Google Fonts, generados desde las fuentes oficiales de google/fonts (Inter 4.001 con el tamaño óptico fijo en 14 y el peso variable; Manrope 4.505 SemiBold). Comparados glifo por glifo con lo que servía Google: contornos y anchos idénticos en 400, 500 y 600. Capturas antes/después del login y de una muestra de todos los pesos y tamaños: 0 píxeles distintos. Mismas variables (`--font-inter`, `--font-manrope`), tokens y pesos.
 - Licencias SIL OFL 1.1 junto a los archivos; origen, hashes y cómo regenerarlos en `frontend/src/app/fonts/README.md`. Test `frontend/tests/fonts.test.ts`: ningún archivo vuelve a cargar fuentes de Google.
 
+### Added — R9‑5‑5: CSP en Report‑Only y receptor de reportes
+- **Todas las páginas envían `Content-Security-Policy-Report-Only`** con la política de la propuesta R9‑5 (`default-src 'self'`; scripts y estilos `'self' 'unsafe-inline'`; imágenes `'self' data:`; fuentes y conexiones `'self'`; `frame-ancestors`, `object-src` `'none'`; `base-uri` y `form-action` `'self'`) y `report-uri /api/v1/csp-report`. El navegador no bloquea nada todavía: informa lo que bloquearía. `'unsafe-eval'` solo en `next dev`. Enforce en R9‑5‑6.
+- **`POST /api/v1/csp-report`:** sin sesión ni header CSRF (única excepción, por ruta exacta), cuerpo máximo 16 KiB (413 si lo supera), 204 ante cualquier cuerpo, sin guardar nada. Loguea solo la directiva, una categoría de lo bloqueado (`inline`, `eval`, `data`, `same-origin`, `external`…, nunca la URL), la disposición y el formato; como mucho 60 líneas por minuto por proceso. Acepta el formato `report-uri` y el de la Reporting API.
+- **Zod sin la sonda `new Function`:** los esquemas importan `z` de `@/lib/zod`, que activa `jitless`. Sin esto, cada página violaba `script-src` (`eval`), lo que habría impedido pasar a enforce.
+- R9‑5‑4 **DONE** (PR #61, 2026-11-01).
+
 ### Changed — S2 DONE
 - S2 integrada en `main` (PR #59 `d814b8d`, PR #60 `c902f64`); ADR 015 aceptado. S3 sigue pendiente en el hardware real.
 
