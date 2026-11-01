@@ -52,6 +52,7 @@ uv run alembic check                          # modelos == migraciones
 uv run python -m app.cli create-admin --email ... --name ...
 uv run python -m app.cli grant-module-role --email ... --module settlements --role operator
 uv run python -m app.cli grant-module-role --email ... --module settlements.employee_finance --role admin   # área protegida (ADR 010)
+uv run python -m app.cli reset-password --email ...   # contraseña temporal, se muestra una vez (ADR 015)
 # Frontend
 cd frontend
 pnpm install

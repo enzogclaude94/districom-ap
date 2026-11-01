@@ -37,7 +37,8 @@ export default defineConfig({
       command: `uv run --directory ../backend uvicorn app.main:app --port ${BACKEND_PORT}`,
       url: `http://localhost:${BACKEND_PORT}/api/v1/health`,
       reuseExistingServer: !process.env.CI,
-      env: { COOKIE_SECURE: "false", CORS_ORIGINS: "" },
+      // The browser talks to the Next.js server, which forwards /api/* with the backend's Host (S2 Origin check).
+      env: { COOKIE_SECURE: "false", CORS_ORIGINS: "", TRUSTED_ORIGINS: `http://localhost:${FRONTEND_PORT}` },
     },
     {
       // API_INTERNAL_URL is baked into the rewrites at build time, so build with it.

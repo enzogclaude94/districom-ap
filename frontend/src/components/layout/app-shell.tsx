@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronsUpDown, LayoutGrid, Lock, LogOut, Menu, X } from "lucide-react";
+import { ChevronsUpDown, LayoutGrid, Lock, LogOut, Menu, UserRound, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
@@ -14,6 +14,7 @@ import { Sidebar } from "@/components/layout/sidebar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { PasswordChangeRequired } from "@/features/auth/password-change-required";
 import { authApi, currentUserQueryKey, moduleRole } from "@/lib/api/auth";
 import { ApiError } from "@/lib/api/client";
 import { cn } from "@/lib/cn";
@@ -136,6 +137,15 @@ export function AppShell({ modules, children }: AppShellProps) {
   }
 
   const user = me.data;
+  if (user.must_change_password) {
+    return (
+      <PasswordChangeRequired
+        fullName={user.full_name}
+        loggingOut={logout.isPending}
+        onLogout={() => logout.mutate()}
+      />
+    );
+  }
   const accessible = modules.filter((module) => user.modules.some((access) => access.key === module.key));
   // Platform pages (e.g. Configuración) keep the navigation of the user's first module.
   const activeModule = accessible.find((module) => isInModule(pathname, module)) ?? accessible[0];
@@ -207,6 +217,14 @@ export function AppShell({ modules, children }: AppShellProps) {
                 {ROLE_LABELS[role]}
               </Badge>
             </div>
+            <Link
+              href="/cuenta"
+              aria-label="Mi cuenta"
+              title="Mi cuenta: contraseña y sesiones"
+              className="inline-flex size-9 items-center justify-center rounded-md hover:bg-muted [&_svg]:size-4"
+            >
+              <UserRound aria-hidden />
+            </Link>
             <Button
               variant="ghost"
               size="icon"

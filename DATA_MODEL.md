@@ -85,9 +85,12 @@ erDiagram
 | role | text NOT NULL CHECK (`admin`,`viewer`) | **Rol de plataforma.** `admin` = administrador de plataforma (usuarios, empleados, configuración general) con `admin` en todos los módulos. El acceso de los demás usuarios a cada módulo está en `user_module_roles` (R0, ARCHITECTURE.md §8). |
 | active | bool NOT NULL DEFAULT true | |
 | last_login_at | timestamptz | |
+| must_change_password | bool NOT NULL DEFAULT false | S2 (ADR 015): contraseña temporal; hasta cambiarla la API solo deja elegir una nueva |
+| temporary_password_expires_at | timestamptz NULL | Vencimiento de la contraseña temporal. CHECK: solo con `must_change_password` |
+| password_changed_at | timestamptz NULL | Último cambio o reseteo |
 
 ### user_sessions
-`id`, `user_id` FK, `token_hash` (bytea UNIQUE), `created_at`, `last_seen_at`, `expires_at`, `revoked_at`, `ip`, `user_agent`. Índice `(user_id)`.
+`id`, `user_id` FK, `token_hash` (bytea UNIQUE), `created_at`, `last_seen_at`, `expires_at`, `revoked_at`, `ip`, `user_agent`, `access_origin` (`lan`, `tailscale`, `local`, `other`; solo auditoría, S2), `revoked_reason` (`logout`, `revoked_by_user`, `revoked_by_admin`, `password_changed`, `password_reset`, `user_deactivated`), `revoked_by` FK users. Índice `(user_id)`.
 
 ### app_settings
 Parámetros de negocio editables. `key text PK`, `value jsonb NOT NULL`, `description`, `updated_by` FK users, `updated_at`. Las claves llevan el **scope** como prefijo: `platform.*` (globales) y `<módulo>.*` (`commercial.*`). Los defaults viven en código junto a su dueño (`app/platform/settings/` y `app/modules/<módulo>/settings.py`) y la tabla solo guarda overrides; así un parámetro siempre tiene valor seguro. Cambios auditados. La zona horaria de negocio **no** es un parámetro: es la variable de entorno `BUSINESS_TIMEZONE`.

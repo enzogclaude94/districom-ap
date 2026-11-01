@@ -1,7 +1,7 @@
 "use client";
 
 import type { LucideIcon } from "lucide-react";
-import { Handshake, IdCard, Settings, Store, Truck } from "lucide-react";
+import { Handshake, IdCard, Settings, Store, Truck, UserCog } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -17,7 +17,10 @@ const PLATFORM_NAV: NavSection[] = [
   { label: "Configuración", icon: Settings, href: "/configuracion" },
 ];
 /** Platform pages only platform admins can use. */
-const PLATFORM_ADMIN_NAV: NavSection[] = [{ label: "Empleados", icon: IdCard, href: "/empleados" }];
+const PLATFORM_ADMIN_NAV: NavSection[] = [
+  { label: "Empleados", icon: IdCard, href: "/empleados" },
+  { label: "Usuarios", icon: UserCog, href: "/usuarios" },
+];
 
 function isActive(pathname: string, item: NavItem) {
   return item.exact ? pathname === item.href : pathname === item.href || pathname.startsWith(`${item.href}/`);

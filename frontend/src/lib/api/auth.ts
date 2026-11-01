@@ -20,16 +20,52 @@ export interface CurrentUser {
   modules: ModuleAccess[];
   /** Protected areas the user was granted (ADR 010), e.g. `settlements.employee_finance`. */
   areas: ModuleAccess[];
+  /**
+   * A temporary password (S2): until it is replaced the API refuses everything but the password change,
+   * and `modules` / `areas` come empty.
+   */
+  must_change_password?: boolean;
 }
+
+/** Where a session was opened from, by its real IP. Information only: it never grants access. */
+export type AccessOrigin = "lan" | "tailscale" | "local" | "other";
+
+export interface OpenSession {
+  id: number;
+  created_at: string;
+  last_seen_at: string;
+  expires_at: string;
+  ip: string | null;
+  access_origin: AccessOrigin | null;
+  user_agent: string | null;
+  /** The session of this browser. */
+  current: boolean;
+}
+
+export const ACCESS_ORIGIN_LABELS: Record<AccessOrigin, string> = {
+  lan: "Red del local",
+  tailscale: "Acceso remoto (Tailscale)",
+  local: "El servidor",
+  other: "Otra red",
+};
 
 export const authApi = {
   login: (email: string, password: string) =>
     apiFetch<CurrentUser>("/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }),
   logout: () => apiFetch<void>("/auth/logout", { method: "POST" }),
   me: () => apiFetch<CurrentUser>("/auth/me"),
+  changePassword: (currentPassword: string, newPassword: string) =>
+    apiFetch<CurrentUser>("/auth/password", {
+      method: "POST",
+      body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+    }),
+  sessions: () => apiFetch<OpenSession[]>("/auth/sessions"),
+  revokeSession: (id: number) => apiFetch<void>(`/auth/sessions/${id}/revoke`, { method: "POST" }),
+  revokeOtherSessions: () => apiFetch<{ revoked: number }>("/auth/sessions/revoke-others", { method: "POST" }),
 };
 
 export const currentUserQueryKey = ["auth", "me"] as const;
+export const ownSessionsQueryKey = ["auth", "sessions"] as const;
 
 const MODULE_ROLE_RANK: Record<ModuleRole, number> = { viewer: 0, operator: 1, admin: 2 };
 
