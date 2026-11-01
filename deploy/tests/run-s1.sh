@@ -526,7 +526,7 @@ expect "Docker's backend healthcheck is still /api/v1/health ($backend_hc)" hc_i
 # ---------------------------------------------------------------- T19 PostgreSQL logs without personal data
 section "T19 PostgreSQL logs: an error keeps its message, not the row or the statement (fictitious personal data)"
 expect "safe log settings in force ($(q "SELECT string_agg(name || '=' || setting, ' ' ORDER BY name) FROM pg_settings WHERE name IN ('log_error_verbosity','log_min_error_statement','log_statement','log_min_duration_statement','log_min_duration_sample','log_transaction_sample_rate','log_duration','log_parameter_max_length','log_parameter_max_length_on_error')"))" \
-    test "$(q "SELECT string_agg(setting, ' ' ORDER BY name) FROM pg_settings WHERE name IN ('log_error_verbosity','log_min_error_statement','log_statement','log_min_duration_statement','log_min_duration_sample','log_transaction_sample_rate','log_duration','log_parameter_max_length','log_parameter_max_length_on_error')")" = "off terse panic -1 -1 0 0 none 0"
+    test "$(q "SELECT string_agg(setting, ' ' ORDER BY name) FROM pg_settings WHERE name IN ('log_error_verbosity','log_min_error_statement','log_statement','log_min_duration_statement','log_min_duration_sample','log_transaction_sample_rate','log_duration','log_parameter_max_length','log_parameter_max_length_on_error')")" = "off terse -1 -1 panic 0 0 none 0"
 expect "no module that logs plans or statements is loaded ($(q 'SHOW shared_preload_libraries'))" sh -c "! echo '$(q 'SHOW shared_preload_libraries')' | grep -qiE 'auto_explain|pgaudit'"
 pii_insert="INSERT INTO third_parties (name, name_key, tax_id, notes, created_by, updated_by)
     VALUES ('Prueba PII Nombre', '', '30712345671', 'tel 11-5555-1234 pii@example.com', (SELECT min(id) FROM users), (SELECT min(id) FROM users))"
@@ -540,12 +540,12 @@ run_pii() { # run_pii [SET ...;] -> the db log written meanwhile
     sleep 1
     db_log_since "$since"
 }
-out="$(run_pii)"
-logged_constraint() { echo "$out" | grep -q 'ERROR: .*violates check constraint "ck_third_parties'; }
+pg_log="$(run_pii)"
+logged_constraint() { echo "$pg_log" | grep -q 'ERROR: .*violates check constraint "ck_third_parties'; }
 expect "the error is logged with its constraint" logged_constraint
-expect "the db log holds none of the personal data (found: $(echo "$out" | leaks))" test -z "$(echo "$out" | leaks)"
-out="$(run_pii "SET log_error_verbosity = default; SET log_min_error_statement = error;")"
-expect "control: with the old defaults the same error leaks (found: $(echo "$out" | leaks)): the check sees a leak" test -n "$(echo "$out" | leaks)"
+expect "the db log holds none of the personal data (found: $(echo "$pg_log" | leaks))" test -z "$(echo "$pg_log" | leaks)"
+pg_log="$(run_pii "SET log_error_verbosity = default; SET log_min_error_statement = error;")"
+expect "control: with the old defaults the same error leaks (found: $(echo "$pg_log" | leaks)): the check sees a leak" test -n "$(echo "$pg_log" | leaks)"
 
 section "T19b Incident procedure: deploy/bin/db-log-detail raises the detail for a limited time"
 expect "status: off" test "$("$ROOT/deploy/bin/db-log-detail" status)" = off
@@ -556,15 +556,15 @@ expect "on 5 min with a reason" sh -c "'$ROOT/deploy/bin/db-log-detail' on 5 'S1
 expect "the change is in deploy/state/db-log-detail.log" sh -c "tail -n1 '$STATE_DIR/db-log-detail.log' | grep -q 'on for 5 min: S1 test incident'"
 expect "the app's idle connections were reopened" test "$(q "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND backend_type = 'client backend' AND state = 'idle' AND backend_start < to_timestamp($since_on)")" = 0
 expect "the app keeps answering (ready)" wait_ready
-out="$(run_pii)"
-expect "while on, a new session logs DETAIL and the statement (found: $(echo "$out" | leaks))" sh -c "echo '$(echo "$out" | leaks)' | grep -q 'Failing row'"
+pg_log="$(run_pii)"
+expect "while on, a new session logs DETAIL and the statement (found: $(echo "$pg_log" | leaks))" sh -c "echo '$(echo "$pg_log" | leaks)' | grep -q 'Failing row'"
 line="$("$ROOT/deploy/bin/monitor" 2> /dev/null | grep 'PostgreSQL')"
 expect "monitor warns that detailed logs are on ($line)" sh -c "echo '$line' | grep -q '^WARN  PostgreSQL detailed logs ON'"
 sed -i "s/^[0-9]* /$(($(date +%s) - 1)) /" "$STATE_DIR/db-log-detail"
 line="$("$ROOT/deploy/bin/monitor" 2> /dev/null | grep 'PostgreSQL')"
 expect "time ran out: the monitor restores the safe level ($line)" sh -c "echo '$line' | grep -q 'time ran out, safe level restored' && [ \"\$('$ROOT/deploy/bin/db-log-detail' status)\" = off ]"
-out="$(run_pii)"
-expect "after the restore no personal data reaches the log (found: $(echo "$out" | leaks))" test -z "$(echo "$out" | leaks)"
+pg_log="$(run_pii)"
+expect "after the restore no personal data reaches the log (found: $(echo "$pg_log" | leaks))" test -z "$(echo "$pg_log" | leaks)"
 q "ALTER ROLE districom IN DATABASE districom_perf_s1 SET log_error_verbosity = 'verbose'" > /dev/null
 line="$("$ROOT/deploy/bin/monitor" 2> /dev/null | grep 'PostgreSQL')"
 expect "a level raised by hand (not through db-log-detail) is a monitor FAIL ($line)" sh -c "echo '$line' | grep -q '^FAIL  PostgreSQL logs above the safe level'"
