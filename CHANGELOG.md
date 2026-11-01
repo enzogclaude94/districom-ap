@@ -4,6 +4,22 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Changed — Servidor: readiness en smoke y monitor, logs de PostgreSQL sin datos personales
+- **Smoke y monitor usan `/api/v1/health/ready`** (R9‑5‑4, handoff O6):
+  - el smoke falla si la base no está en la migración del código;
+  - el monitor separa «APP DOWN», «DATABASE DOWN» y «MIGRATION MISMATCH» (atrasada o desconocida);
+  - cada chequeo HTTPS tiene un timeout explícito (`HEALTH_TIMEOUT_SECONDS`, 10 s);
+  - el healthcheck de Docker del backend sigue en `/api/v1/health`, y `connect_timeout` del backend no cambia.
+- **Ventana de mantenimiento:** `update` y `rollback` la abren al detener la app y la cierran al terminar. El monitor informa «MAINTENANCE» en lugar de alertar, y vuelve a fallar si pasa `MAINTENANCE_MAX_MINUTES` (60).
+- **PostgreSQL sin datos personales en su log** (handoff O7 de R9‑5‑3):
+  - `log_error_verbosity=terse` y `log_min_error_statement=panic`;
+  - además, explícitos: sin sentencias, duraciones ni parámetros.
+- **`deploy/bin/db-log-detail`:** más detalle durante un incidente, con plazo máximo (`DB_LOG_DETAIL_MAX_MINUTES`, 120), motivo obligatorio y registro. Al vencer, el monitor restablece solo el nivel seguro, y da FAIL si el nivel se sube a mano.
+- **`deploy/tests/run-s1.sh`:**
+  - T18 (readiness, timeouts, mantenimiento) y T19 (logs sin datos personales, con un control que muestra la fuga con la configuración anterior, y el procedimiento de incidentes);
+  - el generador de datos de prueba corre como `development`: desde R9‑5‑4 la validación de producción no lo dejaba arrancar con el `.env` del stack de prueba.
+- Docs: OPERATIONS §3.1, §3.2, §6 y §8; SECURITY.
+
 ### Added — R9‑5‑4: health live/ready y validación de producción
 - **`GET /api/v1/health/live`:** el proceso responde; no consulta la base ni nada externo, así sigue en 200 con PostgreSQL caído.
 - **`GET /api/v1/health/ready`:** PostgreSQL responde y su migración (`alembic_version`) es exactamente el head del código que corre, leído de los scripts de Alembic (nunca un número escrito a mano). Base caída, migración atrasada (`behind`) o desconocida/adelantada (`unknown`) es 503 con `status: not_ready`.

@@ -60,7 +60,8 @@ Requisitos de hardware y de red en `docs/SERVER_REQUIREMENTS.md`.
 | Estado | `deploy/bin/dc ps` · `deploy/bin/monitor` (también corre cada 5 min y alerta) |
 | Alguien olvidó su contraseña | Un administrador: «Usuarios» › la persona › «Resetear contraseña» (se muestra una vez). |
 | Alguien olvidó su contraseña y nadie puede administrar usuarios desde la app | `deploy/bin/dc exec backend python -m app.cli reset-password --email ...`: muestra **una vez** una contraseña temporal (vence en 72 h), cierra todas las sesiones de esa persona y le exige elegir una nueva al ingresar (ADR 015). Entregarla en persona o por un canal distinto del email |
-| Logs | `deploy/bin/dc logs -f --tail=100 backend` (Caddy, backend, frontend, db) |
+| Logs | `deploy/bin/dc logs -f --tail=100 backend` (Caddy, backend, frontend, db). Los de PostgreSQL no traen datos personales: ver §3.2 |
+| ¿La app está lista? | `deploy/bin/smoke`, o el monitor: distingue app caída, base caída y migración distinta del código (§3.1) |
 | Reiniciar la app | `deploy/bin/dc restart backend frontend` |
 | Apagar el servidor | `deploy/bin/dc stop` y después `shutdown`; al volver la luz Docker levanta todo solo |
 | Backups manuales | `deploy/bin/backup full|diff [nota]` |
@@ -77,6 +78,60 @@ Requisitos de hardware y de red en `docs/SERVER_REQUIREMENTS.md`.
 | Monitor | Cada 5 min |
 
 **Alertas:** `ALERT_COMMAND` en `.env` recibe el reporte por stdin (por ejemplo, un `curl` a un webhook de chat o `mail`). **[S3]** Definir el canal.
+
+### 3.1 Salud de la app: `/health`, `/health/ready` y ventanas de mantenimiento
+
+La app tiene tres endpoints de salud (R9‑5‑4). Cada uno tiene un uso:
+
+| Endpoint | Qué verifica | Quién lo usa |
+|---|---|---|
+| `/api/v1/health` | El proceso y que PostgreSQL responde | **Healthcheck de Docker del backend** (sin cambios). Con una migración distinta del código sigue en 200: el contenedor queda levantado para diagnosticar |
+| `/api/v1/health/ready` | Además, que la migración de la base es exactamente la del código que corre | **Smoke test y monitor** |
+| `/api/v1/health/live` | Solo el proceso | Nadie por ahora. **No** sirve como healthcheck de Docker: daría «sano» con la base caída |
+
+- **Smoke** (`deploy/bin/smoke`, lo corren `update` y `rollback` al final): falla si `/health/ready` no da 200. Así un `update` cuyas migraciones no corrieron, o un `rollback` sin `--restore-db` después de migrar, **no terminan en «ok»**. Una versión anterior a R9‑5‑4, sin ese endpoint, se salta ese chequeo y queda el de migraciones con Alembic.
+- **Monitor** (cada 5 min). Cada caso es una alerta distinta, con un arreglo distinto:
+  - **«APP DOWN»:** no responde HTTPS. Mirar backend, frontend y Caddy.
+  - **«DATABASE DOWN»:** la app responde, pero no llega a PostgreSQL.
+  - **«MIGRATION MISMATCH»:** la app y la base responden, pero la migración no es la del código:
+    - «older migration»: faltó `deploy/bin/migrate`, o hay que volver atrás;
+    - «does not know»: una reversión sin `--restore-db`, o código más viejo que la base.
+- **Timeouts:** cada chequeo HTTPS espera como mucho `HEALTH_TIMEOUT_SECONDS` (10 s). Una base que no contesta a nivel de red, sin «connection refused», no deja al smoke ni al monitor colgados. El backend no define `connect_timeout` (sin cambios): esa espera la corta el timeout del chequeo.
+- **Ventana de mantenimiento:** `update` y `rollback` abren una ventana al detener la app (`deploy/state/maintenance`) y la cierran cuando terminan bien.
+  - Durante la ventana, el monitor informa **«WARN MAINTENANCE for N min (motivo)»** en lugar de alertar por la app. Los demás chequeos (discos, WAL, backups) siguen alertando como siempre.
+  - Si la ventana pasa `MAINTENANCE_MAX_MINUTES` (60), el monitor vuelve a dar FAIL: «maintenance window open». Un `update` o `rollback` que murió a mitad de camino no queda en silencio.
+  - Para un mantenimiento manual con la app detenida a propósito: `echo "$(date +%s) motivo" > deploy/state/maintenance` antes de empezar, y `rm deploy/state/maintenance` al terminar.
+
+### 3.2 Logs de PostgreSQL sin datos personales
+
+Por defecto, PostgreSQL escribe en su log, ante cada error, el `DETAIL` y la sentencia que falló:
+- el `DETAIL` trae la fila completa o la clave: nombre, CUIT, teléfono, email, notas, importes;
+- la sentencia trae valores literales cuando viene de `psql` o de un script.
+
+Desde la revisión de seguridad posterior a S2 (handoff O7 de R9‑5‑3), `deploy/docker-compose.prod.yml` arranca PostgreSQL con:
+
+| Parámetro | Valor | Efecto |
+|---|---|---|
+| `log_error_verbosity` | `terse` | Del error queda el mensaje (tabla, constraint, SQLSTATE), sin `DETAIL`, `HINT`, `QUERY` ni `CONTEXT` |
+| `log_min_error_statement` | `panic` | No se escribe la sentencia que falló |
+| `log_statement`, `log_min_duration_statement`, `log_min_duration_sample`, `log_transaction_sample_rate`, `log_duration` | `none`, `-1`, `-1`, `0`, `off` | No se loguean sentencias ni duraciones con su texto (son los valores por defecto, explícitos para que un cambio se vea en la revisión) |
+| `log_parameter_max_length`, `log_parameter_max_length_on_error` | `0`, `0` | Nunca los parámetros de una sentencia |
+
+**El diagnóstico queda.** El mensaje del error sigue en el log de la base. El log de la app agrega `request_id`, `sqlstate`, `constraint`, `schema`, `table`, `column` y la clase del error (R9‑5‑3). Los logs de pgBackRest, WAL, checkpoints y arranques no cambian.
+
+**Lo que queda posible.** Algunos mensajes principales de PostgreSQL incluyen el valor rechazado, por ejemplo `invalid input syntax for type numeric: "..."`. La app valida antes de llegar a la base, así que en la práctica solo pasa con sentencias escritas a mano en `psql`. No hay módulos que logueen planes o sentencias (`auto_explain`, `pgaudit`); el test T19 lo verifica.
+
+**Más detalle durante un incidente:** `deploy/bin/db-log-detail`.
+1. Solo quien puede usar Docker en el servidor (root o el grupo `docker`).
+2. `deploy/bin/db-log-detail on <minutos> <motivo>`. El máximo es `DB_LOG_DETAIL_MAX_MINUTES` (120), y el motivo es obligatorio (la referencia del incidente).
+   - Aplica `DETAIL` y la sentencia que falló solo a las conexiones de la app a su base (`ALTER ROLE … IN DATABASE`).
+   - Cierra las conexiones inactivas para que el pool las reabra con el nivel nuevo. Los usuarios no lo notan.
+   - Queda registrado en `deploy/state/db-log-detail.log` (cuándo, quién, cuánto y por qué).
+3. Mientras está activo, el monitor avisa **«WARN PostgreSQL detailed logs ON»**. **Al vencer el plazo, el monitor restablece solo el nivel seguro** en su pasada siguiente: como mucho 5 minutos después del vencimiento.
+4. Al terminar antes: `deploy/bin/db-log-detail off`. Estado: `deploy/bin/db-log-detail status`.
+5. Si alguien sube el nivel a mano, sin este comando, el monitor da **FAIL «PostgreSQL logs above the safe level»**.
+6. Para depurar una sola sentencia no hace falta nada de esto. En la propia sesión de `psql`: `SET log_error_verbosity = default;`, que solo afecta a esa sesión.
+7. **Lo que se escribió mientras estaba activo sigue en el log de la base** hasta que Docker lo rote (5 archivos de 10 MB). Para borrarlo antes hay que recrear el contenedor de la base fuera de horario (`deploy/bin/dc up -d --force-recreate db`), lo que corta el servicio unos segundos.
 
 ## 4. Backups y objetivos de recuperación
 
@@ -140,7 +195,9 @@ El resultado queda en `deploy/state/drills/` (`summary.txt`: duración, `amcheck
    4. **backup completo etiquetado**;
    5. migraciones;
    6. arranque;
-   7. smoke test.
+   7. smoke test, con `/health/ready`: falla si la base no quedó en la migración del código.
+
+   Mientras tanto, el monitor informa mantenimiento en lugar de alertar (§3.1).
 4. Si algo falla:
    - `deploy/bin/rollback`: código e imágenes anteriores. Sirve cuando no hubo migración o era compatible.
    - `deploy/bin/rollback --restore-db`: además, la base vuelve al backup previo a la actualización. **Quita de la base todo lo cargado después de la actualización**, así que tiene tres protecciones:
@@ -185,5 +242,12 @@ El resultado queda en `deploy/state/drills/` (`summary.txt`: duración, `amcheck
 - **T15:** corte largo que llena la cola de WAL: descarte detectado, simulacro INCOMPLETE, remedio con un backup completo.
 - **T16:** sin el disco de backup, PostgreSQL no arranca, tampoco cuando Docker se reinicia; con el disco de vuelta, arranca.
 - **T17:** disco perdido con la base funcionando: la base sigue, el monitor da la alerta crítica con el estado de los repositorios y del RPO.
+- **T18:** readiness en smoke y monitor:
+  - con la migración en el head: listo;
+  - atrasada, desconocida o la base detenida: el smoke falla y el monitor da la alerta que corresponde (`/health` sigue en 200 con la migración atrasada);
+  - backend colgado: smoke y monitor terminan en su timeout;
+  - backend detenido: «APP DOWN», salvo dentro de una ventana de mantenimiento, que pasado su límite vuelve a fallar;
+  - el healthcheck de Docker sigue en `/health`.
+- **T19:** logs de PostgreSQL. Un error con datos personales ficticios deja en el log de la base el mensaje con su constraint, sin la fila ni la sentencia. El control (la configuración anterior en esa sesión) muestra la fuga, así que la prueba la detecta. `db-log-detail`: activación con plazo y motivo, registro, vencimiento con restauración automática por el monitor, y FAIL si el nivel se sube a mano.
 
 Se niega a correr donde haya un `.env` real. `deploy/tests/run-s1.sh clean` lo desarma.
