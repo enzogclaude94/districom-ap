@@ -4,6 +4,11 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Changed — Fuentes locales: el build no depende de Google Fonts
+- **Inter y Manrope se sirven desde el repositorio** con `next/font/local` (`frontend/src/app/fonts/`), en lugar de `next/font/google`. El build de Next descargaba las fuentes de Google en cada compilación, y el 31/10 el CI falló tres veces porque el runner no las consiguió; un build sin Internet (el servidor propio) fallaba igual.
+- **Misma identidad visual:** son los archivos que servía Google Fonts, generados desde las fuentes oficiales de google/fonts (Inter 4.001 con el tamaño óptico fijo en 14 y el peso variable; Manrope 4.505 SemiBold). Comparados glifo por glifo con lo que servía Google: contornos y anchos idénticos en 400, 500 y 600. Capturas antes/después del login y de una muestra de todos los pesos y tamaños: 0 píxeles distintos. Mismas variables (`--font-inter`, `--font-manrope`), tokens y pesos.
+- Licencias SIL OFL 1.1 junto a los archivos; origen, hashes y cómo regenerarlos en `frontend/src/app/fonts/README.md`. Test `frontend/tests/fonts.test.ts`: ningún archivo vuelve a cargar fuentes de Google.
+
 ### Changed — R9‑5 DONE (aplicación)
 - R9‑5‑6 **DONE** (PR #66, 2026-11-02) y, con ella, **R9‑5 y R9 DONE desde la aplicación**: lista para el piloto (S3).
 - El go‑live de producción sigue **BLOCKED** hasta: S3 en el equipo real (dominio, Tailscale, bucket externo, alertas, LAN y acceso remoto, simulacro de pérdida total y benchmark con la imagen completa `deploy/postgres` y pgBackRest activo), el PR #65 de S1, el checklist O10 verificado en el equipo real (handoff enviado a S1) y la asignación de las áreas protegidas Empleados y Store Sys, que define Enzo.
