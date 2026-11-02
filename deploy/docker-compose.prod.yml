@@ -36,6 +36,29 @@ services:
       - archive_timeout=${ARCHIVE_TIMEOUT_SECONDS:-60}
       - -c
       - max_wal_size=2GB
+      # Logs without personal data (handoff O7 of R9-5-3, docs/OPERATIONS.md): an error keeps its message
+      # (constraint, table, SQLSTATE) but not the DETAIL with the whole row or the key, nor the statement that
+      # failed (literal values when it came from psql or a script). The app logs the same error with its request_id.
+      # deploy/bin/db-log-detail raises the detail for a limited time during an incident.
+      - -c
+      - log_error_verbosity=terse
+      - -c
+      - log_min_error_statement=panic
+      # Defaults written down so a later change shows in review: no statements, durations or parameters logged.
+      - -c
+      - log_statement=none
+      - -c
+      - log_min_duration_statement=-1
+      - -c
+      - log_min_duration_sample=-1
+      - -c
+      - log_transaction_sample_rate=0
+      - -c
+      - log_duration=off
+      - -c
+      - log_parameter_max_length=0
+      - -c
+      - log_parameter_max_length_on_error=0
     ports: !reset []
     volumes: !override
       - db-data:/var/lib/postgresql/data
