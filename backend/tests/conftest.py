@@ -4,6 +4,7 @@ Set TEST_DATABASE_URL to point at a disposable database; it is migrated from scr
 """
 
 import os
+import tempfile
 
 os.environ["DATABASE_URL"] = os.environ.get(
     "TEST_DATABASE_URL", "postgresql+psycopg://districom:districom@localhost:5432/districom_test"
@@ -14,6 +15,8 @@ os.environ["APP_ENV"] = "test"
 os.environ["ARGON2_PROFILE"] = "test"
 os.environ["COOKIE_SECURE"] = "false"
 os.environ["CORS_ORIGINS"] = ""
+# Uploaded originals of the import tests (F1.1b): a fresh directory per run, never the repository.
+os.environ["UPLOAD_DIR"] = tempfile.mkdtemp(prefix="districom-test-uploads-")
 
 from collections.abc import Iterator
 from pathlib import Path
@@ -26,6 +29,8 @@ from sqlalchemy import Connection, create_engine, text
 from sqlalchemy.orm import Session
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
+# `synthetic_types`: the import types the F1.1b tests register (tests/imports/).
+pytest_plugins = ["tests.imports.fixtures"]
 
 # Tables emptied after each test that uses the database, in one TRUNCATE without CASCADE: the list is exact, so a
 # table that references one of these and is missing here makes the TRUNCATE fail instead of being emptied silently.
@@ -45,6 +50,10 @@ TRUNCATED_TABLES = (
     "settlements.employee_loans",
     "settlements.employee_movements",
     "settlements.employee_compensation_terms",
+    "data_quality_issues",
+    "import_rows",
+    "import_jobs",
+    "import_files",
     "vehicles",
     "third_parties",
     "users",
