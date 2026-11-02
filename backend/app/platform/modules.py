@@ -7,8 +7,12 @@ from dataclasses import dataclass
 
 from fastapi import APIRouter
 
+from app.platform.imports.registry import ImportTypeSpec
+from app.platform.imports.registry import registry as import_type_registry
 from app.platform.parties.functions import EmployeeFunctionSpec
 from app.platform.parties.functions import registry as function_registry
+from app.platform.quality.registry import QualityCodeSpec
+from app.platform.quality.registry import registry as quality_code_registry
 from app.platform.settings.registry import SettingsScope
 from app.platform.settings.registry import registry as settings_registry
 
@@ -37,6 +41,10 @@ class ModuleSpec:
     employee_functions: tuple[EmployeeFunctionSpec, ...] = ()
     # Areas of the module with their own authorization; keys are `<key>.<area>` (ADR 010).
     protected_areas: tuple[ProtectedAreaSpec, ...] = ()
+    # Import types the module reads (ADR 014): keys `<key>.<source>.<report>`, run by the platform's pipeline.
+    import_types: tuple[ImportTypeSpec, ...] = ()
+    # Data quality codes the module raises; codes are `<key>.<entity>.<problem>`.
+    quality_codes: tuple[QualityCodeSpec, ...] = ()
 
 
 _installed: dict[str, ModuleSpec] = {}
@@ -49,11 +57,18 @@ def install(module: ModuleSpec) -> None:
     for area in module.protected_areas:
         if not area.key.startswith(f"{module.key}."):
             raise ValueError(f"Protected area {area.key} must use the {module.key}. prefix")
+    for code in module.quality_codes:
+        if not code.code.startswith(f"{module.key}."):
+            raise ValueError(f"Quality code {code.code} must use the {module.key}. prefix")
     _installed[module.key] = module
     if module.settings is not None:
         settings_registry.register(module.settings)
     for function in module.employee_functions:
         function_registry.register(function)
+    for import_type in module.import_types:
+        import_type_registry.register(module.key, import_type)
+    for code in module.quality_codes:
+        quality_code_registry.register(code)
 
 
 def installed_modules() -> list[ModuleSpec]:
