@@ -13,7 +13,7 @@ DistriCom es una plataforma modular (ADR 006). Este roadmap tiene tres carriles:
 |---|---|---|---|
 | PL‑1 | Preparación modular (P0‑1 … P0‑7 de la revisión del 2026-10-03) | **DONE** (PR #3, mergeado el 2026-10-04) | Fase 0 |
 | PL‑2a | Empleados: `employees` + `employee_functions` con alta manual y registro de funciones por módulo | **DONE** (R0, ADR 007) | PL‑1 |
-| PL‑2b | Framework de importación (jobs, archivos, lectores CSV/XLSX/XLS, staging), `external_entity_mappings`, `data_quality_issues` e identidad `customers` | PLANNED (se construye en F1.1b y F1.2, ADR 014) | PL‑2a |
+| PL‑2b | Framework de importación (jobs, archivos, lectores CSV/XLSX/XLS, staging), `external_entity_mappings`, `data_quality_issues` e identidad `customers` | IN_PROGRESS (framework y `data_quality_issues` en F1.1b, en revisión; mappings y `customers` en F1.2, ADR 014) | PL‑2a |
 | PL‑3 | Roles por módulo (`user_module_roles`, `viewer < operator < admin`) y selector de módulos | **DONE** (R0) | PL‑1 |
 | PL‑4 | Pantalla de gestión de usuarios | PLANNED (mientras tanto, CLI) | PL‑3 |
 
@@ -22,7 +22,7 @@ DistriCom es una plataforma modular (ADR 006). Este roadmap tiene tres carriles:
 | Fase | Nombre | Estado | Depende de |
 |---|---|---|---|
 | 0 | Fundación y arquitectura | **DONE** (aprobada y mergeada el 2026-10-02, PR #1) | — |
-| 1 | Importación y maestros | **IN_PROGRESS** (F1.0 diseño aprobado el 2026-10-30; F1.1a documentación en revisión) | 0 · PL‑1 · PL‑2a |
+| 1 | Importación y maestros | **IN_PROGRESS** (F1.0 y F1.1a DONE; F1.1b infraestructura en revisión) | 0 · PL‑1 · PL‑2a |
 | 2 | Dashboard general | PLANNED | 1 |
 | 3 | Rutas y preventistas | PLANNED | 2 |
 | 4 | Cliente 360° y estados | PLANNED | 1 (puede ir en paralelo con 3) |
@@ -78,8 +78,8 @@ Cada etapa termina con un informe y la aprobación de Enzo. Despliegue, red, bac
 | Sub | Contenido | Estado | Depende de |
 |---|---|---|---|
 | F1.0 | Diseño técnico | **DONE** (aprobado 2026-10-30, decisiones D‑A…D‑K + ajustes 1–3) | — |
-| F1.1a | Documentación: ADR 014, `docs/IMPORTS.md`, DATA_MODEL, ARCHITECTURE, ROADMAP, PLAN, DATA_INTAKE, SECURITY | IN_PROGRESS (PR en revisión) | F1.0 |
-| F1.1b | Infraestructura de plataforma: archivos, jobs, lectores CSV/XLSX/XLS, staging, pipeline con lock y transacción, issues base, API y CLI | PLANNED | F1.1a |
+| F1.1a | Documentación: ADR 014, `docs/IMPORTS.md`, DATA_MODEL, ARCHITECTURE, ROADMAP, PLAN, DATA_INTAKE, SECURITY | **DONE** (PR #56, aprobado 2026-11-02) | F1.0 |
+| F1.1b | Infraestructura de plataforma: archivos, jobs, lectores CSV/XLSX/XLS, staging, pipeline con lock y transacción, issues base, API y CLI | IN_PROGRESS (PR en revisión; migración 0033) | F1.1a |
 | F1.2 | Maestros y configuración + núcleo de mappings: `customers`, `external_entity_mappings`, schema `commercial`, zonas, listas, categorías, tipos de comprobante, motivos, productos, familias, precios, seed controlado | PLANNED | F1.1b · confirmaciones S1–S3 de ADR 014 para sembrar |
 | F1.3 | Importadores STORE SYS (clientes, artículos, comprobantes, ventas) + pantalla Importaciones | PLANNED | F1.2 · muestra del maestro de artículos · muestra de ventas de varios días |
 | F1.4 | Importador AXUM No Compra (motivo crudo + categoría, ocurrencias) | PLANNED | F1.3 · muestra del CSV |

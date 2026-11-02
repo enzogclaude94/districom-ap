@@ -1,7 +1,7 @@
 # IMPORTS — Importación de AXUM y STORE SYS
 
 > v0.1 · 2026-10-30 · Fase 1 de Inteligencia Comercial. Decisiones: ADR 014. Tablas: `DATA_MODEL.md` §4–§7.
-> Estado: **diseño aprobado (F1.0); implementación desde F1.1b.** Lo marcado *pendiente de muestra* se cierra con el archivo real antes de escribir su adaptador.
+> Estado: **diseño aprobado (F1.0); infraestructura de plataforma implementada en F1.1b** (lectores, pipeline, staging, lock, issues base, API y CLI; `app/platform/imports/`, `app/platform/quality/`). Los adaptadores de STORE SYS y AXUM llegan desde F1.2. Lo marcado *pendiente de muestra* se cierra con el archivo real antes de escribir su adaptador.
 
 Este documento dice qué fuente alimenta qué entidad, cómo se lee cada archivo, qué se excluye, cómo se evita duplicar y qué pasa con cada error. Si una regla de importación cambia, se actualiza acá en el mismo commit (`CLAUDE.md §9`).
 
@@ -20,7 +20,7 @@ SUBIR → DETECTAR → ANALIZAR ─────────────► PREVI
           │           │ import_rows (raw,        │                          una transacción,
           │           │ normalized, mensajes)    │                          lock por tipo
           │           └ nada canónico            └ cancelar → cancelled
-          └ mismo sha256 + tipo ya importado → duplicate (antes de analizar)
+          └ mismo sha256 + tipo ya importado → duplicate (antes de analizar, y otra vez bajo el lock al confirmar)
 ```
 
 **Pasos:**
@@ -52,7 +52,7 @@ SUBIR → DETECTAR → ANALIZAR ─────────────► PREVI
 | Estado | Significado |
 |---|---|
 | `pending` | Analizado, espera confirmación |
-| `processing` | Escribiendo |
+| `processing` | Detectando y analizando (recién subido) o escribiendo (confirmado) |
 | `completed` | Escrito, sin warnings |
 | `completed_with_warnings` | Escrito, con filas rechazadas, pendientes o warnings |
 | `failed` | No escribió nada |
@@ -62,7 +62,14 @@ SUBIR → DETECTAR → ANALIZAR ─────────────► PREVI
 **Formas de ejecución:**
 - **Síncrona:** es la forma por defecto en V1.
 - **Tarea en el mismo proceso:** se usa si un análisis supera ~20 s medidos. El estado vive en la base, sin Celery ni Redis.
-- **CLI:** `python -m app.cli imports analyze|confirm|reprocess|recover`, para operación y recuperación.
+- **CLI:** `python -m app.cli imports analyze|confirm|reprocess|recover`, para operación y recuperación:
+  - `imports analyze --file <ruta> --email <operator> [--type <tipo>]`: sube y analiza como ese usuario;
+  - `imports confirm --job <id> --email <operator>` / `imports reprocess --job <id> --email <admin>`;
+  - `imports recover [--older-than-minutes 30]`.
+  
+  Imprime un resumen JSON con el estado y los contadores, nunca valores de filas. Sale con 0 si terminó, 2 si el job quedó `failed` y 1 si no se pudo ni intentar (usuario, permisos, extensión, tamaño).
+
+**Registro de tipos (F1.1b).** Cada módulo declara sus tipos en `ModuleSpec.import_types` (`ImportTypeSpec`: clave con el prefijo del módulo, nombre, sistema fuente y adaptador) y sus códigos de issue en `ModuleSpec.quality_codes`. El adaptador implementa `score(workbook)` (0–1, umbral 0,8), `analyze(db, workbook, ctx)` y `write(db, ctx, filas)`; la plataforma hace todo lo demás. El análisis corre en una transacción `READ ONLY`: un adaptador que intenta escribir falla con `unexpected_error`.
 
 ## 3. Fuentes → entidades
 
@@ -226,10 +233,17 @@ Reglas aprobadas:
 |---|---|---|---|
 | XLS (BIFF2–8) | `D0 CF 11 E0 A1 B1 1A E1` (OLE2) | `xlrd` 2.x | Las muestras de STORE SYS son **BIFF7** (Excel 5/95), que `openpyxl` no lee. Fechas con el `datemode` del libro; codepage del libro (cp1252: `Ñ` correcta). Códigos numéricos llegan como float y se convierten a entero‑texto. Los ceros a la izquierda no existen en la fuente |
 | XLSX | ZIP `PK\x03\x04` con `[Content_Types].xml` | `openpyxl` `read_only=True, data_only=True` | Sin evaluar fórmulas ni ejecutar macros; `.xlsm` rechazado; `defusedxml`; límite de descompresión |
-| CSV | texto | `csv` stdlib | Encoding UTF‑8 (con o sin BOM) → CP1252, o rechazo. Separador detectado entre `;`, `,` y tab. Decimales según la columna (`1.234,56` o `1234.56`) |
+| CSV | texto | `csv` stdlib | Encoding UTF‑8 (con o sin BOM) → CP1252, o rechazo (`unknown_encoding`). Separador detectado entre `;`, `,` y tab. Todas las celdas llegan como texto: el adaptador interpreta los decimales según la columna (`1.234,56` o `1234.56`) |
 | HTML / SpreadsheetML con extensión `.xls` | `<html`, `<?xml` | — | Rechazo con `failure_reason = unsupported_format` hasta que una muestra real lo justifique |
 
 El lector entrega `RawSheet` (filas de celdas `str | Decimal | date | datetime | None` con número de fila real). El adaptador no importa `xlrd`, `openpyxl` ni `csv`, y un contrato de import‑linter lo verifica.
+
+**Detalle de F1.1b:**
+- La firma decide el formato; la extensión solo filtra lo que se puede subir. Si no coinciden (un CSV llamado `.xls`), se lee por la firma y se registra `extension_mismatch` en el job.
+- Un ZIP sin `[Content_Types].xml` y `xl/workbook.xml` no es XLSX (`unsupported_format`); un archivo con bytes NUL que no es OLE2 ni ZIP tampoco.
+- Números: un valor entero llega como `Decimal` entero (`1001`, nunca `1001.0`); el adaptador lo pasa a texto si es un código. Una fecha‑hora a medianoche llega como `date`.
+- Topes: 200.000 filas por hoja (`too_many_rows`) y 500 columnas (`too_many_columns`); XLSX con más de 300 MB descomprimidos o una parte de más de 10 MB con razón de compresión > 200 (`file_too_complex`).
+- Las filas en blanco se conservan (con `skipped`) para que los números de fila sean los del archivo. En CSV, una celda entre comillas con saltos de línea conserva el número de la línea donde empieza el registro.
 
 ## 5. Idempotencia
 
@@ -278,9 +292,11 @@ El archivo no trae número de comprobante, y dos líneas idénticas pueden ser v
 La estrategia definitiva se valida con una muestra de varios días antes de F1.3 (ADR 014 S7).
 
 ### 5.4 Concurrencia
-- Lock consultivo de PostgreSQL por `import_type` al confirmar.
+- Lock consultivo de PostgreSQL por `import_type` al confirmar (`pg_advisory_xact_lock`, se libera con el commit o el rollback).
 - Una transacción por job.
-- Dos confirmaciones del mismo tipo se serializan.
+- Dos confirmaciones del mismo tipo se serializan; las de tipos distintos no se esperan.
+- La espera del lock tiene su propio tope de 60 s (por encima del `lock_timeout` de 10 s del backend). Si vence, la confirmación responde 409 `import_in_progress` y el job vuelve a `pending` sin haber escrito nada: se puede confirmar de nuevo.
+- Bajo el lock se vuelve a buscar un archivo idéntico ya completado: si dos jobs del mismo archivo esperaban confirmación, el segundo queda `duplicate`.
 
 ## 6. Resolución de entidades y mappings
 
@@ -341,10 +357,24 @@ Zonas y productos **no usan mappings**: se identifican por `commercial.zones.nam
 - **Re‑resolver:** al confirmar mappings, los hechos pendientes se completan solos.
 - **Reprocesar un job** (solo admin):
   - crea un job nuevo con `reprocess_of_job_id`;
-  - parte de `import_rows.raw`, o del archivo guardado si cambió el lector;
+  - lee otra vez el archivo guardado con el lector y el adaptador actuales (ADR 014 §2.11 admite staging o archivo; F1.1b usa siempre el archivo, que nunca cambia, así un arreglo del lector también se aplica);
   - aplica las mismas claves naturales (y §5.3 para ventas);
   - el job original queda intacto.
-- **Recuperar:** `imports recover` pasa a `failed` un job colgado en `processing`. Como era una transacción, no deja datos a medias.
+  - no aplica el chequeo de archivo idéntico (es la forma explícita de volver a aplicarlo).
+- **Recuperar:** `imports recover` pasa a `failed` (`interrupted`) un job que lleva más de 30 minutos en `processing` y cuyo tipo no tiene el lock tomado; uno que sigue confirmándose nunca se toca. Como era una transacción, no deja datos a medias.
+
+**`failure_reason`** (código estable; el texto para mostrar va en `failure_detail`):
+
+| Código | Cuándo |
+|---|---|
+| `empty_file`, `unsupported_format`, `unreadable_file`, `unknown_encoding` | El contenido no se puede leer (§4) |
+| `too_many_rows`, `too_many_columns`, `file_too_complex` | Supera los topes del lector (§4) |
+| `type_not_detected`, `ambiguous_type` | Ningún tipo o más de uno supera el umbral: hay que elegir el tipo |
+| `header_mismatch` | El tipo elegido no coincide con los encabezados |
+| `missing_columns` | El adaptador no encuentra columnas requeridas (+ issue `platform.import.missing_columns`) |
+| `interrupted` | Lo marcó `imports recover` |
+| `unexpected_error` | Cualquier otra excepción; se loguea con `job_id`, nunca con valores |
+| otros del adaptador | Un error estructural propio del reporte (`StructuralError`), con su código |
 
 **Retención:**
 - El staging no se purga por defecto (`platform.imports.row_retention_days` = sin límite).
@@ -358,7 +388,20 @@ Zonas y productos **no usan mappings**: se identifican por `commercial.zones.nam
 | Subir, analizar, confirmar, cancelar, resolver mappings operativos, confirmar candidatos en lote | `operator` |
 | Configuración (zonas, días, reglas, listas, categorías, tipos de comprobante, motivos), reprocesar, decidir reemplazos de ventas bloqueados, reasignar un mapping confirmado, `analytics_eligible`, familias | `admin` |
 
-El admin de plataforma es admin del módulo (ARCHITECTURE §8).
+El admin de plataforma es admin del módulo (ARCHITECTURE §8). Cada tipo toma los permisos del módulo dueño: quien no tiene acceso al módulo no ve sus tipos ni sus jobs (404). Un job sin tipo detectado lo ven quien lo subió y el admin de plataforma.
+
+**API genérica (F1.1b)**, bajo `/api/v1/imports`:
+
+| Método y ruta | Rol | Qué hace |
+|---|---|---|
+| `GET /types` | `viewer` | Tipos visibles, con `can_import` |
+| `POST /` (multipart `file`, `import_type` opcional) | `operator` | Sube, detecta y analiza; 201 con el job (`pending`, `failed` o `duplicate`) |
+| `GET /` (`status`, `import_type`, `limit`, `offset`) | `viewer` | Jobs visibles |
+| `GET /{id}`, `GET /{id}/rows` (`status`), `GET /{id}/issues` | `viewer` | Detalle con preview y contadores, filas del staging, issues |
+| `POST /{id}/confirm`, `POST /{id}/cancel` | `operator` | Confirma o descarta un job `pending` (409 `import_job_not_pending` si no lo está) |
+| `POST /{id}/reprocess` | `admin` | Job nuevo sobre el mismo archivo |
+
+Errores: 413 `request_too_large` (supera `UPLOAD_MAX_SIZE_MB`), 422 `invalid_extension`, 409 `import_in_progress`.
 
 ## 9. Seguridad y privacidad
 

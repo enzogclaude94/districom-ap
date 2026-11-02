@@ -428,9 +428,9 @@ El **framework** es de plataforma; los **tipos de import, adaptadores y códigos
 | Columna | Notas |
 |---|---|
 | id | PK |
-| source_system_id | FK `source_systems` |
-| import_type | text namespaced (`commercial.store_sys.customers`, `.sales_lines`, `.documents`, `.products`, `commercial.axum.no_purchase`), validado por el registro |
-| status | `pending`, `processing`, `completed`, `completed_with_warnings`, `failed`, `duplicate`, `cancelled` |
+| source_system_id | FK `source_systems` NULL — NULL hasta detectar el tipo (F1.1b) |
+| import_type | text namespaced (`commercial.store_sys.customers`, `.sales_lines`, `.documents`, `.products`, `commercial.axum.no_purchase`), validado por el registro; NULL si la detección falló (`type_not_detected`, `ambiguous_type`, archivo ilegible) |
+| status | `pending`, `processing` (analizando o escribiendo), `completed`, `completed_with_warnings`, `failed`, `duplicate`, `cancelled` |
 | file_id | FK `import_files` |
 | parser_version | text — versión del adaptador |
 | created_by, confirmed_by | FK users |
@@ -443,10 +443,11 @@ El **framework** es de plataforma; los **tipos de import, adaptadores y códigos
 | scope | jsonb NULL — scope declarado (`FULL` / `FILTERED` + descripción) y dimensiones observadas (vendedores, zonas, listas y días) |
 | reprocess_of_job_id, duplicate_of_job_id | FK self NULL |
 | metadata | jsonb — hoja, fila de encabezado, encoding, separador, firma de encabezados |
-| failure_reason | text NULL — código + detalle (`missing_columns`, `header_mismatch`, `unsupported_format`, `unexpected_error`) |
+| failure_reason | varchar(40) NULL — código estable (`docs/IMPORTS.md §7`: `missing_columns`, `header_mismatch`, `unsupported_format`, `unexpected_error`, `type_not_detected`, `interrupted`…); obligatorio si `failed` |
+| failure_detail | text NULL — texto para mostrar, sin valores de filas (F1.1b separa código y detalle) |
 | timestamps | `created_at`, `updated_at` |
 
-Duplicado exacto: mismo `sha256` + `import_type` que un job `completed`/`completed_with_warnings` → `duplicate` sin escritura. Reproceso deliberado: solo admin, job nuevo con `reprocess_of_job_id`.
+Duplicado exacto: mismo `sha256` + `import_type` que un job `completed`/`completed_with_warnings` → `duplicate` sin escritura (CHECK: `duplicate` exige `duplicate_of_job_id`). Reproceso deliberado: solo admin, job nuevo con `reprocess_of_job_id`. CHECK `period_from <= period_to`.
 
 ### 7.3 import_rows (staging)
 `id`, `job_id` FK, `sheet`, `row_number` (fila real del archivo), `raw` jsonb (celdas tal cual), `normalized` jsonb (registro canónico propuesto y mapping aplicado), `business_key` text NULL, `row_hash` bytea, `status` (`valid`, `warning`, `rejected`, `duplicate`, `pending_resolution`, `skipped`), `outcome` (`inserted`, `updated`, `unchanged`, `superseded`, NULL), `entity_type`, `entity_id`, `messages` jsonb (código, columna, severidad, texto **sin PII**). `UNIQUE (job_id, sheet, row_number)`.
@@ -473,7 +474,9 @@ Sin purga por defecto (`platform.imports.row_retention_days`); habilita auditor�
 
 ### 7.5 data_quality_issues
 `id`, `code` (registrado por módulo), `severity` (`error`, `warning`, `info`), `status` (`open`, `resolved`, `ignored`), `dedupe_key` text, `entity_type`, `entity_id`, `external_ref` jsonb (sistema + namespace + id cuando no hay entidad), `job_id` FK NULL, `row_id` FK NULL, `details` jsonb (sin PII), `occurrences` int, `first_seen_at`, `last_seen_at`, `resolved_by`, `resolved_at`, `resolution_note`.
-`UNIQUE (code, dedupe_key) WHERE status = 'open'`. Códigos en `docs/IMPORTS.md §7`.
+`UNIQUE (code, dedupe_key) WHERE status = 'open'`. Códigos en `docs/IMPORTS.md §7`. Se escribe solo con `app.platform.quality.service.record_issue` (inserta o suma una ocurrencia).
+
+Migración `0033` (F1.1b) crea `import_files`, `import_jobs`, `import_rows` y `data_quality_issues`. Su downgrade se niega si hay jobs o issues: nunca borra historia.
 
 ## 8. Estado del cliente (Fase 4, `commercial`)
 
@@ -536,7 +539,7 @@ Diseñados desde las queries previstas; se revisan con `EXPLAIN ANALYZE` al impl
 | Tabla | Índice | Uso |
 |---|---|---|
 | import_files | `(sha256)` | duplicado exacto |
-| import_jobs | `(import_type, status)`, `(created_at)` | lista de imports, duplicados |
+| import_jobs | `(import_type, status)`, `(file_id)` | lista de imports (ordenada por `id`, la PK), duplicados |
 | import_rows | `UNIQUE (job_id, sheet, row_number)`, `(job_id, status)` | detalle y filas rechazadas |
 | external_entity_mappings | `UNIQUE (entity_type, source_system_id, namespace, external_id)`, `(status)`, `(entity_type, entity_id)` | resolución, pendientes |
 | data_quality_issues | `UNIQUE (code, dedupe_key) WHERE status='open'`, `(status, code)` | pantalla de calidad |
