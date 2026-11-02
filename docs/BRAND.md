@@ -48,7 +48,7 @@ Reglas:
 | Marca y títulos de alta jerarquía (H1 de página, títulos de login/reportes) | Manrope | SemiBold 600 | `font-display` |
 | Producto: UI, tablas, filtros, formularios, métricas | Inter | 400 / 500 / 600 | `font-sans` (default) |
 
-Las cifras usan números tabulares (`font-feature-settings: "tnum"`) para que KPIs y columnas alineen. Fuentes servidas por `next/font` (self-hosted en build). Manrope: SIL OFL 1.1 (`docs/brand/MANROPE-OFL.txt`).
+Las cifras usan números tabulares (`font-feature-settings: "tnum"`) para que KPIs y columnas alineen. Fuentes servidas desde el repositorio por `next/font/local` (`frontend/src/app/fonts/`): el build no descarga nada. Son los mismos archivos de Google Fonts, generados desde las fuentes oficiales (google/fonts), con su origen y cómo regenerarlos en `frontend/src/app/fonts/README.md`. Inter y Manrope: SIL OFL 1.1 (`frontend/src/app/fonts/OFL-Inter.txt`, `OFL-Manrope.txt`; también `docs/brand/MANROPE-OFL.txt`).
 
 ## Paleta
 
