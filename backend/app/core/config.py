@@ -4,6 +4,7 @@ Required variables have no default: the app refuses to start without them.
 """
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Annotated, Literal
 
 from pydantic import Field, field_validator, model_validator
@@ -44,6 +45,9 @@ class Settings(BaseSettings):
     argon2_profile: Literal["standard", "test"] = "standard"
 
     upload_max_size_mb: int = Field(default=25, gt=0)
+    # Original files of the imports (ADR 014): one file per upload, UUID name, read-only. Production mounts the
+    # backed-up `uploads` volume at /data/uploads (ADR 013); relative paths are relative to the backend's directory.
+    upload_dir: Path = Path("../data/uploads")
     # Largest request body the API reads, in real bytes (R9-5-2); file uploads (multipart) use upload_max_size_mb.
     request_max_body_bytes: int = Field(default=1024 * 1024, gt=0)
     # Limits of the backend's own database connections only (R9-5-2): migrations, backups, restores and dumps open
