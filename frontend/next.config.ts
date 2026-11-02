@@ -5,8 +5,9 @@ import type { NextConfig } from "next";
 // Read at build time: rebuild when it changes.
 const apiInternalUrl = process.env.API_INTERNAL_URL ?? "http://localhost:8000";
 
-// Content Security Policy (R9-5-5, O5). In Report-Only for now: the browser blocks nothing and reports what it
-// would block to /api/v1/csp-report, which logs only the directive and a category (R9-5-6 turns it to enforce).
+// Content Security Policy (R9-5-5, O5), enforced since R9-5-6 after a clean Report-Only run of the whole E2E suite:
+// the browser blocks what the policy does not allow and reports it to /api/v1/csp-report, which logs only the
+// directive and a category. Never loosen it to make something work: report the violation instead.
 // 'unsafe-inline' in scripts: Next.js hydrates with inline scripts; removing it needs a nonce per request (R1).
 // `next dev` also evaluates code for Fast Refresh, so development adds 'unsafe-eval'; production builds never do.
 const CSP_REPORT_PATH = "/api/v1/csp-report";
@@ -27,7 +28,7 @@ const contentSecurityPolicy = [
 ].join("; ");
 
 const securityHeaders = [
-  { key: "Content-Security-Policy-Report-Only", value: contentSecurityPolicy },
+  { key: "Content-Security-Policy", value: contentSecurityPolicy },
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "X-Frame-Options", value: "DENY" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },

@@ -20,6 +20,14 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
   - el generador de datos de prueba corre como `development`: desde R9‑5‑4 la validación de producción no lo dejaba arrancar con el `.env` del stack de prueba.
 - Docs: OPERATIONS §3.1, §3.2, §6 y §8; SECURITY.
 
+### Changed — R9‑5‑6: CSP en enforce y aceptación sobre PostgreSQL 17
+- **La CSP pasa a enforce:** todas las páginas envían `Content-Security-Policy` (ya no `-Report-Only`) con la misma política de R9‑5‑5, `'unsafe-inline'` en scripts y estilos y sin `'unsafe-eval'` fuera de `next dev`. El navegador bloquea lo que la política no permite y lo reporta a `/api/v1/csp-report`. Antes del cambio, la suite E2E completa corrió en Report‑Only sin una sola violación.
+- **Guardia de CSP en todo el E2E** (`frontend/e2e/fixtures.ts`): cada test falla si el navegador registra una violación en cualquier página de su contexto, incluidos los contextos que el test abre (una segunda persona que ingresa), aunque la funcionalidad haya andado. Todos los specs toman `test` de `./fixtures` salvo `csp.spec.ts`, que provoca violaciones a propósito; `frontend/tests/e2e-csp-guard.test.ts` lo verifica.
+- `csp.spec.ts`: la política llega en enforce y sin header Report‑Only; una imagen y un script de otro origen son rechazados por el navegador por la CSP (el pedido no sale) y el reporte llega con disposición `enforce`.
+- **Aceptación sobre PostgreSQL 17.11** (la versión de producción, con los parámetros de WAL de `docker-compose.prod.yml`): suite backend completa verde; `perf/bench.py` y `perf/guards.py` sobre los datasets realista y stress dentro de los criterios de R9‑4 (lecturas y Cierre del día p95 < 300 ms, Store Sys 200 p95 < 5 s). Sin cambios de código del backend.
+- Bloque «Antes del go‑live de la app» entregado a S1 como handoff (`docs/OPERATIONS.md` es de S1).
+- R9‑5‑5 **DONE** (PR #63, 2026-11-01).
+
 ### Added — R9‑5‑5: CSP en Report‑Only y receptor de reportes
 - **Todas las páginas envían `Content-Security-Policy-Report-Only`** con la política de la propuesta R9‑5 (`default-src 'self'`; scripts y estilos `'self' 'unsafe-inline'`; imágenes `'self' data:`; fuentes y conexiones `'self'`; `frame-ancestors`, `object-src` `'none'`; `base-uri` y `form-action` `'self'`) y `report-uri /api/v1/csp-report`. El navegador no bloquea nada todavía: informa lo que bloquearía. `'unsafe-eval'` solo en `next dev`. Enforce en R9‑5‑6.
 - **`POST /api/v1/csp-report`:** sin sesión ni header CSRF (única excepción, por ruta exacta), cuerpo máximo 16 KiB (413 si lo supera), 204 ante cualquier cuerpo, sin guardar nada. Loguea solo la directiva, una categoría de lo bloqueado (`inline`, `eval`, `data`, `same-origin`, `external`…, nunca la URL), la disposición y el formato; como mucho 60 líneas por minuto por proceso. Acepta el formato `report-uri` y el de la Reporting API.
