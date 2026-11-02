@@ -1,4 +1,5 @@
-import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import type { APIRequestContext, Page } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 import { adminEmail, adminPassword, businessDay, login } from "./helpers";
 import { chequeForPending, closedWithPending, driver } from "./settlement-setup";

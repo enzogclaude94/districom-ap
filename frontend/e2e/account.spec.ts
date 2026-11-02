@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 
-import { expect, test, type Browser } from "@playwright/test";
+import type { Browser } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 /**
  * S2-1: a temporary password only lets its holder choose a new one; «Mi cuenta» lists the open sessions with their
