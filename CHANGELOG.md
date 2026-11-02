@@ -4,6 +4,10 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Changed — R9‑5 DONE (aplicación)
+- R9‑5‑6 **DONE** (PR #66, 2026-11-02) y, con ella, **R9‑5 y R9 DONE desde la aplicación**: lista para el piloto (S3).
+- El go‑live de producción sigue **BLOCKED** hasta: S3 en el equipo real (dominio, Tailscale, bucket externo, alertas, LAN y acceso remoto, simulacro de pérdida total y benchmark con la imagen completa `deploy/postgres` y pgBackRest activo), el PR #65 de S1, el checklist O10 verificado en el equipo real (handoff enviado a S1) y la asignación de las áreas protegidas Empleados y Store Sys, que define Enzo.
+
 ### Changed — R9‑5‑6: CSP en enforce y aceptación sobre PostgreSQL 17
 - **La CSP pasa a enforce:** todas las páginas envían `Content-Security-Policy` (ya no `-Report-Only`) con la misma política de R9‑5‑5, `'unsafe-inline'` en scripts y estilos y sin `'unsafe-eval'` fuera de `next dev`. El navegador bloquea lo que la política no permite y lo reporta a `/api/v1/csp-report`. Antes del cambio, la suite E2E completa corrió en Report‑Only sin una sola violación.
 - **Guardia de CSP en todo el E2E** (`frontend/e2e/fixtures.ts`): cada test falla si el navegador registra una violación en cualquier página de su contexto, incluidos los contextos que el test abre (una segunda persona que ingresa), aunque la funcionalidad haya andado. Todos los specs toman `test` de `./fixtures` salvo `csp.spec.ts`, que provoca violaciones a propósito; `frontend/tests/e2e-csp-guard.test.ts` lo verifica.
