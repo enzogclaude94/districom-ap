@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 
-import { expect, test, type APIRequestContext, type Locator, type Page } from "@playwright/test";
+import type { APIRequestContext, Locator, Page } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 import { formatMoney } from "../src/lib/format";
 import { adminEmail, adminPassword, login } from "./helpers";
