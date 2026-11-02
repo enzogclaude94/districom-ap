@@ -4,27 +4,37 @@ Module access (ARCHITECTURE.md §8): `grant-module-role --email ... --module set
 `revoke-module-role --email ... --module settlements`. The same commands grant a protected area (ADR 010):
 `--module settlements.employee_finance`; a platform admin needs that grant too to read the area.
 
+`imports analyze|confirm|reprocess|recover` (ADR 014, docs/IMPORTS.md §2): the same pipeline as the API, acting as
+the user named by `--email` with that user's permissions; `recover` fails the jobs a dead process left `processing`.
+Each command prints the job's id, status and counters as JSON, never row values.
+
 `reset-password --email ...` (S2) gives a user a temporary password and closes all their sessions: the way back in
 when nobody who can administer users can log in. The password is printed once on stdout, never logged.
 """
 
 import argparse
 import getpass
+import json
 import logging
 import sys
 from collections.abc import Generator, Iterator
 from contextlib import contextmanager
+from datetime import timedelta
+from pathlib import Path
 from typing import cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.core.errors import AppError
 from app.core.logging import configure_logging
 from app.db.session import get_db
 from app.platform.auth.models import MODULE_ROLES, User
 from app.platform.auth.module_roles import ModuleRoleError, grant_module_role, revoke_module_role
 from app.platform.auth.service import create_user, set_temporary_password
+from app.platform.imports import service as imports
+from app.platform.imports.models import ImportJob
 
 logger = logging.getLogger("app.cli")
 
@@ -96,6 +106,60 @@ def _reset_password(args: argparse.Namespace) -> int:
     return 0
 
 
+def _job_summary(job: ImportJob) -> str:
+    return json.dumps(
+        {
+            "job_id": job.id,
+            "import_type": job.import_type,
+            "status": job.status,
+            "failure_reason": job.failure_reason,
+            "rows": {
+                "detected": job.rows_detected,
+                "valid": job.rows_valid,
+                "rejected": job.rows_rejected,
+                "skipped": job.rows_skipped,
+                "pending_resolution": job.rows_pending_resolution,
+                "inserted": job.rows_inserted,
+                "updated": job.rows_updated,
+                "unchanged": job.rows_unchanged,
+                "superseded": job.rows_superseded,
+            },
+        }
+    )
+
+
+def _imports(args: argparse.Namespace) -> int:
+    import app.api.v1.router  # noqa: F401  (composition root: installs the modules and their import types)
+
+    settings = get_settings()
+    with _session() as db:
+        if args.action == "recover":
+            recovered = imports.recover(db, timedelta(minutes=args.older_than_minutes))
+            sys.stdout.write(json.dumps({"recovered_job_ids": recovered}) + "\n")
+            return 0
+        user = db.scalar(select(User).where(User.email == args.email, User.active.is_(True)))
+        if user is None:
+            logger.error("imports_failed", extra={"reason": "unknown or inactive user"})
+            return 1
+        try:
+            if args.action == "analyze":
+                path = Path(args.file)
+                with path.open("rb") as stream:
+                    job = imports.upload(db, user, settings, imports.Upload(stream, path.name, None), args.type)
+            elif args.action == "confirm":
+                job = imports.confirm(db, user, settings, args.job)
+            else:
+                job = imports.reprocess(db, user, settings, args.job)
+        except AppError as exc:
+            logger.error("imports_failed", extra={"reason": exc.code})
+            return 1
+        except OSError as exc:
+            logger.error("imports_failed", extra={"reason": type(exc).__name__})
+            return 1
+        sys.stdout.write(_job_summary(job) + "\n")
+    return 0 if job.status not in ("failed",) else 2
+
+
 def main(argv: list[str] | None = None) -> int:
     configure_logging(get_settings().log_level)
     parser = argparse.ArgumentParser(prog="app.cli")
@@ -122,6 +186,19 @@ def main(argv: list[str] | None = None) -> int:
     )
     reset.add_argument("--email", required=True)
     reset.set_defaults(func=_reset_password)
+    imports_cmd = sub.add_parser("imports", help="Importaciones: analizar, confirmar, reprocesar o recuperar jobs")
+    actions = imports_cmd.add_subparsers(dest="action", required=True)
+    analyze = actions.add_parser("analyze", help="Subir y analizar un archivo (queda pendiente de confirmación)")
+    analyze.add_argument("--file", required=True)
+    analyze.add_argument("--email", required=True, help="Usuario que importa (necesita rol operator)")
+    analyze.add_argument("--type", default=None, help="Tipo de importación; sin él se detecta por encabezados")
+    for name, text in (("confirm", "Confirmar un job pendiente"), ("reprocess", "Reprocesar un job (rol admin)")):
+        action = actions.add_parser(name, help=text)
+        action.add_argument("--job", required=True, type=int)
+        action.add_argument("--email", required=True)
+    recover = actions.add_parser("recover", help="Pasar a failed los jobs interrumpidos en processing")
+    recover.add_argument("--older-than-minutes", type=int, default=30)
+    imports_cmd.set_defaults(func=_imports)
     args = parser.parse_args(argv)
     result: int = args.func(args)
     return result
