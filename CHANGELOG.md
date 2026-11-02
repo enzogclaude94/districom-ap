@@ -4,6 +4,10 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Changed — R9‑5 DONE (aplicación)
+- R9‑5‑6 **DONE** (PR #66, 2026-11-02) y, con ella, **R9‑5 y R9 DONE desde la aplicación**: lista para el piloto (S3).
+- El go‑live de producción sigue **BLOCKED** hasta: S3 en el equipo real (dominio, Tailscale, bucket externo, alertas, LAN y acceso remoto, simulacro de pérdida total y benchmark con la imagen completa `deploy/postgres` y pgBackRest activo), el PR #65 de S1, el checklist O10 verificado en el equipo real (handoff enviado a S1) y la asignación de las áreas protegidas Empleados y Store Sys, que define Enzo.
+
 ### Docs — Fase 1 de Inteligencia Comercial: diseño de importación y maestros (F1.1a)
 - **F1.0 aprobado por Enzo el 2026-10-30** con las decisiones D‑A…D‑K y los ajustes 1–3. Sin código ni migraciones en este cambio.
 - **ADR 014** (nuevo): framework de importación en plataforma (archivo original, jobs con estados `pending`…`duplicate`/`cancelled`, lectores CSV/XLSX/**XLS BIFF**, staging, mappings, calidad); análisis en dos pasos; vínculos externos solo en `external_entity_mappings`; AXUM y STORE SYS como espacios de IDs independientes; vendedor de STORE SYS por mapping (Comercial no escribe `employees.external_store_id`); zonas con días configurables en lugar de rutas de AXUM; RETIRO fuera del universo comercial por configuración; productos con campos fuente y canónicos, `analytics_eligible`, familias explícitas y listas de precio con semántica; idempotencia de ventas por período **y scope**; no‑compras sin UNIQUE; visitas, programación y pedidos fuera de Fase 1. Reemplaza las plantillas de columnas de ADR 003 y la definición de rutas de ADR 006.
