@@ -91,6 +91,60 @@ caddy_curl() {
     curl -sS --noproxy "*" --max-time 20 --resolve "$DISTRICOM_HOST:443:127.0.0.1" --resolve "$DISTRICOM_HOST:80:127.0.0.1" "${ca[@]}" "$@"
 }
 
+# Readiness of the app through Caddy (GET /api/v1/health/ready, R9-5-4), as one word:
+#   ready              the database answers and its migration is exactly the head of the running code
+#   database_down      the app answers but cannot reach PostgreSQL
+#   migrations_behind  the database is at an older migration than the code (an update whose migrations did not run)
+#   migrations_unknown the database is at a migration the code does not know (a rollback without --restore-db)
+#   not_available      404: a version from before R9-5-4, without the endpoint (smoke's migration check covers it)
+#   no_answer          nothing answered within HEALTH_TIMEOUT_SECONDS, or Caddy could not reach the backend
+#   unexpected         any other answer
+# The timeout bounds a PostgreSQL that does not answer at the network level: the backend sets no connect_timeout.
+app_readiness() {
+    local out code body
+    out="$(caddy_curl --max-time "${HEALTH_TIMEOUT_SECONDS:-10}" -w '\n%{http_code}' \
+        "https://$DISTRICOM_HOST/api/v1/health/ready" 2> /dev/null)" || { echo no_answer; return; }
+    code="${out##*$'\n'}"
+    body="${out%$'\n'*}"
+    python3 -c 'import json, sys
+code, body = sys.argv[1], sys.argv[2]
+try:
+    data = json.loads(body)
+except ValueError:
+    data = {}
+if code == "200" and data.get("status") == "ready":
+    print("ready")
+elif code == "503" and data.get("db") == "error":
+    print("database_down")
+elif code == "503" and data.get("migrations") in ("behind", "unknown"):
+    print("migrations_" + data["migrations"])
+elif code == "404":
+    print("not_available")
+elif code in ("502", "504"):
+    print("no_answer")  # Caddy could not reach the backend
+else:
+    print("unexpected")' "$code" "$body"
+}
+
+# A controlled maintenance window (deploy/bin/update and rollback stop the app on purpose). While it lasts the
+# monitor reports the app as under maintenance instead of failing; after MAINTENANCE_MAX_MINUTES it fails again,
+# so an update that died half-way does not stay silent.
+MAINTENANCE_FILE="$STATE_DIR/maintenance"
+maintenance_begin() { printf '%s %s\n' "$(date +%s)" "$*" > "$MAINTENANCE_FILE"; }
+maintenance_end() { rm -f "$MAINTENANCE_FILE"; }
+# Prints "active <minutes> <reason>" or "expired <minutes> <reason>", nothing outside a window.
+maintenance_state() {
+    [ -f "$MAINTENANCE_FILE" ] || return 0
+    local started reason minutes
+    read -r started reason < "$MAINTENANCE_FILE"
+    minutes=$((($(date +%s) - started) / 60))
+    if [ "$minutes" -lt "${MAINTENANCE_MAX_MINUTES:-60}" ]; then
+        echo "active $minutes $reason"
+    else
+        echo "expired $minutes $reason"
+    fi
+}
+
 # update and rollback check out another version of this very directory: they first re-run themselves from a
 # private copy so Bash never reads a script that Git is rewriting.
 run_from_copy() {
