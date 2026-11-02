@@ -2,8 +2,9 @@ import { expect, test, type Page } from "@playwright/test";
 
 import { login } from "./helpers";
 
-// R9-5-5 (O5): the Content Security Policy in Report-Only. Every screen loads without a violation (what enforce
-// would block), and a real violation reaches the backend's report receiver.
+// R9-5-5/R9-5-6 (O5): the Content Security Policy, enforced. Every screen loads without a violation, and a real
+// violation is blocked and reaches the backend's report receiver. The rest of the suite runs under the violation
+// guard of fixtures.ts; this spec provokes one on purpose, so it takes `test` from Playwright directly.
 
 const SCREENS = [
   "/",
@@ -38,7 +39,7 @@ async function watchViolations(page: Page) {
     const seen: string[] = [];
     (window as unknown as { __cspViolations: string[] }).__cspViolations = seen;
     document.addEventListener("securitypolicyviolation", (event) => {
-      seen.push(`${event.effectiveDirective} ${event.blockedURI || "(none)"}`);
+      seen.push(`${event.disposition} ${event.effectiveDirective} ${event.blockedURI || "(none)"}`);
     });
   });
 }
@@ -47,11 +48,11 @@ async function violations(page: Page) {
   return page.evaluate(() => (window as unknown as { __cspViolations: string[] }).__cspViolations);
 }
 
-test("the policy is sent in Report-Only with its directives", async ({ page }) => {
+test("the policy is enforced with its directives", async ({ page }) => {
   const response = await page.goto("/login");
   const headers = response!.headers();
-  expect(headers["content-security-policy"]).toBeUndefined(); // not enforced yet (R9-5-6)
-  const policy = headers["content-security-policy-report-only"];
+  expect(headers["content-security-policy-report-only"]).toBeUndefined(); // enforced since R9-5-6, never both
+  const policy = headers["content-security-policy"];
   for (const directive of [
     "default-src 'self'",
     "script-src 'self' 'unsafe-inline'",
@@ -70,7 +71,7 @@ test("the policy is sent in Report-Only with its directives", async ({ page }) =
   expect(policy).not.toContain("unsafe-eval");
 });
 
-test("no screen would be blocked by the policy", async ({ page, baseURL }) => {
+test("no screen is blocked by the policy", async ({ page, baseURL }) => {
   test.setTimeout(120_000);
   await watchViolations(page);
   const external: string[] = [];
@@ -89,18 +90,44 @@ test("no screen would be blocked by the policy", async ({ page, baseURL }) => {
   expect(external).toEqual([]); // fonts and everything else served by the app itself
 });
 
-test("a violation reaches the report receiver", async ({ page }) => {
+/** Adds an element that loads `url` from the page and tells whether it loaded or the browser refused it. */
+async function load(page: Page, tag: "img" | "script", url: string) {
+  return page.evaluate(
+    ([tagName, src]) =>
+      new Promise<string>((resolve) => {
+        const element = document.createElement(tagName) as HTMLImageElement | HTMLScriptElement;
+        element.onload = () => resolve("loaded");
+        element.onerror = () => resolve("refused");
+        element.src = src;
+        document.body.appendChild(element);
+      }),
+    [tag, url] as const,
+  );
+}
+
+test("a violation is blocked and reaches the report receiver", async ({ page }) => {
   await watchViolations(page);
+  const failures: string[] = [];
+  page.on("requestfailed", (request) => failures.push(`${request.failure()?.errorText} ${request.url()}`));
   await page.goto("/login");
   const report = page.waitForRequest((request) => request.url().endsWith("/api/v1/csp-report"));
-  await page.evaluate(() => {
-    const image = document.createElement("img");
-    image.src = "https://example.invalid/pixel.png?cuit=30712345671";
-    document.body.appendChild(image);
-  });
+  expect(await load(page, "img", "https://example.invalid/pixel.png?cuit=30712345671")).toBe("refused");
   const request = await report;
   expect(request.method()).toBe("POST");
+  expect(request.postDataJSON()["csp-report"].disposition).toBe("enforce");
   const response = await request.response();
   expect(response?.status()).toBe(204);
-  expect(await violations(page)).toEqual(["img-src https://example.invalid/pixel.png?cuit=30712345671"]);
+  // Refused by the policy itself (Chromium's reason is "csp"), not by the network: the request never left.
+  expect(failures).toEqual(["csp https://example.invalid/pixel.png?cuit=30712345671"]);
+  expect(await violations(page)).toEqual(["enforce img-src https://example.invalid/pixel.png?cuit=30712345671"]);
+});
+
+test("a script from another origin is blocked", async ({ page }) => {
+  await watchViolations(page);
+  const failures: string[] = [];
+  page.on("requestfailed", (request) => failures.push(`${request.failure()?.errorText} ${request.url()}`));
+  await page.goto("/login");
+  expect(await load(page, "script", "https://example.invalid/x.js")).toBe("refused");
+  expect(failures).toEqual(["csp https://example.invalid/x.js"]);
+  expect(await violations(page)).toEqual(["enforce script-src-elem https://example.invalid/x.js"]);
 });

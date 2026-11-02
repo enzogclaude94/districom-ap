@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 
-import { expect, test, type APIRequestContext } from "@playwright/test";
+import type { APIRequestContext } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 import { login } from "./helpers";
 import { HEADERS, api, driver, openSettlement } from "./settlement-setup";
