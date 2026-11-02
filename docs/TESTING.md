@@ -34,6 +34,12 @@ cd frontend && pnpm e2e
 - `backend/tests/unit/test_settlements_test_days.py` lo garantiza: prueba con el reloj movido a través de la medianoche que `today()` cambia entre dos llamadas, y recorre con `ast` cada archivo de `tests/modules/settlements/` fallando si algo que corre al importar (asignaciones de módulo, defaults, decoradores, cuerpos de clase) lee el reloj (`business_today`, `date.today`, `datetime.now` o un helper de `days.py`, directo o a través de una función local).
 - E2E: `businessDay(offset)` de `frontend/e2e/helpers.ts` se llama al usarlo (`const today = () => businessDay()`), nunca como constante del spec ni con el reloj local de la máquina (`cash`, `delivery` y `fuel` pasaron a `businessDay`).
 
+## R9‑5‑6 (CSP en enforce y aceptación)
+- `frontend/e2e/fixtures.ts`: guardia automática de CSP en cada test E2E (también en los contextos que abre el test); cualquier violación hace fallar el test con la lista. Probada con una mutación: sin `'unsafe-inline'` en `script-src`, hasta un test que funcionalmente pasa (la redirección al login) falla por la guardia.
+- `frontend/tests/e2e-csp-guard.test.ts`: todo spec salvo `csp.spec.ts` usa la guardia.
+- `frontend/e2e/csp.spec.ts`: header de enforce sin Report‑Only; una imagen y un script de otro origen rechazados por la CSP (motivo `csp`, el pedido no sale) y el reporte con disposición `enforce`. Un `eval` lanzado desde Playwright no sirve como prueba: el código que inyecta DevTools no está sujeto a la CSP de la página.
+- Aceptación sobre PostgreSQL 17 (no corre en CI): suite backend completa y `perf/bench.py`/`perf/guards.py` sobre los datasets de R9‑4; informe R9‑5‑6.
+
 ## R9‑5‑5 (CSP Report‑Only)
 - `tests/integration/test_csp_report.py`: un reporte `report-uri` llega al log solo con directiva, categoría, disposición y formato (sin la página, el referrer, la URL bloqueada con su query string, el `script-sample` ni la política), con `queries: 0` en el access log; un lote de la Reporting API conserva solo las violaciones CSP; cada tipo de recurso bloqueado se reduce a su categoría; una directiva rara es `unknown`; cuerpos vacíos, de texto, de otra forma, anidados o con UTF‑8 inválido dan 204 y `csp_report_invalid`; más de 16 KiB (con `Content-Length` o chunked) es 413 y no se loguea; el tope por minuto; sin sesión ni CSRF y desde otro origen pasa; la excepción CSRF es solo esa ruta.
 - `frontend/tests/zod-csp.test.ts`: Zod en `jitless` y ningún archivo importa `zod` salvo `@/lib/zod`.

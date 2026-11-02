@@ -1,4 +1,5 @@
-import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import type { APIRequestContext, Page } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 import { AREA, mainCash, noSideScroll, settlement, setUp } from "./employee-finance-setup";
 import { api, day } from "./settlement-setup";
