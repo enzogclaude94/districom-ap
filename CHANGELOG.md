@@ -4,6 +4,16 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Added — Servidor: lista «Antes del go‑live de la app» (handoff O10)
+- **`docs/OPERATIONS.md §2.1`:** once ítems obligatorios, cada uno con cómo se verifica y qué evidencia queda. No se pone en producción con un ítem en FAIL o sin evidencia. Paso 11 nuevo en la instalación.
+- **Adaptado del bloque de R9‑5‑6:**
+  - los comandos HTTPS usan `--resolve`, como el smoke, porque `caddy_curl` no es un comando;
+  - el conteo de `csp_violation` se hace desde la hora del recorrido;
+  - las áreas protegidas se asignan solo a la lista de Enzo;
+  - el restore exige también el simulacro desde `repo2` (pérdida total);
+  - el benchmark corre sobre el dataset ficticio de `perf.generate` en un PostgreSQL descartable de la imagen de producción, nunca sobre la base de producción ni una copia suya.
+- Sin cambios de código.
+
 ### Added — R9‑5‑5: CSP en Report‑Only y receptor de reportes
 - **Todas las páginas envían `Content-Security-Policy-Report-Only`** con la política de la propuesta R9‑5 (`default-src 'self'`; scripts y estilos `'self' 'unsafe-inline'`; imágenes `'self' data:`; fuentes y conexiones `'self'`; `frame-ancestors`, `object-src` `'none'`; `base-uri` y `form-action` `'self'`) y `report-uri /api/v1/csp-report`. El navegador no bloquea nada todavía: informa lo que bloquearía. `'unsafe-eval'` solo en `next dev`. Enforce en R9‑5‑6.
 - **`POST /api/v1/csp-report`:** sin sesión ni header CSRF (única excepción, por ruta exacta), cuerpo máximo 16 KiB (413 si lo supera), 204 ante cualquier cuerpo, sin guardar nada. Loguea solo la directiva, una categoría de lo bloqueado (`inline`, `eval`, `data`, `same-origin`, `external`…, nunca la URL), la disposición y el formato; como mucho 60 líneas por minuto por proceso. Acepta el formato `report-uri` y el de la Reporting API.

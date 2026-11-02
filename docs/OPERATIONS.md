@@ -52,6 +52,36 @@ Requisitos de hardware y de red en `docs/SERVER_REQUIREMENTS.md`.
 8. Crear el primer administrador: `deploy/bin/dc exec backend python -m app.cli create-admin --email ... --name ...` (la contraseña se lee de stdin). Después, los demás usuarios, sus roles por módulo y sus áreas se administran desde la pantalla «Usuarios» (o con `grant-module-role`, ver `CLAUDE.md §2`). Cada usuario cambia su contraseña y ve o cierra sus sesiones en «Mi cuenta».
 9. **[S3]** DNS: registro local en el router (`DISTRICOM_HOST` → `LAN_SERVER_IP`) y split DNS en la consola de Tailscale (dominio → `TAILSCALE_SERVER_IP`, con `COMPOSE_PROFILES=dns` en `.env` y `deploy/bin/dc up -d dns`).
 10. Verificar con `deploy/bin/smoke` y `deploy/bin/monitor`, y hacer un simulacro de restauración (§5).
+11. Antes de abrir la app a los usuarios: la lista de §2.1, completa.
+
+## 2.1 Antes del go‑live de la app
+
+Lista de aceptación del sistema completo (handoff O10 de R9‑5‑6). Cada ítem se marca **PASS** con la evidencia indicada y se guarda en el informe de S3. **Todos los ítems son obligatorios: no se pone en producción con un ítem en FAIL o sin evidencia.** Los ítems 2, 3, 4, 8 y 11 solo se pueden verificar en el equipo real, con el dominio y el certificado de S3: lo hecho en el entorno de prueba es evidencia de la aplicación, no de este paso.
+
+Los comandos usan `--resolve` para llegar a Caddy por el nombre real desde el mismo servidor, como el smoke (`H=$DISTRICOM_HOST`, de `.env`).
+
+| # | Ítem | Cómo se verifica | Evidencia |
+|---|---|---|---|
+| 1 | Configuración de producción válida | `deploy/bin/dc ps backend` en `healthy` y `deploy/bin/dc logs backend` sin `InsecureProductionConfigError`. Con `APP_ENV=production` (lo fija `deploy/docker-compose.prod.yml`) la app no arranca si `COOKIE_SECURE` no es true, si `CORS_ORIGINS` no está vacío, si `ARGON2_PROFILE` no es `standard`, si `LOG_LEVEL` es `DEBUG`, o si `SECRET_KEY` o la contraseña de la base son de ejemplo, placeholders o poco aleatorias (R9‑5‑4) | Salida de `dc ps` |
+| 2 | `/ready` en verde | `curl -sS --resolve "$H:443:127.0.0.1" "https://$H/api/v1/health/ready"` → 200 `{"status":"ready","db":"ok","migrations":"ok"}`. Con PR #65, `deploy/bin/smoke` lo verifica (línea `ok HTTPS /api/v1/health/ready`) y el monitor lo vigila | Salida del comando y del smoke |
+| 3 | CSP en enforce | `curl -sSI --resolve "$H:443:127.0.0.1" "https://$H/login"` trae `Content-Security-Policy:` (y **no** `Content-Security-Policy-Report-Only`), con `script-src 'self' 'unsafe-inline'`, **sin** `unsafe-eval` y con `report-uri /api/v1/csp-report` | Header copiado |
+| 4 | Sin violaciones de CSP | Anotar la hora, recorrer la app con un navegador real (login, Rendiciones, Comercial, Usuarios, Mi cuenta, una descarga CSV del Cierre del día) y contar: `deploy/bin/dc logs --since <hora> backend \| grep -c csp_violation` → **0** | Conteo y hora |
+| 5 | Primer administrador | §2 paso 8. Ingresar con él; si la contraseña fue temporal, cambiarla en «Mi cuenta» | Ingreso correcto |
+| 6 | Áreas protegidas asignadas a mano | En «Usuarios», solo a las personas de la **lista que define Enzo**: **Empleados** (`settlements.employee_finance`) e **Integración Store Sys** (`settlements.store_sys_import`). Nadie las recibe por defecto ni por ser administrador de plataforma: sin el área, esas pantallas dan 404 (ADR 010, ADR 011). No se crean usuarios que no estén en la lista | Lista de Enzo y captura de «Usuarios» que coincide |
+| 7 | Roles por módulo | Cada usuario con su rol en Rendiciones y/o Comercial, el mínimo necesario | Captura de «Usuarios», revisada por Enzo |
+| 8 | Benchmark de aceptación en el equipo real | Ver «Benchmark en el equipo real», abajo. Criterios de R9‑4 (`docs/PERFORMANCE.md`): lecturas p95 < 300 ms, Cierre del día p95 < 300 ms, Store Sys 200 p95 < 5 s, escrituras sin degradación estructural | Informe del benchmark |
+| 9 | Suite final verde | CI 4/4 en el commit del tag que se despliega (`git checkout <tag>`, §6) | Link al run |
+| 10 | Handoffs a S1 resueltos | O6 (`/ready` en smoke y monitor) y O7 (logs de PostgreSQL sin datos personales): PR #65 mergeado, o cada uno marcado pendiente por Enzo, explícitamente. O10: esta lista | Decisión registrada |
+| 11 | Backups y restore | §2 pasos 6, 7 y 10: disco de backup con su marca, *stanza*, primer backup completo, `deploy/bin/monitor` sin FAIL, y dos simulacros (§5): `deploy/bin/restore-drill` (`repo1`) **IDENTICAL** y `deploy/bin/restore-drill --repo 2` (pérdida total de la oficina) **IDENTICAL** | `summary.txt` de cada simulacro y salida del monitor |
+
+**Benchmark en el equipo real (ítem 8).** Mide el hardware y la imagen de producción con los datos ficticios de `perf.generate`, **nunca la base de producción ni una copia suya**: antes del go‑live esa base está casi vacía (no mide nada) y, después, el informe del benchmark guarda los `EXPLAIN` con sus parámetros reales, que serían datos de clientes y empleados. Pasos:
+
+1. Fuera de horario, un PostgreSQL descartable de la imagen de producción (`districom/db:current`, con los mismos parámetros que `deploy/docker-compose.prod.yml`) en una red de Docker propia, sin publicar puertos y sin tocar el volumen ni los repositorios de backup de producción.
+2. En esa base, una base `districom_perf`: `perf.generate` realista (`--scale 1 --workers 2`) y, si corresponde, stress (`--scale 2 --workers 4`); `pg_dump` y restauración en una copia, porque el benchmark escribe (`docs/PERFORMANCE.md`).
+3. `perf.bench` y `perf.guards` desde un contenedor de la imagen del backend (`districom/backend:current`, que incluye `perf/`) en la misma red, con `PERF_DATABASE_URL` hacia esa copia.
+4. Guardar el informe y borrar el contenedor, su volumen y la red.
+
+Esos pasos todavía no son un script: **[S3]** se automatizan como `deploy/bin/perf-acceptance` cuando Enzo lo autorice, con su prueba en `deploy/tests`.
 
 ## 3. Día a día
 
