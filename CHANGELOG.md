@@ -11,6 +11,7 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
   - el conteo de `csp_violation` se hace desde la hora del recorrido;
   - las áreas protegidas se asignan solo a la lista de Enzo;
   - el restore exige también el simulacro desde `repo2` (pérdida total);
+  - el ítem 10 exige O6 y O7 implementados y verificados en el equipo real; un pendiente anotado no cuenta como PASS;
   - el benchmark corre sobre el dataset ficticio de `perf.generate` en un PostgreSQL descartable de la imagen de producción, nunca sobre la base de producción ni una copia suya.
 - Sin cambios de código.
 
