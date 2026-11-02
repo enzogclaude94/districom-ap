@@ -15,6 +15,27 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
   - el benchmark corre sobre el dataset ficticio de `perf.generate` en un PostgreSQL descartable de la imagen de producción, nunca sobre la base de producción ni una copia suya.
 - Sin cambios de código.
 
+### Changed — Servidor: readiness en smoke y monitor, logs de PostgreSQL sin datos personales
+- **Smoke y monitor usan `/api/v1/health/ready`** (R9‑5‑4, handoff O6):
+  - el smoke falla si la base no está en la migración del código;
+  - el monitor separa «APP DOWN», «DATABASE DOWN» y «MIGRATION MISMATCH» (atrasada o desconocida);
+  - cada chequeo HTTPS tiene un timeout explícito (`HEALTH_TIMEOUT_SECONDS`, 10 s);
+  - el healthcheck de Docker del backend sigue en `/api/v1/health`, y `connect_timeout` del backend no cambia.
+- **Ventana de mantenimiento:** `update` y `rollback` la abren al detener la app y la cierran al terminar. El monitor informa «MAINTENANCE» en lugar de alertar, y vuelve a fallar si pasa `MAINTENANCE_MAX_MINUTES` (60).
+- **PostgreSQL sin datos personales en su log** (handoff O7 de R9‑5‑3):
+  - `log_error_verbosity=terse` y `log_min_error_statement=panic`;
+  - además, explícitos: sin sentencias, duraciones ni parámetros.
+- **`deploy/bin/db-log-detail`:** más detalle durante un incidente, con plazo máximo (`DB_LOG_DETAIL_MAX_MINUTES`, 120), motivo obligatorio y registro. Al vencer, el monitor restablece solo el nivel seguro, y da FAIL si el nivel se sube a mano.
+- **`deploy/tests/run-s1.sh`:**
+  - T18 (readiness, timeouts, mantenimiento) y T19 (logs sin datos personales, con un control que muestra la fuga con la configuración anterior, y el procedimiento de incidentes);
+  - el generador de datos de prueba corre como `development`: desde R9‑5‑4 la validación de producción no lo dejaba arrancar con el `.env` del stack de prueba.
+- Docs: OPERATIONS §3.1, §3.2, §6 y §8; SECURITY.
+
+### Changed — Fuentes locales: el build no depende de Google Fonts
+- **Inter y Manrope se sirven desde el repositorio** con `next/font/local` (`frontend/src/app/fonts/`), en lugar de `next/font/google`. El build de Next descargaba las fuentes de Google en cada compilación, y el 31/10 el CI falló tres veces porque el runner no las consiguió; un build sin Internet (el servidor propio) fallaba igual.
+- **Misma identidad visual:** son los archivos que servía Google Fonts, generados desde las fuentes oficiales de google/fonts (Inter 4.001 con el tamaño óptico fijo en 14 y el peso variable; Manrope 4.505 SemiBold). Comparados glifo por glifo con lo que servía Google: contornos y anchos idénticos en 400, 500 y 600. Capturas antes/después del login y de una muestra de todos los pesos y tamaños: 0 píxeles distintos. Mismas variables (`--font-inter`, `--font-manrope`), tokens y pesos.
+- Licencias SIL OFL 1.1 junto a los archivos; origen, hashes y cómo regenerarlos en `frontend/src/app/fonts/README.md`. Test `frontend/tests/fonts.test.ts`: ningún archivo vuelve a cargar fuentes de Google.
+
 ### Changed — R9‑5 DONE (aplicación)
 - R9‑5‑6 **DONE** (PR #66, 2026-11-02) y, con ella, **R9‑5 y R9 DONE desde la aplicación**: lista para el piloto (S3).
 - El go‑live de producción sigue **BLOCKED** hasta: S3 en el equipo real (dominio, Tailscale, bucket externo, alertas, LAN y acceso remoto, simulacro de pérdida total y benchmark con la imagen completa `deploy/postgres` y pgBackRest activo), el PR #65 de S1, el checklist O10 verificado en el equipo real (handoff enviado a S1) y la asignación de las áreas protegidas Empleados y Store Sys, que define Enzo.

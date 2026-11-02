@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# Raises the detail of PostgreSQL's logs for a limited time during an incident, and puts it back (docs/OPERATIONS.md).
+#   deploy/bin/db-log-detail on <minutes> <reason>   DETAIL and the failing statement in the db log, up to 120 min
+#   deploy/bin/db-log-detail off                     back to the safe level now
+#   deploy/bin/db-log-detail status                  off | on until <time> (<reason>) | unsafe <values>
+#   deploy/bin/db-log-detail expire                  like status, after restoring the safe level if the time ran out
+# The safe level is the one of deploy/docker-compose.prod.yml (terse, no statements). "on" overrides it only for the
+# app's role in the app's database (ALTER ROLE ... IN DATABASE), which new connections read; idle connections are
+# closed so the app's pool reopens them with the new level (pool_pre_ping: users see nothing).
+# Only who can run Docker on the server can use it. Every change goes to deploy/state/db-log-detail.log.
+# While on, the db log can hold personal data again: it stays there until Docker rotates it (5 files of 10 MB).
+# shellcheck source=lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+STATE_FILE="$STATE_DIR/db-log-detail"
+MAX_MINUTES="${DB_LOG_DETAIL_MAX_MINUTES:-120}"
+
+audit() { printf '%s %s by %s\n' "$(date -Is)" "$*" "${SUDO_USER:-${USER:-?}}" >> "$STATE_DIR/db-log-detail.log"; }
+target() { printf 'ROLE "%s" IN DATABASE "%s"' "$POSTGRES_USER" "$POSTGRES_DB"; }
+
+# Closes the idle connections of the app's database that started before $1 (epoch), so each reopens with the
+# current level. Busy ones are closed once they turn idle; gives up after 30 s and says how many are left.
+reopen_connections() {
+    local older="datname = current_database() AND backend_type = 'client backend' AND pid <> pg_backend_pid()
+        AND backend_start < to_timestamp($1)" left waited=0
+    while :; do
+        psql_db -XtA -c "SELECT count(pg_terminate_backend(pid)) FROM pg_stat_activity WHERE $older AND state = 'idle'" > /dev/null
+        left="$(psql_db -XtA -c "SELECT count(*) FROM pg_stat_activity WHERE $older")"
+        if [ "$left" -eq 0 ] || [ "$waited" -ge 30 ]; then break; fi
+        sleep 2; waited=$((waited + 2))
+    done
+    [ "$left" -eq 0 ] || log "db-log-detail: $left busy connections keep the previous level until they reconnect"
+}
+
+current_level() { psql_db -XtA -F' ' -c "SELECT current_setting('log_error_verbosity'), current_setting('log_min_error_statement')"; }
+
+status() {
+    local level
+    level="$(current_level 2> /dev/null)" || { echo unknown; return 0; }
+    if [ "$level" = "terse panic" ]; then
+        echo off
+    elif [ -f "$STATE_FILE" ]; then
+        local until reason
+        read -r until reason < "$STATE_FILE"
+        echo "on until $(date -d "@$until" '+%Y-%m-%d %H:%M') ($reason)"
+    else
+        echo "unsafe $level"
+    fi
+}
+
+off() {
+    local now
+    now="$(date +%s)"
+    psql_db -q -c "ALTER $(target) RESET log_error_verbosity" -c "ALTER $(target) RESET log_min_error_statement"
+    rm -f "$STATE_FILE"
+    reopen_connections "$now"
+}
+
+case "${1:-status}" in
+    on)
+        minutes="${2:-}" reason="${*:3}"
+        if ! [[ "$minutes" =~ ^[0-9]+$ ]] || [ "$minutes" -lt 1 ] || [ "$minutes" -gt "$MAX_MINUTES" ]; then
+            die "usage: db-log-detail on <minutes 1-$MAX_MINUTES> <reason>"
+        fi
+        [ -n "$reason" ] || die "say why (incident reference): db-log-detail on $minutes <reason>"
+        now="$(date +%s)"
+        echo "$((now + minutes * 60)) $reason" > "$STATE_FILE"
+        psql_db -q -c "ALTER $(target) SET log_error_verbosity = 'default'" \
+            -c "ALTER $(target) SET log_min_error_statement = 'error'"
+        audit "on for $minutes min: $reason"
+        reopen_connections "$now"
+        status
+        ;;
+    off)
+        off
+        audit "off"
+        status
+        ;;
+    status)
+        status
+        ;;
+    expire)
+        if [ -f "$STATE_FILE" ] && [ "$(cut -d' ' -f1 "$STATE_FILE")" -le "$(date +%s)" ]; then
+            reason="$(cut -d' ' -f2- "$STATE_FILE")"
+            off
+            audit "off (time ran out)"
+            echo "restored ($reason)"
+        else
+            status
+        fi
+        ;;
+    *)
+        die "usage: db-log-detail on <minutes> <reason> | off | status | expire"
+        ;;
+esac
