@@ -1,6 +1,8 @@
+import pytest
 from alembic import command
 from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.exc import DBAPIError
 
 from tests.conftest import alembic_config
 
@@ -18,6 +20,8 @@ EXPECTED_TABLES = {
     "third_parties",
     "outlets",
 }
+# F1.1b (0033): the import framework, kept apart so the tests that go below 0033 keep comparing EXPECTED_TABLES.
+IMPORT_TABLES = {"import_files", "import_jobs", "import_rows", "data_quality_issues"}
 
 
 def _schemas(url: str) -> set[str]:
@@ -405,3 +409,47 @@ def test_faster_ledger_guards_migration_goes_down_and_up() -> None:
             assert dict(conn.execute(guards).all()) == faster
     finally:
         engine.dispose()
+
+
+def test_import_framework_migration_goes_down_and_up_and_never_drops_history() -> None:
+    """F1.1b: 0033 only adds the import framework's tables. Empty, going back to 0032 removes exactly them; with a
+    job recorded, the downgrade is refused (the import history is never dropped)."""
+    cfg = alembic_config()
+    url = cfg.get_main_option("sqlalchemy.url")
+    assert url
+
+    command.upgrade(cfg, "head")
+    assert _tables(url) >= EXPECTED_TABLES | IMPORT_TABLES
+    command.downgrade(cfg, "0032")
+    assert _tables(url).isdisjoint(IMPORT_TABLES)
+    assert _tables(url) >= EXPECTED_TABLES
+    command.upgrade(cfg, "head")
+    assert _tables(url) >= IMPORT_TABLES
+
+    engine = create_engine(url)
+    try:
+        with engine.begin() as conn:
+            user_id = conn.execute(
+                text("INSERT INTO users (email, full_name, role) VALUES ('m@x.test', 'M', 'admin') RETURNING id")
+            ).scalar_one()
+            file_id = conn.execute(
+                text(
+                    "INSERT INTO import_files (original_filename, storage_key, size_bytes, sha256, uploaded_by) "
+                    "VALUES ('a.csv', 'k', 1, 'h', :u) RETURNING id"
+                ),
+                {"u": user_id},
+            ).scalar_one()
+            conn.execute(
+                text("INSERT INTO import_jobs (status, file_id, created_by) VALUES ('processing', :f, :u)"),
+                {"f": file_id, "u": user_id},
+            )
+        with pytest.raises(DBAPIError, match="downgrade refused"):
+            command.downgrade(cfg, "0032")
+        assert _tables(url) >= IMPORT_TABLES
+    finally:
+        with engine.begin() as conn:
+            conn.execute(text("DELETE FROM import_jobs"))
+            conn.execute(text("DELETE FROM import_files"))
+            conn.execute(text("DELETE FROM users WHERE email = 'm@x.test'"))
+        engine.dispose()
+        command.upgrade(cfg, "head")

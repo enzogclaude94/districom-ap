@@ -6,6 +6,7 @@ from app.api.v1 import csp, health
 from app.modules import MODULES
 from app.platform.auth import router as auth
 from app.platform.banks import router as banks
+from app.platform.imports import router as imports
 from app.platform.modules import install
 from app.platform.outlets import router as outlets
 from app.platform.parties import router as employees
@@ -25,6 +26,7 @@ api_router.include_router(banks.router)
 api_router.include_router(vehicles.router)
 api_router.include_router(third_parties.router)
 api_router.include_router(outlets.router)
+api_router.include_router(imports.router)
 
 for module in MODULES:
     install(module)
