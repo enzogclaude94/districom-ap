@@ -65,7 +65,7 @@ SOURCE_FIELDS = {
 
 def _row_hash(record: SourceProduct) -> bytes:
     payload = {k: (str(v) if isinstance(v, Decimal) else v) for k, v in asdict(record).items()}
-    return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).digest()
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str).encode()).digest()
 
 
 def _category_for(db: Session, source_category: str | None) -> ProductCategory | None:

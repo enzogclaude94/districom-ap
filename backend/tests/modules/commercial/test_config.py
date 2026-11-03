@@ -176,6 +176,22 @@ def test_manual_configuration_wins_and_keeps_history(db: Session, seeded: None, 
     assert days(db, luvi.id, later) == [1]
     voided = db.scalars(select(ZoneVisitDay).where(ZoneVisitDay.voided_at.is_not(None))).all()
     assert [(d.weekday, d.valid_from) for d in voided] == [(4, later)]
+    # History is written forward only: a change dated before the last one is refused, not overlapped.
+    with pytest.raises(AppError) as exc:
+        service.configure_zone(
+            db,
+            admin,
+            luvi.id,
+            zone_type="PRESALE",
+            requires_visit=True,
+            weekdays=[2],
+            effective_from=DAY,
+            display_name=None,
+            active=None,
+            reason="Fecha vieja",
+        )
+    assert exc.value.code == "zone_change_out_of_order"
+    db.rollback()
     # The rule is still there, but the zone is MANUAL now: a new rule or re-seeding never touches it.
     seed_config(db)
     db.refresh(luvi)

@@ -196,6 +196,23 @@ def _set_days(db: Session, zone_id: int, weekdays: set[int], effective_from: dat
     db.flush()
 
 
+def _check_forward(db: Session, zone_id: int, effective_from: date) -> None:
+    """Visit days are written forward only: a change cannot start before the last one did (nor inside a range that
+    already ended), or the history would overlap. Reordering history is not an admin edit."""
+    latest_start, latest_end = db.execute(
+        select(func.max(ZoneVisitDay.valid_from), func.max(ZoneVisitDay.valid_to)).where(
+            ZoneVisitDay.zone_id == zone_id, ZoneVisitDay.voided_at.is_(None)
+        )
+    ).one()
+    if (latest_start and effective_from < latest_start) or (latest_end and effective_from <= latest_end):
+        raise AppError(
+            409,
+            "zone_change_out_of_order",
+            "La fecha de vigencia es anterior al último cambio de días de la zona.",
+            {"latest_change": max(d for d in (latest_start, latest_end) if d).isoformat()},
+        )
+
+
 def _zone_state(db: Session, zone: Zone, on: date) -> dict[str, Any]:
     return {
         "display_name": zone.display_name,
@@ -236,6 +253,7 @@ def configure_zone(
     if not requires_visit and days:
         raise AppError(422, "visit_days_without_visit", "Una zona sin visita no tiene días.")
     clean_reason = _reason(reason, required=True)
+    _check_forward(db, zone.id, effective_from)
     before = _zone_state(db, zone, effective_from)
     zone.zone_type = zone_type
     zone.requires_visit = requires_visit
