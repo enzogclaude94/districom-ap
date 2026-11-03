@@ -112,7 +112,12 @@ class ImportAdapter(Protocol):
 
     def analyze(self, db: Session, workbook: Workbook, context: AnalyzeContext) -> Analysis: ...
 
-    def write(self, db: Session, context: ConfirmContext, rows: Sequence[StagedRow]) -> Sequence[RowOutcome]: ...
+    def write(self, db: Session, context: ConfirmContext, rows: Sequence[StagedRow]) -> Sequence[RowOutcome]:
+        """Write `rows` (every staged row whose status is valid, warning or pending_resolution) and return
+        **exactly one** outcome per row: no row may be left without one, none may get two, and no other row may
+        appear. A row the adapter decides not to change is `unchanged`, never omitted. The platform fails the whole
+        confirmation (`adapter_contract_violation`, full rollback) when the outcomes break this contract."""
+        ...
 
 
 @dataclass(frozen=True)

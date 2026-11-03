@@ -318,6 +318,42 @@ def test_structural_error_on_write_rolls_back(
     assert items(db) == {}
 
 
+THREE_ROWS = [["codigo", "nombre", "cantidad"], [1, "a", 1], [2, "b", 2], [3, "c", 3]]
+
+
+@pytest.mark.parametrize("reported", [2, 0])
+def test_missing_outcomes_fail_the_confirmation_and_roll_back(
+    db: Session,
+    operator: User,
+    settings: Settings,
+    synthetic_types: SyntheticTypes,
+    caplog: pytest.LogCaptureFixture,
+    reported: int,
+) -> None:
+    """The adapter writes all 3 writable rows but reports outcomes for fewer: the platform refuses the contract."""
+    service.confirm(
+        db, operator, settings, upload(db, operator, settings, xlsx([THREE_ROWS[0], [9, "z", 9]]), "s.xlsx").id
+    )
+    before = items(db)
+    job = upload(db, operator, settings, xlsx(THREE_ROWS), "t.xlsx")
+    assert (job.status, job.rows_valid) == ("pending", 3)
+    synthetic_types.items.knobs.report_only = reported
+    caplog.set_level(logging.INFO)
+
+    job = service.confirm(db, operator, settings, job.id)
+
+    assert (job.status, job.failure_reason) == ("failed", "adapter_contract_violation")
+    assert items(db) == before  # the 3 writes were rolled back
+    assert [outcome for _, _, outcome in statuses(db, job.id)] == [None, None, None, None]
+    assert (job.rows_inserted, job.rows_updated, job.rows_unchanged, job.rows_superseded) == (0, 0, 0, 0)
+    events = db.scalars(select(AuditEvent.event_type).where(AuditEvent.entity_id == str(job.id))).all()
+    assert "platform.import.confirmed" not in events
+    assert events[-1] == "platform.import.failed"
+    logged = [r for r in caplog.records if r.getMessage() == "import_adapter_contract_violation"]
+    assert len(logged) == 1
+    assert logged[0].__dict__["error"] == f"Adapter {TYPE_KEY} returned {reported} outcomes for 3 writable rows"
+
+
 def test_only_pending_jobs_confirm_or_cancel(db: Session, operator: User, settings: Settings) -> None:
     job = upload(db, operator, settings, biff7_xls(REPORT))
     assert service.cancel(db, operator, job.id).status == "cancelled"

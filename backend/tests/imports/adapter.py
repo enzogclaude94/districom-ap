@@ -55,6 +55,8 @@ class Knobs:
     write_during_analyze: bool = False
     fail_after_writes: int | None = None
     structural_error_on_write: bool = False
+    # Write every row but report outcomes for only this many (the contract test).
+    report_only: int | None = None
     # Set while a confirmation is inside `write`; it then waits for `release` (lock tests).
     entered: threading.Event = field(default_factory=threading.Event)
     release: threading.Event | None = None
@@ -222,6 +224,8 @@ class ItemsAdapter:
                     values,
                 )
                 outcomes.append(RowOutcome(row.id, "updated", "test_item"))
+        if self.knobs.report_only is not None:
+            return outcomes[: self.knobs.report_only]
         return outcomes
 
 

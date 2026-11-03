@@ -65,6 +65,11 @@ WRITABLE_STATUSES = ("valid", "warning", "pending_resolution")
 RECOVER_AFTER = timedelta(minutes=30)
 
 
+class AdapterContractError(Exception):
+    """The adapter's outcomes do not cover the rows it was given exactly once (ImportAdapter.write). The message
+    carries only the type and counts, never row values."""
+
+
 @dataclass(frozen=True)
 class Upload:
     stream: BinaryIO
@@ -420,6 +425,18 @@ def confirm(db: Session, user: User, settings: Settings, job_id: int) -> ImportJ
     except StructuralError as exc:
         db.rollback()
         return _fail(db, db.get_one(ImportJob, job_id), exc.reason, exc.message, details=exc.details)
+    except AdapterContractError as exc:
+        db.rollback()
+        logger.error(
+            "import_adapter_contract_violation",
+            extra={"import_job_id": job_id, "import_type": entry.spec.key, "error": str(exc)},
+        )
+        return _fail(
+            db,
+            db.get_one(ImportJob, job_id),
+            "adapter_contract_violation",
+            "El importador no informó el resultado de todas las filas; no se escribió nada.",
+        )
     except Exception:
         db.rollback()
         logger.exception("import_confirm_failed", extra={"import_job_id": job_id, "import_type": entry.spec.key})
@@ -478,7 +495,7 @@ def _write(db: Session, user: User, job: ImportJob, entry: RegisteredType) -> No
     seen: set[int] = set()
     for outcome in outcomes:
         if outcome.row_id not in ids or outcome.row_id in seen or outcome.outcome not in ROW_OUTCOMES:
-            raise RuntimeError(f"Adapter {entry.spec.key} returned an invalid outcome")
+            raise AdapterContractError(f"Adapter {entry.spec.key} returned an invalid outcome")
         seen.add(outcome.row_id)
         counts[outcome.outcome] += 1
         values: dict[str, Any] = {"outcome": outcome.outcome}
@@ -487,6 +504,10 @@ def _write(db: Session, user: User, job: ImportJob, entry: RegisteredType) -> No
         if outcome.entity_id is not None:
             values["entity_id"] = outcome.entity_id
         db.execute(update(ImportRow).where(ImportRow.id == outcome.row_id).values(**values))
+    if seen != ids:  # a writable row without an outcome: never close the job over a silently skipped row
+        raise AdapterContractError(
+            f"Adapter {entry.spec.key} returned {len(seen)} outcomes for {len(ids)} writable rows"
+        )
 
     _record_row_issues(
         db,

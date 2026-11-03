@@ -69,7 +69,7 @@ SUBIR → DETECTAR → ANALIZAR ─────────────► PREVI
   
   Imprime un resumen JSON con el estado y los contadores, nunca valores de filas. Sale con 0 si terminó, 2 si el job quedó `failed` y 1 si no se pudo ni intentar (usuario, permisos, extensión, tamaño).
 
-**Registro de tipos (F1.1b).** Cada módulo declara sus tipos en `ModuleSpec.import_types` (`ImportTypeSpec`: clave con el prefijo del módulo, nombre, sistema fuente y adaptador) y sus códigos de issue en `ModuleSpec.quality_codes`. El adaptador implementa `score(workbook)` (0–1, umbral 0,8), `analyze(db, workbook, ctx)` y `write(db, ctx, filas)`; la plataforma hace todo lo demás. El análisis corre en una transacción `READ ONLY`: un adaptador que intenta escribir falla con `unexpected_error`.
+**Registro de tipos (F1.1b).** Cada módulo declara sus tipos en `ModuleSpec.import_types` (`ImportTypeSpec`: clave con el prefijo del módulo, nombre, sistema fuente y adaptador) y sus códigos de issue en `ModuleSpec.quality_codes`. El adaptador implementa `score(workbook)` (0–1, umbral 0,8), `analyze(db, workbook, ctx)` y `write(db, ctx, filas)`; la plataforma hace todo lo demás. `write` recibe todas las filas escribibles y devuelve **exactamente un** resultado por fila (`inserted`, `updated`, `unchanged` o `superseded`; una fila sin cambios es `unchanged`, nunca se omite): si no, la confirmación falla entera. El análisis corre en una transacción `READ ONLY`: un adaptador que intenta escribir falla con `unexpected_error`.
 
 ## 3. Fuentes → entidades
 
@@ -373,6 +373,7 @@ Zonas y productos **no usan mappings**: se identifican por `commercial.zones.nam
 | `header_mismatch` | El tipo elegido no coincide con los encabezados |
 | `missing_columns` | El adaptador no encuentra columnas requeridas (+ issue `platform.import.missing_columns`) |
 | `interrupted` | Lo marcó `imports recover` |
+| `adapter_contract_violation` | El adaptador no devolvió exactamente un resultado por cada fila escribible (`valid`, `warning`, `pending_resolution`): faltó alguna, sobró o se repitió. Rollback total; el log lleva solo tipo y contadores |
 | `unexpected_error` | Cualquier otra excepción; se loguea con `job_id`, nunca con valores |
 | otros del adaptador | Un error estructural propio del reporte (`StructuralError`), con su código |
 
