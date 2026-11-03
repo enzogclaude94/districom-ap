@@ -1,5 +1,7 @@
 """Import every model module so Base.metadata is complete (used by Alembic)."""
 
+from app.modules.commercial.catalog import models as commercial_catalog_models
+from app.modules.commercial.config import models as commercial_config_models
 from app.modules.settlements.cheques import models as settlements_cheques_models
 from app.modules.settlements.delivery import models as settlements_delivery_models
 from app.modules.settlements.employee_finance import models as settlements_employee_finance_models
@@ -12,7 +14,9 @@ from app.modules.settlements.pending import models as settlements_pending_models
 from app.platform.audit import models as audit_models
 from app.platform.auth import models as auth_models
 from app.platform.banks import models as banks_models
+from app.platform.customers import models as customers_models
 from app.platform.imports import models as imports_models
+from app.platform.mappings import models as mappings_models
 from app.platform.outlets import models as outlets_models
 from app.platform.parties import models as parties_models
 from app.platform.quality import models as quality_models
@@ -25,7 +29,11 @@ __all__ = [
     "audit_models",
     "auth_models",
     "banks_models",
+    "commercial_catalog_models",
+    "commercial_config_models",
+    "customers_models",
     "imports_models",
+    "mappings_models",
     "outlets_models",
     "parties_models",
     "quality_models",
