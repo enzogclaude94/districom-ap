@@ -328,6 +328,12 @@ Zonas y productos **no usan mappings**: se identifican por `commercial.zones.nam
 - Confirmar un mapping completa los hechos guardados con `*_id NULL` que lo esperaban y cierra sus issues, en una transacción auditada.
 - **No hay sugerencias por similitud de texto en Fase 1.**
 
+**Implementado en F1.2** (`app/platform/mappings/`, migración `0034`):
+- `resolve` / `resolve_many` solo leen (los usa el análisis, en su transacción `READ ONLY`); `observe` escribe al confirmar el import y, si el mapping existe, solo refresca `external_label` y `last_seen_job_id`.
+- Un import crea `confirmed` solo con método automático (`created_from_master`, `exact_external_id`, `rule`) y su entidad. Si no, `pending` (con a lo sumo un candidato **exacto**, p. ej. `customers.exact_name_candidates`, que es una propuesta y nunca se confirma sola) o `ambiguous` (dos o más).
+- Decisiones: un `operator` del módulo confirma, rechaza o excluye un mapping abierto; un `admin` vincula un código excluido, excluye uno confirmado o lo reasigna. Excluir, reasignar y vincular un excluido exigen motivo. La entidad debe existir y estar activa (`invalid_mapping_entity`). La auditoría guarda estado, entidad, método, tipo, namespace y motivo, **nunca** el código ni la etiqueta externa.
+- No hay endpoint que cree un cliente ni un mapping: solo los imports (F1.3). API en `/api/v1/commercial/customers` y `/mappings`.
+
 ## 7. Errores, calidad de datos y reproceso
 
 **Tres niveles:**
