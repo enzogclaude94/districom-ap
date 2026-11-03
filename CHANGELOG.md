@@ -4,6 +4,17 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Added — Servidor: lista «Antes del go‑live de la app» (handoff O10)
+- **`docs/OPERATIONS.md §2.1`:** once ítems obligatorios, cada uno con cómo se verifica y qué evidencia queda. No se pone en producción con un ítem en FAIL o sin evidencia. Paso 11 nuevo en la instalación.
+- **Adaptado del bloque de R9‑5‑6:**
+  - los comandos HTTPS usan `--resolve`, como el smoke, porque `caddy_curl` no es un comando;
+  - el conteo de `csp_violation` se hace desde la hora del recorrido;
+  - las áreas protegidas se asignan solo a la lista de Enzo;
+  - el restore exige también el simulacro desde `repo2` (pérdida total);
+  - el ítem 10 exige O6 y O7 implementados y verificados en el equipo real; un pendiente anotado no cuenta como PASS;
+  - el benchmark corre sobre el dataset ficticio de `perf.generate` en un PostgreSQL descartable de la imagen de producción, nunca sobre la base de producción ni una copia suya.
+- Sin cambios de código.
+
 ### Changed — Servidor: readiness en smoke y monitor, logs de PostgreSQL sin datos personales
 - **Smoke y monitor usan `/api/v1/health/ready`** (R9‑5‑4, handoff O6):
   - el smoke falla si la base no está en la migración del código;
