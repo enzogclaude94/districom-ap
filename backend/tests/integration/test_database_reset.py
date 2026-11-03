@@ -21,7 +21,7 @@ def _tables(conn: Connection) -> set[str]:
         conn.execute(
             text(
                 "SELECT n.nspname || '.' || c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
-                "WHERE c.relkind = 'r' AND n.nspname IN ('public', 'settlements')"
+                "WHERE c.relkind = 'r' AND n.nspname IN ('public', 'settlements', 'commercial')"
             )
         ).scalars()
     )

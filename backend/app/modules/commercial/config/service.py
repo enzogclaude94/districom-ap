@@ -221,6 +221,7 @@ def configure_zone(
     reason: str | None,
 ) -> Zone:
     """An admin's explicit configuration: from now on the zone is MANUAL and no rule touches it again."""
+    actor_id = actor.id  # read before any change: an expired actor would autoflush a half-made configuration
     zone = db.scalars(select(Zone).where(Zone.id == zone_id).with_for_update()).first()
     if zone is None:
         raise AppError(404, "zone_not_found", "Esa zona no existe.")
@@ -245,10 +246,10 @@ def configure_zone(
     if active is not None:
         zone.active = active
     zone.configuration_origin = "MANUAL"
-    zone.configured_by = actor.id
+    zone.configured_by = actor_id
     zone.configured_at = func.now()
     db.flush()
-    _set_days(db, zone.id, days, effective_from, actor.id)
+    _set_days(db, zone.id, days, effective_from, actor_id)
     after = _zone_state(db, zone, effective_from)
     _audit(
         db,

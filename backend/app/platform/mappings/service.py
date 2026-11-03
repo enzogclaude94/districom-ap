@@ -306,3 +306,32 @@ def exclude(db: Session, actor: User, mapping_id: int, *, reason: str | None, is
         raise AppError(403, "forbidden", "Solo un admin excluye un vínculo confirmado.")
     clean = _reason(reason, required=True)
     return _decide(db, actor, mapping, "excluded", status="excluded", entity_id=None, reason=clean)
+
+
+def search(
+    db: Session,
+    *,
+    entity_type: str | None,
+    source_system: str | None,
+    namespace: str | None,
+    statuses: Sequence[str],
+    limit: int,
+    offset: int,
+) -> tuple[Sequence[ExternalEntityMapping], int]:
+    """The mappings to review, oldest first (what waits longest goes first)."""
+    query = select(ExternalEntityMapping)
+    if entity_type:
+        query = query.where(ExternalEntityMapping.entity_type == entity_type)
+    if source_system:
+        query = query.where(ExternalEntityMapping.source_system_id == source_system_id(db, source_system))
+    if namespace:
+        query = query.where(ExternalEntityMapping.namespace == namespace)
+    if statuses:
+        query = query.where(ExternalEntityMapping.status.in_(statuses))
+    total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
+    rows = db.scalars(query.order_by(ExternalEntityMapping.id).offset(offset).limit(limit)).all()
+    return rows, total
+
+
+def source_codes(db: Session) -> dict[int, str]:
+    return {row.id: row.code for row in db.execute(select(SourceSystem.id, SourceSystem.code))}
