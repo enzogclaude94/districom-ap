@@ -12,8 +12,10 @@ from app.modules.settlements.pending import models as settlements_pending_models
 from app.platform.audit import models as audit_models
 from app.platform.auth import models as auth_models
 from app.platform.banks import models as banks_models
+from app.platform.imports import models as imports_models
 from app.platform.outlets import models as outlets_models
 from app.platform.parties import models as parties_models
+from app.platform.quality import models as quality_models
 from app.platform.settings import models as settings_models
 from app.platform.sources import models as sources_models
 from app.platform.third_parties import models as third_parties_models
@@ -23,8 +25,10 @@ __all__ = [
     "audit_models",
     "auth_models",
     "banks_models",
+    "imports_models",
     "outlets_models",
     "parties_models",
+    "quality_models",
     "settings_models",
     "settlements_cheques_models",
     "settlements_delivery_models",

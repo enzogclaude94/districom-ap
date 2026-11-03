@@ -1,6 +1,6 @@
 # PLAN — DistriCom · Plataforma de Inteligencia Comercial
 
-> Estado del documento: **v0.5 — Fase 0 DONE; plataforma modular DONE; Fase 1 de Comercial IN_PROGRESS (F1.0 aprobado, F1.1a en revisión)**
+> Estado del documento: **v0.5 — Fase 0 DONE; plataforma modular DONE; Fase 1 de Comercial IN_PROGRESS (F1.0 y F1.1a aprobados, F1.1b en revisión)**
 > Última actualización: 2026-10-30 (secciones de Comercial; las de Rendiciones las mantiene su hilo)
 > Fuente de requisitos: prompt maestro adjunto por Enzo (`message.md`, 165 secciones).
 
@@ -266,10 +266,11 @@ Estado: **IN_PROGRESS.** Diseño F1.0 aprobado por Enzo el 2026-10-30 con las de
 | Muestras de formato STORE SYS: clientes, ventas, comprobantes | Recibidas y perfiladas (2026-10-30, `docs/IMPORTS.md §3`) |
 | Muestras: maestro de artículos y AXUM No Compra | **Pendiente (Enzo)** — necesarias para F1.3 / F1.4 |
 | F1.0 diseño técnico | Aprobado (2026-10-30) |
-| F1.1a documentación | En revisión (este PR) |
-| F1.1b – F1.8 | Pendientes de aprobación sucesiva |
+| F1.1a documentación | Aprobada y mergeada (PR #56, 2026-11-02) |
+| F1.1b infraestructura de importación | En revisión (este PR) |
+| F1.2 – F1.8 | Pendientes de aprobación sucesiva |
 
-**Confirmaciones pendientes de Enzo** (ADR 014 §3), ninguna bloquea F1.1b:
+**Confirmaciones de ADR 014 §3:** Enzo respondió S1–S8 el 2026-11-01; ninguna afecta F1.1b y se vuelcan en los documentos de F1.2/F1.3, que las aplican. Lista original:
 - S1 días de visita de las zonas `RUTA 03` y `RUTA 05` (MISA) · S2 `LUVI` = Lumivi y `MAJU` = Majusa → antes de sembrar reglas (F1.2).
 - S3 clasificación de los tipos de comprobante observados → antes de sembrar `document_types` (F1.2).
 - S4 si *Ventas artículos/clientes* puede exportarse con código de cliente · S7 muestra de ventas de varios días · S8 si los `.xls` pasaron por Excel → antes de F1.3.

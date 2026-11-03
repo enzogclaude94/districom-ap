@@ -4,6 +4,15 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Added — F1.1b: infraestructura de importación de plataforma
+- **Migración `0033`** (`platform: …`): `import_files`, `import_jobs`, `import_rows` (staging) y `data_quality_issues`, con CHECKs de estado, formato, motivo de falla, duplicado y período, y el índice único parcial de issues abiertos por `(code, dedupe_key)`. El downgrade se niega si hay jobs o issues.
+- **`app/platform/imports/`**: originales guardados bajo `UPLOAD_DIR` (nueva variable, default `../data/uploads`) con nombre UUID, SHA‑256, límite `UPLOAD_MAX_SIZE_MB` y permisos de solo lectura; **detección por firma** (OLE2 → XLS, ZIP con partes de workbook → XLSX, texto → CSV; `.xlsm`, HTML y SpreadsheetML rechazados); lectores **XLS BIFF2‑8** (`xlrd`, incluido el BIFF7 cp1252 de STORE SYS), **XLSX** (`openpyxl` solo lectura, sin fórmulas, con tope de descompresión) y **CSV** (UTF‑8/BOM/CP1252, separador `;` `,` tab); registro de tipos por módulo (`ModuleSpec.import_types`) con detección por encabezados; pipeline subir → detectar → analizar (transacción `READ ONLY`) → preview → confirmar bajo **lock consultivo por tipo** en **una transacción**, rollback total ante cualquier falla, **duplicado por `sha256` + tipo** (revisado otra vez bajo el lock), cancelación, reproceso (admin) y recuperación de jobs interrumpidos. El adapter debe devolver exactamente un resultado por fila escribible; si omite, repite o inventa alguna, la confirmación falla entera (`adapter_contract_violation`).
+- **`app/platform/quality/`**: registro de códigos por módulo (`ModuleSpec.quality_codes`) y `record_issue` (inserta o suma ocurrencias); códigos `platform.import.duplicate_file`, `invalid_row`, `missing_columns`.
+- **API** `/api/v1/imports` (tipos, subir, listar, detalle, filas, issues, confirmar, cancelar, reprocesar) con permisos del módulo dueño de cada tipo; **CLI** `imports analyze|confirm|reprocess|recover`.
+- Contrato de import‑linter nuevo: solo los lectores importan `xlrd`, `openpyxl` y `csv`. Dependencias: `xlrd`, `openpyxl`, `defusedxml`, `python-multipart`; de desarrollo `xlwt` y `types-openpyxl`.
+- Tests con un adaptador **sintético** (`tests/imports/`) y fixtures generados en el test (BIFF7 cp1252 escrito a mano, BIFF8, XLSX, CSV): lectores, extensión engañosa, archivos dañados, topes, idempotencia, rollback, lock concurrente, recuperación, permisos y ausencia de valores de filas en logs, auditoría e issues. Sin adaptadores reales ni datos comerciales.
+- `docs/IMPORTS.md` (motivos de falla, API, CLI, espera del lock, reproceso desde el archivo), `DATA_MODEL.md §7`, `docs/SECURITY.md`, `ROADMAP.md`, `PLAN.md` y `CLAUDE.md §2` actualizados. F1.1a **DONE** (PR #56).
+
 ### Added — Servidor: lista «Antes del go‑live de la app» (handoff O10)
 - **`docs/OPERATIONS.md §2.1`:** once ítems obligatorios, cada uno con cómo se verifica y qué evidencia queda. No se pone en producción con un ítem en FAIL o sin evidencia. Paso 11 nuevo en la instalación.
 - **Adaptado del bloque de R9‑5‑6:**
