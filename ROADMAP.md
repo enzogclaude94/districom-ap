@@ -61,6 +61,12 @@ Cada fase empieza solo con aprobación explícita de Enzo y termina con un infor
 | S3 | Piloto en el equipo real: dominio, Tailscale, bucket externo, pruebas LAN y remotas, simulacro de pérdida total | PLANNED: pendiente de implementación y validación en el hardware real (requiere hardware, dominio y contrataciones aprobadas) | S1 · S2 |
 | S4 | Producción de Rendiciones en paralelo con el método actual | PLANNED | S3 |
 | S5 | Endurecimiento y crecimiento (Comercial en el mismo servidor) | PLANNED | S4 |
+| W1 | ADR 016 (Propuesto): despliegue nativo en Windows 11 Pro, en el mismo equipo que Store Sys; plan `docs/WINDOWS_DEPLOYMENT.md` | IN REVIEW (autorizada por Enzo el 2026-11-03; solo documentación). El ADR 016 sigue «Propuesto» hasta validar la infraestructura Windows | S2 |
+| W2‑A | Prueba de concepto aislada de backups físicos, WAL, PITR y restauración en Windows (`deploy/windows/backup/`, job de CI en Windows) | PLANNED: enfoque aprobado en lo general; implementación **no autorizada** hasta resolver W1 | W1 |
+| W2‑B | Pruebas automatizadas de los componentes compatibles con Windows | PLANNED | W2‑A |
+| W2‑C | Resto de la infraestructura Windows (operación, instalación, servicios, firewall, cierre de jornada, suite de aceptación) | PLANNED: se planifica solo después de validar W2‑A | W2‑A · W2‑B |
+
+Desde el 2026-11-03 la plataforma definitiva es **Windows 11 Pro nativo** (ADR 016, propuesto): S3 se hará sobre ella después de W2‑C. El diseño Linux (ADR 013) se conserva hasta validar la alternativa Windows.
 
 Cada etapa termina con un informe y la aprobación de Enzo. Despliegue, red, backups, acceso remoto, operación y coordinación del CI son del hilo Servidor (D7, D9).
 
