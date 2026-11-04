@@ -153,6 +153,15 @@ Son objetivos a medir en las pruebas, no garantías ya verificadas.
 
 Si un paso falla antes del 4, la app vuelve a quedar disponible. Si falla después, los servicios quedan detenidos y se avisa al responsable: no se apaga hasta resolverlo o registrar el riesgo.
 
+**Requisitos obligatorios para validar W2‑C** (observaciones de Enzo del 2026-11-04). La secuencia de cierre no se considera segura hasta resolverlos y probarlos:
+1. **Bloqueo de escrituras efectivo y reversible.** `REVOKE CONNECT` no desconecta las sesiones existentes, y puede no alcanzar si otros roles conservan el permiso por `PUBLIC`. Hay que diseñar un bloqueo que:
+   - corte también las sesiones abiertas;
+   - cubra todos los roles que pueden escribir;
+   - se pueda revertir;
+   - se recupere tras un error a mitad del cierre;
+   - se restablezca solo en el siguiente arranque.
+2. **Comprobación correcta del WAL y del apagado limpio.** `pg_controldata` no alcanza por sí solo para certificar que no hubo escrituras posteriores a un LSN. Hay que diseñar y probar una comprobación correcta del WAL hasta el apagado, por ejemplo con el contenido real del WAL posterior al LSN y el estado del clúster.
+
 **Windows Update:** horas activas y aplazamiento por directiva; parches en el cierre de jornada.
 
 ## 7. Actualización y rollback
@@ -162,8 +171,8 @@ Si un paso falla antes del 4, la app vuelve a quedar disponible. Si falla despu�
 
 | Etapa | Qué | Dónde se prueba | Estado |
 |---|---|---|---|
-| **W1** | ADR 016 (Propuesto) y este plan | CI (documentación) | En revisión |
-| **W2‑A** | Prueba de concepto aislada de backups físicos, WAL, PITR y restauración (`deploy/windows/backup/`) | GitHub Actions (Windows); lo no reproducible queda PENDIENTE | Alcance aprobado en lo general; implementación **no autorizada** |
+| **W1** | ADR 016 (Propuesto) y este plan | CI (documentación) | DONE (PR #70, 2026-11-04) |
+| **W2‑A** | Prueba de concepto aislada de backups físicos, WAL, PITR y restauración (`deploy/windows/backup/`) | GitHub Actions (Windows); lo no reproducible queda PENDIENTE | Implementada (autorizada el 2026-11-04), en revisión: ver §8.2 |
 | **W2‑B** | Pruebas automatizadas de los componentes compatibles con Windows (backend en Windows, orden de textos, frontend) | GitHub Actions (Windows) | Por definir |
 | **W2‑C** | El resto (operación, `install.ps1`, servicios, firewall, cierre de jornada, suite de aceptación) | CI y laboratorio Windows 11 Pro | Se planifica solo después de validar W2‑A |
 | W3 | Laboratorio Windows 11 Pro: suite completa y pruebas pendientes | PC de laboratorio (no el servidor) | Sin laboratorio confirmado |
@@ -180,6 +189,29 @@ Si un paso falla antes del 4, la app vuelve a quedar disponible. Si falla despu�
 - **GitHub Actions (`windows-latest`):** lógica y herramientas de PostgreSQL en Windows, archivado, backups, PITR, restauración, huecos, retención, cifrado contra un destino local. Los runners son **Windows Server**, no Windows 11 Pro.
 - **Laboratorio Windows 11 Pro (una PC de prueba):** PostgreSQL como servicio y sus permisos, Defender, arranque sin sesión, Programador de tareas, BitLocker, Windows Update, desconexión real de un disco, corte de energía real, bucket remoto real.
 - **Servidor físico (S3):** Intel RST RAID 1, discos reales, tiempos reales, convivencia con Store Sys, UPS. Sin ensayos destructivos mientras Store Sys funcione en él.
+
+### 8.2 W2‑A: prueba de concepto
+- **Dónde está:** `deploy/windows/backup/` (README), un paquete Python que solo usa la biblioteca estándar. Nada de la aplicación ni del despliegue Linux lo usa.
+- **Cómo corre:** en el job de CI «Windows backup PoC (W2-A)», sobre `windows-latest`, con los binarios oficiales de PostgreSQL 17.6 y `rclone`, todo con datos ficticios.
+- **Qué se probó:**
+  - criterios A‑1 a A‑17, más calidad (A‑18) y diseño Linux intacto (A‑19);
+  - el reporte del job da PASS o FAIL por criterio y lista lo PENDIENTE.
+- **Decisiones que surgieron de las pruebas:**
+  - **Segmento del cambio de timeline:** el que contiene el punto de cambio existe en las dos timelines, y recuperar con cualquiera de las dos copias alcanza. Que falte solo una no es un hueco.
+  - **Huecos sin objetivo:** si se restaura hasta el final y hay un hueco, PostgreSQL se detiene en él y promueve sin avisar. Por eso la herramienta revisa los huecos antes de restaurar y, en ese caso, informa **INCOMPLETE**, nunca COMPLETE.
+  - **Configuración heredada:** el backup de un servidor restaurado trae su configuración de recuperación. La restauración la limpia explícitamente antes de fijar el objetivo nuevo.
+  - **Directorios vacíos:** `rclone` no copia directorios vacíos, y un backup base los necesita. El manifiesto de la copia externa los registra y se recrean al traerla.
+  - **Archivos abiertos por otro proceso en Windows:** se cubren con nombre temporal y renombre con reintentos. Con Defender real queda PENDIENTE.
+- **PENDIENTE, nunca PASS:**
+  - Defender real;
+  - un disco desconectado de verdad;
+  - un corte de energía real;
+  - el bucket real con bloqueo de objetos y retención;
+  - PostgreSQL como servicio de Windows;
+  - Windows 11 Pro;
+  - el esquema real de DistriCom.
+
+  Se completan en un laboratorio adecuado antes de aprobar la instalación productiva, nunca en el servidor donde funciona Store Sys.
 
 ## 9. Pendientes que no dependen del desarrollo
 - Requisitos de Store Sys (RAM, disco, puertos, su base de datos, cómo se detiene).

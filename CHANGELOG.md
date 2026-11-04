@@ -4,6 +4,20 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Added — Servidor: W2‑A, prueba de concepto de backups físicos en Windows
+- **`deploy/windows/backup/`**: paquete aislado. Usa solo la biblioteca estándar de Python, sobre las herramientas de PostgreSQL 17 y `rclone`, porque pgBackRest no existe en Windows. Nada de la aplicación ni del despliegue Linux lo usa. Incluye:
+  - `archive_command` y `restore_command`: escritura durable con reintentos ante archivos abiertos. No sobrescribe un archivo con contenido distinto, y no escribe sin la marca del repositorio;
+  - backups base en formato plain, verificados con `pg_verifybackup`;
+  - PITR en una instancia aparte por hora, por nombre, por LSN o hasta el final, con resultado COMPLETE, INCOMPLETE o FAILED;
+  - detección de huecos que sigue los archivos `.history`;
+  - copia externa con `rclone crypt`: `copy --immutable` y un manifiesto SHA‑256 que se verifica al traerla;
+  - retención que conserva todo lo que necesita un backup conservado.
+- **Tests:** 56 tests (A‑1 a A‑17) con datos ficticios contra un PostgreSQL real. Un plugin de pytest escribe el reporte PASS/FAIL por criterio y lista lo PENDIENTE (Defender, disco físico, corte de energía, bucket real, servicio de Windows, Windows 11 Pro, esquema real).
+- **CI:** job nuevo «Windows backup PoC (W2-A)» en `windows-latest`, con PostgreSQL 17.6 oficial y `rclone` con checksum verificado. Los 4 jobs existentes no cambian.
+- **Docs:**
+  - `WINDOWS_DEPLOYMENT.md §8.2` (resultados) y §6: requisitos obligatorios de W2‑C para el bloqueo de escrituras y la comprobación del WAL en el cierre de jornada;
+  - `ROADMAP.md`: W1 DONE y W2‑A en revisión.
+
 ### Added — Servidor: W1, ADR 016 y plan de despliegue en Windows 11 Pro
 - **`docs/ADR/016-windows-native-deployment.md`**, estado **Propuesto**: DistriCom nativo en Windows 11 Pro (sin Docker, WSL, Ubuntu ni VM), en el mismo equipo que Store Sys. Servicios con WinSW, Caddy como única puerta, firewall de Windows, backups con una capa propia sobre las herramientas de PostgreSQL 17 (pgBackRest no existe para Windows), cierre de jornada como único modo de apagado. Enumera las cinco garantías que no son equivalentes al diseño Linux (madurez de los backups, aislamiento, ECC, restauración solo en Windows, equipo compartido) y su mitigación. Pasa a «Aceptado» solo después de validar W2‑A, W2‑B y W2‑C.
 - **`docs/WINDOWS_DEPLOYMENT.md`:** plan de servicios, carpetas y permisos, red, backups y PITR (incluye timelines, `.history` y la diferencia entre transacción confirmada y recuperable), operación diaria, actualización y etapas W1–W9, con qué se prueba en GitHub Actions, en un laboratorio Windows 11 Pro y en el servidor.
