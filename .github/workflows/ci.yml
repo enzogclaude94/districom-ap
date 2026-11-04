@@ -173,8 +173,8 @@ jobs:
         working-directory: deploy/windows/backup
     env:
       PG_VERSION: "17.6"
-      # Not RCLONE_*: rclone reads every RCLONE_* variable as one of its flags.
-      RCLONE_RELEASE: "v1.68.2"
+      # Never RCLONE_*: rclone reads RCLONE_<FLAG> variables as its own flags.
+      DISTRICOM_RCLONE_RELEASE: "v1.68.2"
       DISTRICOM_POC_TIMING_MB: "1024"
       DISTRICOM_POC_RESULTS: ${{ github.workspace }}/deploy/windows/backup/test-results
     steps:
@@ -196,10 +196,10 @@ jobs:
           if ($version -notmatch "PostgreSQL\) $([regex]::Escape($env:PG_VERSION))$") { throw "unexpected version: $version" }
           "DISTRICOM_PG_BIN=$bin" >> $env:GITHUB_ENV
           "DISTRICOM_PG_VERSION=$version" >> $env:GITHUB_ENV
-      - name: Install rclone ${{ env.RCLONE_RELEASE }} (checksum verified)
+      - name: Install rclone ${{ env.DISTRICOM_RCLONE_RELEASE }} (checksum verified)
         run: |
-          $base = "https://downloads.rclone.org/$env:RCLONE_RELEASE"
-          $name = "rclone-$env:RCLONE_RELEASE-windows-amd64.zip"
+          $base = "https://downloads.rclone.org/$env:DISTRICOM_RCLONE_RELEASE"
+          $name = "rclone-$env:DISTRICOM_RCLONE_RELEASE-windows-amd64.zip"
           Invoke-WebRequest "$base/$name" -OutFile "$env:RUNNER_TEMP\$name"
           Invoke-WebRequest "$base/SHA256SUMS" -OutFile "$env:RUNNER_TEMP\SHA256SUMS"
           $line = Get-Content "$env:RUNNER_TEMP\SHA256SUMS" | Where-Object { $_ -match "^[0-9a-f]{64}\s+$([regex]::Escape($name))\s*$" }
