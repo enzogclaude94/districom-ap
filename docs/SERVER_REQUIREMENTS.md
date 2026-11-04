@@ -48,3 +48,20 @@ Para elegir el equipo antes del piloto S3 (decisión D5 pendiente: no se compra 
 ## Personas
 
 Un **responsable** y un **suplente** del servidor, definidos antes de S3. Los dos tienen que poder seguir `docs/OPERATIONS.md`, acceder al resguardo de credenciales y estar en `group:districom-it` de Tailscale.
+
+## Servidor Windows 11 Pro (ADR 016, propuesto)
+
+Decisión de Enzo del 2026-11-03: DistriCom nativo en Windows 11 Pro, en el mismo equipo que Store Sys. Mientras el ADR 016 esté propuesto, lo anterior de este documento (Linux) sigue vigente. Plan completo en `docs/WINDOWS_DEPLOYMENT.md`.
+
+| Ítem | Equipo disponible | Falta o a verificar |
+|---|---|---|
+| Placa y CPU | ASUS PRIME Z390‑A, Intel Core i3‑9100 (4 núcleos) | Requisitos de Store Sys, para confirmar que alcanza para los dos sistemas |
+| RAM | 8 GB | Ampliación con 16 GB prevista, pendiente de verificación. Mínimo 16 GB; recomendado 24–32 GB |
+| ECC | No soportada por la placa | Riesgo aceptado en el ADR 016 |
+| Discos de datos | RAID 1 de Intel RST, 250 GB | Que sean dos discos reales en espejo, estado SMART, monitoreo de Intel RST; espacio que ocupe Store Sys |
+| Disco de backup | WD Purple 1 TB | Estado SMART y horas de uso |
+| Sistema | Windows 10 Pro 22H2 (sin soporte desde el 14/10/2025) | **Windows 11 Pro**: TPM 2.0 (Intel PTT), Secure Boot, disco GPT/UEFI; BitLocker |
+| UPS | No informada | Para el servidor y el router/ONT |
+| Licencias | — | Los términos de Windows 11 Pro limitan a 20 dispositivos el acceso a servicios del propio Windows (archivos e impresión compartidos, IIS, conexión compartida); **no equivale** al número de usuarios web de DistriCom. Confirmar con el proveedor de licencias y con el de Store Sys (`docs/WINDOWS_DEPLOYMENT.md §9`) |
+
+El equipo no se modifica hasta la autorización de Enzo.
