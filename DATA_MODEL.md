@@ -170,7 +170,7 @@ Identidad **única** del cliente para toda la plataforma. Asignaciones y datos c
 > El código de STORE SYS, el de AXUM y cualquier otro identificador externo **no** son columnas: viven en `external_entity_mappings` (§7.4), que admite varios códigos por cliente y guarda estado y decisión. La API los expone igual.
 > Zona y vendedor **no** son columnas de `customers`: viven en tablas de asignación con vigencia (§5).
 
-> **Implementado en F1.2** (migración `0034`, `app/platform/customers/`): CHECK `public.cuit_is_valid(tax_id)`; un CUIT inválido del maestro se guarda NULL con warning `invalid_tax_id` (el `"  -        -"` de STORE SYS es «sin CUIT», sin warning); sin DELETE (trigger). Solo un admin del módulo cambia `is_generic` / `active`, con motivo, auditado `platform.customer.updated` sin datos personales.
+> **Implementado en F1.2** (migración `0034`, `app/platform/customers/`): CHECK `public.cuit_is_valid(tax_id)`; un CUIT inválido del maestro se guarda NULL con warning `invalid_tax_id` (el `"  -        -"` de STORE SYS es «sin CUIT», sin warning); sin DELETE (trigger). Solo un admin del módulo cambia `is_generic` / `active`, con motivo, auditado `platform.customer.updated` sin datos personales. **API con mínimo privilegio** (Enzo, 2026-11-04): un `viewer` de Comercial recibe id, nombres, `is_generic`, `active`, `last_seen_on` y timestamps; `tax_id`, `address` y `phone` llegan **solo** a `operator` y `admin`, y para el viewer las claves no existen en la respuesta (ni enmascaradas ni nulas).
 
 #### financial_institutions (R4‑1 · migración `0011`)
 Catálogo **único** de entidades bancarias por código BCRA, para cualquier módulo (decisión D‑I de Enzo). Un cheque nombra su banco por FK, nunca con un código escrito en cada fila.
@@ -285,7 +285,7 @@ Listas de precio de STORE SYS **con semántica**.
 Seed: 1 Precio oficial de preventa · 2 Boca de Expendio · 3 Promocional por 3 bultos o más · 4 Precios especiales · 5 Bandera. Las listas 6 y 7 (esperadas según Enzo) se siembran `UNASSIGNED` solo si la muestra del maestro de artículos las confirma (ADR 014 S5). Una lista nueva se agrega como fila, sin tocar código.
 
 #### product_categories
-`id`, `code` UNIQUE, `name`, `default_product_kind`, `default_analytics_eligible` bool, `parent_id` FK self NULL (reservado; un nivel en Fase 1), `sort_order`, `active`. El listado inicial sale de los rubros reales (`GASEOSAS`, `VINOS`, `CERVEZAS`, `JUGOS`, `AGUAS`, `MERCADERIA`, `BEBIDAS BLANCAS` en la muestra) y se siembra con confirmación de Enzo.
+`id`, `code` UNIQUE, `name`, `default_product_kind`, `default_analytics_eligible` bool, `parent_id` FK self NULL (reservado; un nivel en Fase 1), `sort_order`, `active`. Sembradas (Enzo, 2026-11-04): `GASEOSAS`, `VINOS`, `CERVEZAS`, `JUGOS`, `AGUAS`, `BEBIDAS_BLANCAS`, `MERCADERIA`, todas `PRODUCT` y `default_analytics_eligible = true`. El seed no crea `source_category_mappings`: un rubro se mapea cuando aparece en el maestro real. Un producto puntual puede quedar `analytics_eligible = false` (override manual) sin excluir su rubro.
 
 #### source_category_mappings
 Traducción explícita **rubro fuente → categoría canónica**.

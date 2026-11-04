@@ -10,6 +10,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 
 from app.modules.commercial.identities.schemas import (
+    CustomerContactOut,
     CustomerFlagsIn,
     CustomerOut,
     CustomerPage,
@@ -22,6 +23,7 @@ from app.platform.auth.access import has_module_access, require_module_access
 from app.platform.auth.deps import DbSession
 from app.platform.auth.models import User
 from app.platform.customers import service as customers
+from app.platform.customers.models import Customer
 from app.platform.mappings import service as mappings
 from app.platform.mappings.models import STATUSES, ExternalEntityMapping
 
@@ -32,30 +34,44 @@ Operator = Annotated[User, Depends(require_module_access("commercial", "operator
 Admin = Annotated[User, Depends(require_module_access("commercial", "admin"))]
 
 
+def _customer(customer: Customer, user: User) -> CustomerContactOut | CustomerOut:
+    """The one projection of a customer: CUIT, address and phone only for an operator or admin of the module. A
+    viewer's response does not carry those keys at all (not masked, not null)."""
+    if has_module_access(user, "commercial", "operator"):
+        return CustomerContactOut.model_validate(customer)
+    return CustomerOut.model_validate(customer)
+
+
 @router.get("/customers", response_model=CustomerPage, summary="Clientes")
 def list_customers(
     db: DbSession,
-    _: Viewer,
+    user: Viewer,
     q: Annotated[str | None, Query(max_length=100)] = None,
     include_inactive: bool = False,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> CustomerPage:
     rows, total = customers.search(db, q=q, include_inactive=include_inactive, limit=limit, offset=offset)
-    return CustomerPage(items=[CustomerOut.model_validate(r) for r in rows], total=total)
+    return CustomerPage(items=[_customer(r, user) for r in rows], total=total)
 
 
-@router.get("/customers/{customer_id}", response_model=CustomerOut, summary="Cliente")
-def get_customer(db: DbSession, _: Viewer, customer_id: int) -> CustomerOut:
-    return CustomerOut.model_validate(customers.get(db, customer_id))
+@router.get(
+    "/customers/{customer_id}",
+    response_model=CustomerContactOut | CustomerOut,
+    summary="Cliente (CUIT, dirección y teléfono solo para operator o admin)",
+)
+def get_customer(db: DbSession, user: Viewer, customer_id: int) -> CustomerContactOut | CustomerOut:
+    return _customer(customers.get(db, customer_id), user)
 
 
-@router.patch("/customers/{customer_id}", response_model=CustomerOut, summary="Marcar cliente genérico o inactivo")
-def update_customer(db: DbSession, user: Admin, customer_id: int, body: CustomerFlagsIn) -> CustomerOut:
+@router.patch(
+    "/customers/{customer_id}", response_model=CustomerContactOut, summary="Marcar cliente genérico o inactivo"
+)
+def update_customer(db: DbSession, user: Admin, customer_id: int, body: CustomerFlagsIn) -> CustomerContactOut:
     customer = customers.set_flags(
         db, user, customer_id, is_generic=body.is_generic, active=body.active, reason=body.reason
     )
-    return CustomerOut.model_validate(customer)
+    return CustomerContactOut.model_validate(customer)
 
 
 def _mapping(row: ExternalEntityMapping, codes: dict[int, str]) -> MappingOut:

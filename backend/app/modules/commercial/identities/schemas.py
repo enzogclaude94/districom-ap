@@ -4,14 +4,13 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class CustomerOut(BaseModel):
+    """What any user of the module sees of a customer: no CUIT, address nor phone (minimum privilege)."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
     display_name: str
     legal_name: str | None
-    tax_id: str | None
-    address: str | None
-    phone: str | None
     is_generic: bool
     active: bool
     last_seen_on: date | None
@@ -19,8 +18,17 @@ class CustomerOut(BaseModel):
     updated_at: datetime
 
 
+class CustomerContactOut(CustomerOut):
+    """The same customer with its personal data, only for an operator or admin of the module. The fields are
+    required (no defaults) so a response without them can never be read as this schema."""
+
+    tax_id: str | None
+    address: str | None
+    phone: str | None
+
+
 class CustomerPage(BaseModel):
-    items: list[CustomerOut]
+    items: list[CustomerContactOut | CustomerOut]
     total: int
 
 

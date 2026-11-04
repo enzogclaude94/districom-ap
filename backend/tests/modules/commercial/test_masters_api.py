@@ -144,19 +144,22 @@ def test_module_admin_configures_zone_type_and_product(sign_in, grant, masters: 
     assert bad.status_code == 422
     assert bad.json()["code"] == "zone_without_visit"
 
-    category = client.post(
+    categories = {c["code"]: c for c in client.get("/api/v1/commercial/product-categories").json()}
+    category = categories["CERVEZAS"]  # seeded
+    assert (category["default_product_kind"], category["default_analytics_eligible"]) == ("PRODUCT", True)
+    duplicate = client.post(
         "/api/v1/commercial/product-categories",
         json={
-            "code": "CERVEZAS",
-            "name": "Cervezas",
+            "code": "cervezas",
+            "name": "Otra",
             "default_product_kind": "PRODUCT",
             "default_analytics_eligible": True,
         },
     )
-    assert category.status_code == 201, category.text
+    assert duplicate.status_code == 409
     mapped = client.put(
         "/api/v1/commercial/source-category-mappings",
-        json={"source_category": "CERVEZAS", "category_id": category.json()["id"]},
+        json={"source_category": "CERVEZAS", "category_id": category["id"]},
     )
     assert mapped.status_code == 200, mapped.text
     product = client.get(f"/api/v1/commercial/products/{masters['product']}").json()
@@ -184,8 +187,81 @@ def test_module_admin_configures_zone_type_and_product(sign_in, grant, masters: 
 def test_seed_config_cli_only_adds_what_is_missing(capsys, db: Session) -> None:  # type: ignore[no-untyped-def]
     assert cli(["commercial", "seed-config"]) == 0
     first = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert first["inserted"]["product_categories"] == 7
     assert first["inserted"]["price_lists"] == 5
     assert first["inserted"]["document_types"] == 9
     assert cli(["commercial", "seed-config"]) == 0
     again = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert set(again["inserted"].values()) == {0}
+
+
+# --- customer privacy (Enzo 2026-11-04): CUIT, address and phone only for operator and admin -------------------
+
+PII_FIELDS = {"tax_id", "address", "phone"}
+TAX_ID = "20123456786"  # valid check digit
+ADDRESS = "Calle Falsa 742"
+PHONE = "3855551234"
+
+
+@pytest.fixture
+def contact(db: Session, make_user) -> int:  # type: ignore[no-untyped-def]
+    owner = make_user(email="owner@districom.test", role="admin")
+    job = make_job(db, owner.id)
+    record = customers.normalize(
+        customers.MasterRecord(
+            display_name="Kiosco Privado", legal_name="Privado SRL", tax_id=TAX_ID, address=ADDRESS, phone=PHONE
+        )
+    )
+    assert record.tax_id == TAX_ID
+    customer = customers.create_from_master(db, record, job_id=job, seen_on=date.today())
+    db.commit()
+    return customer.id
+
+
+def _as(sign_in, grant, name: str, module_role: str | None, platform_role: str = "viewer") -> TestClient:  # type: ignore[no-untyped-def]
+    client: TestClient = sign_in(name, platform_role)
+    if module_role:
+        grant(name, "commercial", module_role)
+    return client
+
+
+def test_viewer_never_receives_tax_id_address_or_phone(sign_in, grant, contact: int) -> None:  # type: ignore[no-untyped-def]
+    client = _as(sign_in, grant, "viewer", "viewer")
+    [item] = client.get("/api/v1/commercial/customers").json()["items"]
+    assert PII_FIELDS.isdisjoint(item)  # absent, not masked nor null
+    assert (item["id"], item["display_name"], item["legal_name"]) == (contact, "Kiosco Privado", "Privado SRL")
+    detail = client.get(f"/api/v1/commercial/customers/{contact}")
+    assert detail.status_code == 200
+    assert PII_FIELDS.isdisjoint(detail.json())
+    for value in (TAX_ID, ADDRESS, PHONE):
+        assert value not in detail.text
+
+
+@pytest.mark.parametrize(
+    ("name", "module_role", "platform_role"),
+    [("operator", "operator", "viewer"), ("boss", "admin", "viewer"), ("platform", None, "admin")],
+)
+def test_operator_and_admin_receive_contact_data(
+    sign_in, grant, contact: int, name, module_role, platform_role
+) -> None:  # type: ignore[no-untyped-def]
+    client = _as(sign_in, grant, name, module_role, platform_role)
+    [item] = client.get("/api/v1/commercial/customers").json()["items"]
+    assert (item["tax_id"], item["address"], item["phone"]) == (TAX_ID, ADDRESS, PHONE)
+    detail = client.get(f"/api/v1/commercial/customers/{contact}").json()
+    assert (detail["tax_id"], detail["address"], detail["phone"]) == (TAX_ID, ADDRESS, PHONE)
+
+
+def test_contact_data_stays_out_of_logs_and_audit(sign_in, grant, contact: int, db: Session, caplog) -> None:  # type: ignore[no-untyped-def]
+    from sqlalchemy import text as sql
+
+    caplog.set_level("DEBUG")
+    client = _as(sign_in, grant, "boss", "admin")
+    client.get("/api/v1/commercial/customers")
+    client.get(f"/api/v1/commercial/customers/{contact}")
+    patched = client.patch(f"/api/v1/commercial/customers/{contact}", json={"is_generic": True, "reason": "Prueba"})
+    assert patched.status_code == 200
+    assert patched.json()["tax_id"] == TAX_ID
+    audit = db.execute(sql("SELECT coalesce(string_agg(payload::text, ' '), '') FROM audit_events")).scalar_one()
+    for value in (TAX_ID, ADDRESS, PHONE, "Kiosco Privado", "Privado SRL"):
+        assert value not in caplog.text
+        assert value not in audit
