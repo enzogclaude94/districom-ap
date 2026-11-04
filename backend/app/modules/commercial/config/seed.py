@@ -1,8 +1,9 @@
 """`commercial seed-config`: the configuration Enzo confirmed (2026-11-01 and 2026-11-03), loaded once.
 
 Idempotent and conservative: it inserts the rows that are missing and never changes one that exists, so running it
-again after an admin edited a list, a rule or a type leaves the admin's decision. Product categories are not seeded:
-their list waits for Enzo's confirmation (DATA_MODEL §4.2). MISA has no rule on purpose: it stays UNCLASSIFIED.
+again after an admin edited a list, a rule, a category or a type leaves the admin's decision. Product categories are
+the seven Enzo confirmed (2026-11-04); no rubro is mapped to them here: a rubro is mapped by an admin when the real
+articles master shows it (F1.3). MISA has no rule on purpose: it stays UNCLASSIFIED.
 """
 
 from dataclasses import dataclass
@@ -15,6 +16,7 @@ from app.modules.commercial.config.models import (
     NoPurchaseReasonCategory,
     NoPurchaseReasonMapping,
     PriceList,
+    ProductCategory,
     ZoneClassificationRule,
 )
 from app.modules.commercial.config.service import source_key
@@ -57,6 +59,18 @@ DOCUMENT_TYPES = (
     ("FACTURA", "UNCLASSIFIED", 0, False),
 )
 
+# (code, name, default_product_kind, default_analytics_eligible, sort_order). A product of an eligible category can
+# still be marked not eligible by hand (logistic or non-commercial articles) without excluding its whole rubro.
+PRODUCT_CATEGORIES = (
+    ("GASEOSAS", "Gaseosas", "PRODUCT", True, 10),
+    ("VINOS", "Vinos", "PRODUCT", True, 20),
+    ("CERVEZAS", "Cervezas", "PRODUCT", True, 30),
+    ("JUGOS", "Jugos", "PRODUCT", True, 40),
+    ("AGUAS", "Aguas", "PRODUCT", True, 50),
+    ("BEBIDAS_BLANCAS", "Bebidas blancas", "PRODUCT", True, 60),
+    ("MERCADERIA", "Mercadería", "PRODUCT", True, 70),
+)
+
 REASON_CATEGORIES = (
     ("STOCK", "Tiene stock"),
     ("NO_DISPONIBLE", "No disponible"),
@@ -81,11 +95,19 @@ class SeedResult:
     zone_rules: int = 0
     price_lists: int = 0
     document_types: int = 0
+    product_categories: int = 0
     reason_categories: int = 0
     reason_mappings: int = 0
 
     def total(self) -> int:
-        return self.zone_rules + self.price_lists + self.document_types + self.reason_categories + self.reason_mappings
+        return (
+            self.zone_rules
+            + self.price_lists
+            + self.document_types
+            + self.product_categories
+            + self.reason_categories
+            + self.reason_mappings
+        )
 
 
 def seed_config(db: Session) -> SeedResult:
@@ -134,6 +156,18 @@ def seed_config(db: Session) -> SeedResult:
                 )
             )
             result.document_types += 1
+    for code, name, kind, eligible, order in PRODUCT_CATEGORIES:
+        if db.scalar(select(ProductCategory.id).where(ProductCategory.code == code)) is None:
+            db.add(
+                ProductCategory(
+                    code=code,
+                    name=name,
+                    default_product_kind=kind,
+                    default_analytics_eligible=eligible,
+                    sort_order=order,
+                )
+            )
+            result.product_categories += 1
     categories: dict[str, int] = {}
     for code, name in REASON_CATEGORIES:
         found = db.scalar(select(NoPurchaseReasonCategory.id).where(NoPurchaseReasonCategory.code == code))

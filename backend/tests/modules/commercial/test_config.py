@@ -18,6 +18,7 @@ from app.modules.commercial.config.models import (
     DocumentType,
     NoPurchaseReasonMapping,
     PriceList,
+    SourceCategoryMapping,
     ZoneClassificationRule,
     ZoneVisitDay,
 )
@@ -59,6 +60,7 @@ def test_seed_is_idempotent_and_never_overwrites_an_edit(db: Session, admin) -> 
     first = seed_config(db)
     assert (first.zone_rules, first.price_lists, first.document_types) == (6, 5, 9)
     assert (first.reason_categories, first.reason_mappings) == (5, 6)
+    assert first.product_categories == 7
     bandera = db.scalars(select(PriceList).where(PriceList.list_number == 5)).one()
     service.update_price_list(db, admin, bandera.id, {"name": "Bandera (editada)"})
     again = seed_config(db)
@@ -67,6 +69,27 @@ def test_seed_is_idempotent_and_never_overwrites_an_edit(db: Session, admin) -> 
     assert bandera.name == "Bandera (editada)"
     assert db.scalar(select(text("count(*)")).select_from(PriceList)) == 5
     assert db.scalars(select(AuditEvent.event_type).where(AuditEvent.event_type == "commercial.config.seeded")).all()
+
+
+def test_confirmed_product_categories_seeded_without_rubro_mappings(db: Session, admin) -> None:  # type: ignore[no-untyped-def]
+    seed_config(db)
+    rows = [(c.code, c.name, c.default_product_kind, c.default_analytics_eligible) for c in service.list_categories(db)]
+    assert rows == [
+        ("GASEOSAS", "Gaseosas", "PRODUCT", True),
+        ("VINOS", "Vinos", "PRODUCT", True),
+        ("CERVEZAS", "Cervezas", "PRODUCT", True),
+        ("JUGOS", "Jugos", "PRODUCT", True),
+        ("AGUAS", "Aguas", "PRODUCT", True),
+        ("BEBIDAS_BLANCAS", "Bebidas blancas", "PRODUCT", True),
+        ("MERCADERIA", "Mercadería", "PRODUCT", True),
+    ]
+    assert db.scalar(select(text("count(*)")).select_from(SourceCategoryMapping)) == 0
+    # An admin's edit survives a new seed.
+    wines = next(c for c in service.list_categories(db) if c.code == "VINOS")
+    service.update_category(db, admin, wines.id, {"name": "Vinos y espumantes", "default_analytics_eligible": False})
+    assert seed_config(db).total() == 0
+    db.refresh(wines)
+    assert (wines.name, wines.default_analytics_eligible) == ("Vinos y espumantes", False)
 
 
 def test_no_rule_for_misa(db: Session, seeded: None) -> None:

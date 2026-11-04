@@ -37,6 +37,10 @@ def jobs(db: Session, admin) -> list[int]:  # type: ignore[no-untyped-def]
 
 
 def category(db: Session, admin, code: str, *, eligible: bool, kind: str | None = "PRODUCT"):  # type: ignore[no-untyped-def]
+    seeded = next((c for c in config.list_categories(db) if c.code == code), None)
+    if seeded is not None:  # the seven Enzo confirmed come from seed-config
+        assert (seeded.default_analytics_eligible, seeded.default_product_kind) == (eligible, kind)
+        return seeded
     return config.create_category(
         db,
         admin,
