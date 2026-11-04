@@ -1,5 +1,6 @@
 """Shared pieces of the integration tests: a primary with archiving, fictitious data and waits."""
 
+import re
 import shutil
 import socket
 import time
@@ -177,3 +178,13 @@ def make_primary(root: Path, *, archive_timeout: str = "60s") -> Iterator[Primar
 def copy_repo(src: Path, dst: Path) -> Path:
     shutil.copytree(src, dst)
     return dst
+
+
+def unique_dir(root: Path, name: str) -> Path:
+    base = re.sub(r"[^A-Za-z0-9_-]+", "-", name)[:60]
+    path, n = root / base, 1
+    while path.exists():
+        n += 1
+        path = root / f"{base}-{n}"
+    path.mkdir()
+    return path

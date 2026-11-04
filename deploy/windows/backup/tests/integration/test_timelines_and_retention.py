@@ -22,7 +22,7 @@ from districom_backup.restore import RestoreStatus
 from districom_backup.retention import apply_retention
 from districom_backup.wal_gaps import find_gaps
 from districom_backup.walnames import Segment, is_segment_name, parse_segment, segment_name
-from tests.integration.support import DBNAME, Primary, copy_repo, make_primary, wait_for_file
+from tests.integration.support import DBNAME, Primary, copy_repo, make_primary, unique_dir, wait_for_file
 
 
 @dataclass
@@ -39,8 +39,8 @@ class Scenario:
 
 
 @pytest.fixture(scope="module")
-def scenario(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Scenario]:
-    root = tmp_path_factory.mktemp("timelines")
+def scenario(work_root: Path) -> Iterator[Scenario]:
+    root = unique_dir(work_root, "timelines")
     with make_primary(root) as primary:
         port = primary.instance.port
         b1 = take_base_backup(primary.repo, port=port)
@@ -71,6 +71,7 @@ def scenario(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Scenario]:
         new.switch_and_wait()
         new.instance.stop()
         yield Scenario(root, primary.repo, primary, b1, b2, b3, fp_rp2, fp_rp3, fp_end)
+    shutil.rmtree(root, ignore_errors=True)
 
 
 def _fresh_copy(scenario: Scenario, name: str) -> Path:
