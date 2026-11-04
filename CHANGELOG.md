@@ -8,6 +8,12 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 - **`docs/ADR/016-windows-native-deployment.md`**, estado **Propuesto**: DistriCom nativo en Windows 11 Pro (sin Docker, WSL, Ubuntu ni VM), en el mismo equipo que Store Sys. Servicios con WinSW, Caddy como única puerta, firewall de Windows, backups con una capa propia sobre las herramientas de PostgreSQL 17 (pgBackRest no existe para Windows), cierre de jornada como único modo de apagado. Enumera las cinco garantías que no son equivalentes al diseño Linux (madurez de los backups, aislamiento, ECC, restauración solo en Windows, equipo compartido) y su mitigación. Pasa a «Aceptado» solo después de validar W2‑A, W2‑B y W2‑C.
 - **`docs/WINDOWS_DEPLOYMENT.md`:** plan de servicios, carpetas y permisos, red, backups y PITR (incluye timelines, `.history` y la diferencia entre transacción confirmada y recuperable), operación diaria, actualización y etapas W1–W9, con qué se prueba en GitHub Actions, en un laboratorio Windows 11 Pro y en el servidor.
 - `docs/SERVER_REQUIREMENTS.md`: sección del equipo Windows disponible y lo que falta verificar. `ROADMAP.md`: etapas W1, W2‑A, W2‑B y W2‑C.
+- Ajustes de la revisión de Enzo (2026-11-04):
+  - el cierre de jornada primero impide escrituras, espera las pendientes, detiene la app, verifica el WAL hasta un LSN en los dos repositorios y detiene la base sin carreras antes de apagar;
+  - durabilidad local, RAID 1, `repo1` y `repo2` separados, sin afirmaciones absolutas de «sin pérdida»;
+  - el ADR exige W2‑C implementada y validada;
+  - el go‑live del servidor compartido exige los dos sistemas validados a la vez;
+  - el límite de 20 dispositivos de Windows no se equipara a usuarios web.
 - Solo documentación. El ADR 013, `docs/OPERATIONS.md`, `deploy/`, el CI y el código no cambian.
 
 ### Added — F1.1b: infraestructura de importación de plataforma

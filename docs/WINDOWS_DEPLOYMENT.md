@@ -93,10 +93,18 @@ Conservar las capacidades del diseño Linux:
 | Dump lógico | `pg_dump` diario, cifrado, a los dos repositorios |
 
 ### 5.3 Qué garantiza y qué no
-- **Una transacción confirmada no es lo mismo que una transacción recuperable.** Es recuperable desde un repositorio cuando el segmento WAL que la contiene ya está archivado en él.
-- Con el equipo funcionando, nada confirmado se pierde (lo protege el WAL local de PostgreSQL y el RAID 1).
-- Ante la **pérdida total del local**, se pierde lo que no haya llegado a `repo2`: hasta `archive_timeout` más el atraso de la subida, o más si no había Internet. **No hay RPO cero frente a una pérdida total.**
-- El cierre de jornada reduce ese riesgo para la noche, pero solo si se usa.
+Ninguna de estas capas garantiza la ausencia de pérdida frente a **toda** falla física, eléctrica o la pérdida del equipo. Cada una protege contra fallas distintas:
+
+| Capa | Qué protege | Qué **no** protege |
+|---|---|---|
+| **Durabilidad local** (WAL de PostgreSQL con `fsync` al confirmar) | Una caída del proceso o de Windows, o un corte de energía, **si** los discos y la controladora respetan el vaciado de su caché | Discos o controladora que mienten sobre el vaciado, corrupción del sistema de archivos, falla de ambos discos, robo, incendio o sobretensión |
+| **RAID 1** (Intel RST) | La falla de **un** disco de datos | Corrupción o borrado (se replican al espejo), falla de la controladora o del driver, falla simultánea de los dos discos, pérdida del equipo |
+| **Archivado en `repo1`** (disco de backup) | Pérdida o corrupción de los discos de datos: se recupera hasta el último segmento WAL **archivado** | Lo confirmado y todavía no archivado (hasta `archive_timeout`); la pérdida del equipo entero, porque `repo1` está en el mismo gabinete |
+| **Recuperación externa desde `repo2`** | La pérdida total del local | Lo que no llegó a `repo2`: hasta `archive_timeout` más el atraso de la subida, o más si no había Internet |
+
+- **Una transacción confirmada no es lo mismo que una transacción recuperable.** Es recuperable desde un repositorio solo cuando el segmento WAL que la contiene ya está archivado en él y ese repositorio se puede leer.
+- **No hay RPO cero** frente a una pérdida de los discos de datos, del equipo o del local.
+- El cierre de jornada (§6) reduce el riesgo de la noche, pero solo si se usa y termina bien.
 
 ### 5.4 Simulacros
 Instancia descartable con `pg_ctl`, en otra carpeta y otro puerto, comparada con el origen en el mismo punto con `deploy/sql/verify.sql` y `pg_amcheck`. Si la copia no llega al punto, el resultado es INCOMPLETE. Mensual desde `repo1`; trimestral desde `repo2` en **otro Windows**.
@@ -106,9 +114,9 @@ Instancia descartable con `pg_ctl`, en otra carpeta y otro puerto, comparada con
 | Escenario | RPO | RTO objetivo |
 |---|---|---|
 | Error humano o corrupción | Al minuto elegido | 1–2 h |
-| Actualización fallida | 0 (backup previo) | < 30 min |
-| Falla un disco de datos | 0 (RAID 1) | Sin corte |
-| Muere el equipo | Lo archivado en `repo1` | < 1 día, en otro Windows |
+| Actualización fallida | Hasta el backup previo a la actualización, tomado con la app detenida | < 30 min |
+| Falla **un** disco de datos | Sin pérdida esperada **si** el espejo estaba sano y sincronizado (se verifica en el monitor) | Sin corte esperado; reemplazo del disco |
+| Fallan los discos de datos o muere el equipo, con `repo1` legible | Lo archivado en `repo1` | < 1 día, en otro Windows |
 | Pérdida total del local | Lo que llegó a `repo2` (1–5 min con Internet y cierre de jornada completo) | < 1 día hábil, en otro Windows |
 
 Son objetivos a medir en las pruebas, no garantías ya verificadas.
@@ -124,14 +132,26 @@ Son objetivos a medir en las pruebas, no garantías ya verificadas.
 - monitor periódico (equivalente a `deploy/bin/monitor`): app, base, migración, archivado de WAL, atraso de `repo2`, huecos, espacio y RAID;
 - backup base de 15 a 17.
 
-**Cierre de jornada** (`cierre-jornada`, por Escritorio remoto), el único modo de apagado. Si un paso falla, no apaga y avisa:
-1. Verifica que no haya backups, subidas, simulacros, importaciones ni escrituras en curso.
-2. Abre la ventana de mantenimiento.
-3. Crea el punto de restauración del día y fuerza el cierre del segmento WAL.
-4. Espera la confirmación de que todo hasta ese punto está en `repo1` y `repo2`. Sin Internet, avisa y deja elegir entre esperar o apagar con el riesgo registrado.
-5. Detiene Caddy, frontend, backend y PostgreSQL, en ese orden.
-6. Store Sys: según defina su proveedor (pendiente).
-7. Registra el cierre y apaga Windows.
+**Cierre de jornada** (`cierre-jornada`, por Escritorio remoto), el único modo de apagado. El orden evita carreras: primero se cierra la entrada de escrituras, y la verificación final se hace cuando ya nadie puede escribir.
+
+1. **Chequeos previos:** no hay backup base, subida, simulacro ni actualización en curso. Si hay, no empieza.
+2. **Impedir nuevas escrituras:**
+   - abre la ventana de mantenimiento (el monitor no alerta);
+   - Caddy responde «en mantenimiento» a todo pedido nuevo;
+   - se suspenden las tareas programadas que escriben (importaciones, dump, simulacros);
+   - se quita el permiso de conexión nueva a la base a los roles de la app (`REVOKE CONNECT`); las sesiones abiertas siguen hasta terminar.
+3. **Esperar que terminen las operaciones pendientes:** pedidos en curso, importaciones y transacciones de escritura (`pg_stat_activity`), con un tiempo máximo. Si vence, **no fuerza**: avisa, revierte el paso 2 y deja la app funcionando.
+4. **Detener backend y frontend.** Desde aquí no queda ningún proceso de la app que pueda escribir.
+5. **Verificar y sincronizar el WAL:**
+   - crea el punto de restauración del día y fuerza el cierre del segmento (`pg_switch_wal`), y registra el LSN;
+   - comprueba que no haya ninguna sesión de escritura, salvo la del propio cierre;
+   - espera la confirmación de que todos los segmentos hasta ese LSN están en `repo1` **y** en `repo2`;
+   - sin Internet o con `repo2` atrasado: avisa y deja elegir entre esperar o seguir con el riesgo **registrado** (qué LSN quedó solo en el equipo).
+6. **Detener PostgreSQL** con un apagado limpio. Con `pg_controldata` verifica que lo único posterior al LSN confirmado sea el checkpoint de apagado. Si hay algo más, no apaga: vuelve a arrancar la base sin la app, repite el paso 5 y avisa.
+7. **Store Sys:** según defina su proveedor (pendiente). Su cierre también tiene que terminar bien antes de apagar.
+8. **Registrar el cierre y apagar.** Registra la hora, el último LSN fuera del local y el estado de cada paso. El mismo comando apaga Windows de inmediato, sin volver a levantar servicios entre la verificación y el apagado.
+
+Si un paso falla antes del 4, la app vuelve a quedar disponible. Si falla después, los servicios quedan detenidos y se avisa al responsable: no se apaga hasta resolverlo o registrar el riesgo.
 
 **Windows Update:** horas activas y aplazamiento por directiva; parches en el cierre de jornada.
 
@@ -151,6 +171,11 @@ Son objetivos a medir en las pruebas, no garantías ya verificadas.
 | W5–W8 | Staging, pruebas en el servidor, transición y go‑live (O10) | Servidor | Equivalen a S3 |
 | W9 | Llegada de Store Sys y pruebas con los dos sistemas | Servidor | Depende del proveedor |
 
+### 8.0 Go‑live del servidor compartido
+- El servidor compartido se da por aceptado **solo** cuando están validados los dos sistemas funcionando **a la vez**: concurrencia, rendimiento, arranque, cierre de jornada, energía, actualizaciones y backups de ambos.
+- Si Store Sys se migra **después** del primer go‑live de DistriCom (W8), ese go‑live vale solo para DistriCom en el equipo sin Store Sys. Al llegar Store Sys (W9), el sistema consolidado necesita **nuevas pruebas y una nueva aprobación de Enzo** antes de considerarse aceptado.
+- Mientras tanto, no se hacen en ese equipo ensayos destructivos, desconexiones de discos ni cortes de energía con Store Sys funcionando.
+
 ### 8.1 Dónde se puede probar cada cosa
 - **GitHub Actions (`windows-latest`):** lógica y herramientas de PostgreSQL en Windows, archivado, backups, PITR, restauración, huecos, retención, cifrado contra un destino local. Los runners son **Windows Server**, no Windows 11 Pro.
 - **Laboratorio Windows 11 Pro (una PC de prueba):** PostgreSQL como servicio y sus permisos, Defender, arranque sin sesión, Programador de tareas, BitLocker, Windows Update, desconexión real de un disco, corte de energía real, bucket remoto real.
@@ -159,7 +184,7 @@ Son objetivos a medir en las pruebas, no garantías ya verificadas.
 ## 9. Pendientes que no dependen del desarrollo
 - Requisitos de Store Sys (RAM, disco, puertos, su base de datos, cómo se detiene).
 - Acceso del proveedor de Store Sys: cuenta, permisos, supervisión y ventanas de cambio.
-- Licencias: límite de 20 dispositivos de Windows cliente frente a los usuarios de los dos sistemas.
+- **Licencias de Windows 11 Pro.** Sus términos limitan a **20 dispositivos** el acceso a ciertos servicios **del propio Windows**: archivos e impresión compartidos, Internet Information Services, conexión compartida y telefonía. Ese límite **no equivale** al número de usuarios web de DistriCom, que se conectan a Caddy y no a esos servicios. Sí puede aplicar a Store Sys si usa carpetas compartidas de Windows, y el Escritorio remoto de Windows cliente admite una sola sesión interactiva a la vez. A confirmar con el proveedor de licencias y con el de Store Sys; si no alcanza, se evalúa Windows Server.
 - Laboratorio Windows 11 Pro.
 - Régimen de fin de semana y encendido diario.
 - Del plan S3 v2 siguen vigentes: dominio, IdP, Tailscale, bucket con bloqueo de objetos (pruebas R2‑1 a R2‑7), alertas, responsable y suplente, áreas protegidas antes del go‑live.

@@ -12,7 +12,10 @@ Este ADR queda **Propuesto** hasta que la infraestructura Windows esté suficien
 
 1. **W2‑A** (prueba de concepto de backups físicos, WAL, PITR y restauración) en PASS en CI, con las pruebas que el CI no reproduce marcadas **PENDIENTES**, nunca PASS.
 2. **W2‑B** (pruebas automatizadas de los componentes compatibles con Windows) en PASS.
-3. **W2‑C** planificada y aprobada, y las pruebas pendientes completadas en un laboratorio Windows 11 Pro adecuado **antes** de aprobar la instalación productiva.
+3. **W2‑C implementada y validada** con sus pruebas pertinentes (operación, instalación, servicios, firewall, cierre de jornada y suite de aceptación). No alcanza con que esté planificada o aprobada.
+4. Las pruebas que quedaron **PENDIENTES** en CI, completadas y en PASS en un laboratorio Windows 11 Pro adecuado, **antes** de aprobar la instalación productiva.
+
+**Go‑live del servidor compartido.** Aceptar este ADR no equivale a aceptar el servidor. El servidor compartido se acepta solo con los dos sistemas, DistriCom y Store Sys, validados funcionando **a la vez**. Si Store Sys se migra después del primer go‑live de DistriCom, ese go‑live vale solo para DistriCom; el sistema consolidado necesita nuevas pruebas y una nueva aprobación de Enzo antes de considerarse aceptado.
 
 Mientras tanto, el diseño Linux (ADR 013, `docs/OPERATIONS.md`, `deploy/`) se conserva completo.
 
@@ -51,7 +54,7 @@ Mientras tanto, el diseño Linux (ADR 013, `docs/OPERATIONS.md`, `deploy/`) se c
    Las exportaciones SQL (`pg_dump`) quedan como formato **secundario** y portable, nunca como reemplazo del PITR.
 5. **Automatización en Python** (el lenguaje del backend, testeable en CI), con PowerShell solo como envoltorio para el Programador de tareas y la instalación.
 6. **Programador de tareas de Windows** en lugar de los timers de systemd, con una cuenta de servicio y «ejecutar aunque el usuario no haya iniciado sesión».
-7. **Cierre de jornada** como único modo de apagado: crea el punto de restauración del día, fuerza el cierre del segmento WAL, espera que esté en `repo1` y `repo2`, detiene los servicios en orden y recién entonces apaga.
+7. **Cierre de jornada** como único modo de apagado, en un orden que evita carreras: primero impide nuevas escrituras, después espera que terminen las operaciones pendientes y detiene la app, verifica y sincroniza el WAL hasta un LSN registrado en `repo1` y `repo2`, detiene PostgreSQL comprobando que no se escribió nada después, y recién entonces apaga (`docs/WINDOWS_DEPLOYMENT.md §6`).
 8. **Actualización y rollback por carpetas de versión** (`C:\DistriCom\releases\<versión>` y un enlace `current`), con backup completo previo y migración explícita, como hoy.
 9. **CI:** los 4 jobs actuales (Linux) no cambian. Se agregan jobs en runners Windows de GitHub Actions para lo que se pueda probar ahí. Los runners son Windows Server, no Windows 11 Pro: lo que dependa del escritorio o del hardware se prueba en un laboratorio Windows 11 Pro y, al final, en el servidor.
 

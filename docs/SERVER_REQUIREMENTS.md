@@ -62,6 +62,6 @@ Decisión de Enzo del 2026-11-03: DistriCom nativo en Windows 11 Pro, en el mism
 | Disco de backup | WD Purple 1 TB | Estado SMART y horas de uso |
 | Sistema | Windows 10 Pro 22H2 (sin soporte desde el 14/10/2025) | **Windows 11 Pro**: TPM 2.0 (Intel PTT), Secure Boot, disco GPT/UEFI; BitLocker |
 | UPS | No informada | Para el servidor y el router/ONT |
-| Licencias | — | Límite de 20 dispositivos de Windows cliente frente a los usuarios de DistriCom y Store Sys |
+| Licencias | — | Los términos de Windows 11 Pro limitan a 20 dispositivos el acceso a servicios del propio Windows (archivos e impresión compartidos, IIS, conexión compartida); **no equivale** al número de usuarios web de DistriCom. Confirmar con el proveedor de licencias y con el de Store Sys (`docs/WINDOWS_DEPLOYMENT.md §9`) |
 
 El equipo no se modifica hasta la autorización de Enzo.
