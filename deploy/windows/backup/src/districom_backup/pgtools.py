@@ -38,16 +38,26 @@ def tool(name: str, bin_dir: Path | None = None) -> str:
     return str(path)
 
 
-def run(args: list[str], *, check: bool = True, timeout: float = 600, env: dict[str, str] | None = None) -> str:
+def run(
+    args: list[str],
+    *,
+    check: bool = True,
+    timeout: float = 600,
+    env: dict[str, str] | None = None,
+    stdin: str | None = None,
+) -> str:
     """Run a binary without a shell and return its stdout. stderr is included in the error.
 
-    Output is always UTF-8: ``PGCLIENTENCODING`` makes psql send UTF-8, and it is decoded as UTF-8.
-    Without both, Windows decodes with the ANSI code page (cp1252) and psql converts to it, so
-    Spanish text such as "ñandú" would arrive altered or fail to decode.
+    Text is always UTF-8 in both directions: ``PGCLIENTENCODING`` makes psql use UTF-8, and
+    ``stdin`` and the output are encoded and decoded as UTF-8. Without that, Windows uses the ANSI
+    code page (cp1252), so Spanish text such as "ñandú" would arrive altered or fail to decode.
+    Non-ASCII SQL goes through ``stdin``, never the command line: Windows hands command-line
+    arguments to psql in the ANSI code page whatever the client encoding says.
     """
     environment = {**(os.environ if env is None else env), "PGCLIENTENCODING": "UTF8"}
     completed = subprocess.run(
         args,
+        input=stdin,
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -114,10 +124,25 @@ class Instance:
     def start(self, *, timeout: int = 300, check: bool = True) -> bool:
         """Start and wait. With ``check=False`` return whether the server came up.
 
+        Right after a crash on Windows, the killed server's processes can hold its log file open
+        for a moment ("could not open log file ... Permission denied"). Only that error is retried,
+        for at most 60 s; any other failure is reported at once.
+
         pg_ctl's output goes to a file, never to a pipe: the server it launches inherits those
         handles, and on Windows a pipe held open by the running server never reaches end-of-file,
         so reading pg_ctl's output would wait forever.
         """
+        deadline = time.monotonic() + 60
+        while True:
+            started, message = self._start_once(timeout)
+            if started or "could not open log file" not in message or time.monotonic() > deadline:
+                break
+            time.sleep(1)
+        if not started and check:
+            raise PgToolError(f"pg_ctl start failed: {message}\n{self.read_log()}")
+        return started
+
+    def _start_once(self, timeout: int) -> tuple[bool, str]:
         output = self.data_dir.parent / f"{self.data_dir.name}.pg_ctl.txt"
         with output.open("w", encoding="utf-8") as handle:
             completed = subprocess.run(
@@ -140,10 +165,7 @@ class Instance:
                 timeout=timeout + 60,
                 check=False,
             )
-        if completed.returncode != 0 and check:
-            message = output.read_text(encoding="utf-8", errors="replace")
-            raise PgToolError(f"pg_ctl start failed: {message}\n{self.read_log()}")
-        return completed.returncode == 0
+        return completed.returncode == 0, output.read_text(encoding="utf-8", errors="replace")
 
     def _server_options(self) -> str:
         options = f"-p {self.port} -c listen_addresses=127.0.0.1"
@@ -210,9 +232,10 @@ class Instance:
                 self.user,
                 "-d",
                 dbname,
-                "-c",
-                sql,
+                "-f",
+                "-",
             ],
+            stdin=sql,
             check=check,
             timeout=300,
         ).strip()
