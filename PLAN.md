@@ -124,7 +124,7 @@ Ninguna modificación cambia el alcance funcional.
 | ID | Pregunta | Default mientras tanto | Bloquea |
 |---|---|---|---|
 | D1 | ~~¿Repo nuevo o existente?~~ **Resuelto:** `districom-ap`. | — | — |
-| D2 | Exports reales de AXUM y STORE SYS. | **Parcial (2026-10-30):** recibidos clientes, ventas y comprobantes de STORE SYS; faltan maestro de artículos y AXUM No Compra. | F1.3 (artículos) y F1.4 (AXUM). |
+| D2 | Exports reales de AXUM y STORE SYS. | **Parcial (2026-11-05):** recibidos clientes, ventas (1 día y octubre), comprobantes y maestro de artículos de STORE SYS; falta AXUM No Compra. | F1.3 (artículos) y F1.4 (AXUM). |
 | D3 | ¿AXUM y STORE SYS comparten código de cliente / producto? | **Decidido (D‑B, 2026-10-30):** espacios independientes hasta comprobarlo con muestras. | — |
 | D4 | ¿Cómo se registran NC y devoluciones en STORE SYS? ¿Importes con o sin IVA? | Comprobantes separados; `netosa` sin signo y `total` con signo; signo canónico por `document_types`. Clasificación confirmada por Enzo (2026-11-03) y sembrada en F1.2; `COMP. INTERNO X` y `FACTURA` sin letra quedan `UNCLASSIFIED`. | Siembra de `document_types` (F1.2). |
 | D5 | Desfase típico pedido → factura en preventa. | 2 días. | Conversión facturada. |
@@ -264,12 +264,12 @@ Estado: **IN_PROGRESS.** Diseño F1.0 aprobado por Enzo el 2026-10-30 con las de
 |---|---|
 | Pedido de exportaciones (`docs/DATA_INTAKE.md`) | Hecho (2026-10-02) |
 | Muestras de formato STORE SYS: clientes, ventas, comprobantes | Recibidas y perfiladas (2026-10-30, `docs/IMPORTS.md §3`) |
-| Muestras: maestro de artículos y AXUM No Compra | **Pendiente (Enzo)** — necesarias para F1.3 / F1.4 |
+| Muestras: AXUM No Compra | **Pendiente (Enzo)** — necesaria para F1.4 (maestro de artículos recibido 2026-11-05) |
 | F1.0 diseño técnico | Aprobado (2026-10-30) |
 | F1.1a documentación | Aprobada y mergeada (PR #56, 2026-11-02) |
 | F1.1b infraestructura de importación | Aprobada y mergeada (PR #69, 2026-11-03) |
 | F1.2 maestros, configuración y mappings | Aprobada y mergeada (PR #71, 2026-11-05) |
-| F1.3a importadores STORE SYS (backend) | En revisión: clientes y comprobantes cerrados contra el export real; ventas implementado sin cerrar (falta muestra de varios días); artículos bloqueado (falta muestra) |
+| F1.3a importadores STORE SYS (backend) | En revisión: clientes, artículos y comprobantes cerrados contra el export real; ventas sin cerrar (el export de varios días tiene otra estructura, pendiente de decisión); identidad semántica de imports |
 | F1.3b pantalla mínima de Importaciones | Pendiente (PR aparte) |
 | F1.4 – F1.8 | Pendientes de aprobación sucesiva |
 

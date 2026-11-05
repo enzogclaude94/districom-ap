@@ -80,7 +80,7 @@ SUBIR → DETECTAR → ANALIZAR ─────────────► PREVI
 | `commercial.store_sys.customers` | Clientes (`clientes.xls`) | XLS BIFF7, cp1252 | 1 fila = 1 cliente (foto actual) | `public.customers` + mapping, `commercial.zones`, `customer_zone_assignments`, `customer_salesperson_assignments` | Formato verificado |
 | `commercial.store_sys.sales_lines` | Ventas artículos/clientes (`ventas.xls`) | XLS BIFF7, cp1252 | 1 fila = 1 artículo vendido a 1 cliente en 1 día (sin comprobante) | `commercial.sale_lines` | Formato verificado |
 | `commercial.store_sys.documents` | Comprobantes emitidos (`comprobantes emitidos.xls`) | XLS BIFF7, cp1252 | 1 fila = 1 comprobante (sin ítems) | `commercial.documents` | Formato verificado |
-| `commercial.store_sys.products` | Maestro de artículos | *pendiente de muestra* | 1 fila = 1 SKU | `commercial.products`, `product_prices` | Pendiente |
+| `commercial.store_sys.products` | Maestro de artículos (`lista de articulos.xls`) | XLS BIFF7, cp1252 | 1 fila = 1 artículo (foto actual) | `commercial.products`, `product_prices` | Formato verificado |
 | `commercial.axum.no_purchase` | AXUM No Compra (CSV) | *pendiente de muestra* | 1 fila = 1 no‑compra (cliente, fecha, preventista, motivo) | `commercial.no_purchase_events` | Pendiente |
 
 **No son fuente:**
@@ -223,24 +223,28 @@ SUBIR → DETECTAR → ANALIZAR ─────────────► PREVI
 - `fechor` se guarda como `timestamptz` en `BUSINESS_TIMEZONE`.
 - Validado con la muestra real (182 comprobantes): 182 altas, 175 vinculados a un cliente, 80 de tipos sin clasificar (78 `COMP. INTERNO X`, 2 `FACTURA`); los vales y retiros sin cliente; el reproceso queda 182 `duplicate`.
 
-### 3.5 STORE SYS · Maestro de artículos (`commercial.store_sys.products`) — *pendiente de muestra*
+### 3.5 STORE SYS · Maestro de artículos (`commercial.store_sys.products`)
 
-Campos esperados según Enzo:
-- código, descripción;
-- `lista1` … `lista7`;
-- línea, rubro, capacidad, pack;
-- impuesto interno, tope de descuento, costo, IVA;
-- código de barras, peso;
-- otros.
+**Estructura del export real** (verificado 2026-11-05 con el maestro de Enzo):
+- XLS BIFF7 (`D0 CF 11 E0`, `biff_version 70`), cp1252, una hoja `lista de articulos`, encabezado en la fila 1, sin títulos, subtotales ni celdas combinadas; ordenado por descripción.
+- **Solo tres columnas.** No vienen rubro, línea, `lista1`…`lista7`, costo, IVA, impuesto interno, tope de descuento, código de barras, capacidad, pack ni peso: lo que se esperaba (§3.5 anterior) no está en este export.
 
-Reglas aprobadas:
-- **Columnas fuente:** se guardan en `products.source_*`. Las desconocidas van a `source_extra`.
-- **Reimport:** solo actualiza `source_*`. Nunca pisa los campos canónicos manuales (categoría, tipo, elegibilidad, familia).
-- **Rubro → categoría canónica:** se traduce por `source_category_mappings`. Un rubro vacío no se infiere: el producto queda sin categoría, con `analytics_eligible = false` (D‑D) y el issue `commercial.product.without_category`.
-- **Precios:** cada `listaN` con valor actualiza `product_prices` por vigencia (§5.2). Que una lista vacía signifique «sin precio» o «0» se define con la muestra.
-- **Código repetido** en el archivo: todas las filas con ese código se rechazan y se abre `commercial.product.duplicate_code`.
+| Columna fuente | Tipo leído | Normalización | Destino |
+|---|---|---|---|
+| `codart` | número entero (2 a 7 dígitos) | entero → texto | `products.source_code` (identidad) |
+| `desart` | texto | espacios colapsados | `products.source_description` |
+| `precio` | número, hasta 2 decimales | `numeric(14,2)` | `product_prices` de la lista configurada (ver abajo) |
 
-**Bloqueado en F1.3a:** sin muestra del maestro de artículos no se implementa el adaptador (ni su estructura). El tipo no se registra. Los códigos `commercial.product.unmapped_category` (rubro sin mapping) y `commercial.product.duplicate_code` se usan cuando llegue la muestra.
+**Reglas:**
+- **Identidad:** `codart`. Este es el único import que crea productos. Un código repetido en el archivo rechaza todas sus filas y abre `commercial.product.duplicate_code`.
+- **Reimport:** solo actualiza `source_*` (`unchanged` si el contenido es igual). Nunca pisa categoría, tipo, elegibilidad ni familia.
+- **Rubro:** el export no lo trae. Todo producto nuevo queda sin categoría, `analytics_eligible = false` (D‑D) y con `commercial.product.without_category`. No se crean mappings de rubro y no se infiere nada de la descripción (ni familia, ni capacidad, ni pack). `commercial.product.unmapped_category` queda para un export que traiga rubro.
+- **Columnas fuera del contrato:** si un export trae otras columnas, se guardan textuales en `source_extra` sin interpretarlas, y el preview las lista (`source_columns_without_contract`).
+- **Precio:** el export no dice a qué lista corresponde `precio`. La lista la fija el parámetro confirmado `commercial.store_sys_articles_price_list` (número de lista existente en `price_lists`). **Sin valor (default), los precios no se cargan:** quedan en el staging del job, el preview dice `prices.loaded = false` y se abre `commercial.product.prices_not_loaded`. Una lista que no existe tampoco carga (nunca se crea una lista desde un export). La confirmación usa la lista que anunció el preview. La decide un admin del módulo, con motivo y auditada (`commercial.config.articles_price_list_set`): `GET`/`PUT /api/v1/commercial/price-lists/articles-master` `{"list_number": n | null, "reason": "…"}`. Rige desde el próximo import o reproceso del maestro; no toca precios ya cargados.
+- **Historia de precios:** precio igual → nada; distinto → cierre el día anterior a la foto + alta; dos fotos del mismo día → la primera se anula. Precio 0 → se guarda (es lo que dice STORE SYS) con warning `zero_price`; vacío → sin precio (`without_price`); negativo, texto o más de dos decimales → no se carga (`invalid_price`). El producto se crea igual en esos casos.
+- **Foto:** como Clientes, el archivo es una foto con fecha (declarada; si no, el día hábil de la carga). Una foto anterior a la última aplicada se rechaza (`snapshot_out_of_order`). Un producto ausente de la foto nunca se desactiva: queda con `commercial.product.missing_from_master` (info), que se resuelve si vuelve a aparecer.
+
+**Validado con el maestro real (2026-11-05, no commiteado):** 281 artículos, 0 códigos repetidos, 0 descripciones repetidas, ninguna celda vacía, 2 precios en 0 (artículos de regalo), 47 precios con centavos, máximo 3.436.400 (`SERVICIO LOGISTICO`). Import: 281 productos creados, 281 sin categoría, 0 precios cargados (lista sin confirmar) y 1 issue `prices_not_loaded`. El mismo archivo con la misma fecha → `duplicate`; el reproceso → 281 `unchanged`; el mismo archivo con fecha nueva → 281 `unchanged`. Con el parámetro en lista 1 (simulación en una base aparte): 281 precios cargados y el reproceso siguiente → 281 `unchanged`. Con el maestro cargado, 61 de los 63 códigos de la muestra de ventas de un día se resuelven.
 
 ### 3.6 AXUM · No Compra (`commercial.axum.no_purchase`) — *pendiente de muestra*
 
@@ -276,11 +280,25 @@ El lector entrega `RawSheet` (filas de celdas `str | Decimal | date | datetime |
 
 ## 5. Idempotencia
 
-### 5.1 Archivo idéntico
-`sha256` + `import_type` contra un job `completed` o `completed_with_warnings`.
-- El job nuevo queda `duplicate` con `duplicate_of_job_id`. Se registra un issue informativo y no se escribe nada.
-- **El nombre del archivo no participa.**
-- Un reproceso deliberado es otra operación (admin, §7).
+### 5.1 Identidad del import (archivo idéntico)
+Un upload repite un import cuando coinciden `sha256` + `import_type` + **las declaraciones que el tipo hace parte de su identidad**, contra un job `completed` o `completed_with_warnings`.
+- Cada tipo lo declara en su `ImportTypeSpec.identity` (la plataforma no conoce tipos): `snapshot_date`, `scope` o ninguna.
+
+| Tipo | Identidad | Por qué |
+|---|---|---|
+| `commercial.store_sys.customers` | `sha256` + tipo + `snapshot_date` | Es una foto: el mismo archivo como foto de otro día confirma que los clientes seguían ahí (`last_seen_on`) |
+| `commercial.store_sys.products` | `sha256` + tipo + `snapshot_date` | Es una foto; los precios toman vigencia desde esa fecha |
+| `commercial.store_sys.sales_lines` | `sha256` + tipo + `scope` | El scope declarado decide qué se reemplaza (§5.3); una declaración equivocada se corrige subiendo el mismo archivo con el scope correcto |
+| `commercial.store_sys.documents` | `sha256` + tipo | Sin declaraciones: un comprobante se identifica por su clave (§5.2) |
+
+- **Fecha de la foto sin declarar:** es el día hábil de la carga. Se escribe en `metadata.declared` (con `metadata.defaulted = ["snapshot_date"]`), así el análisis, la confirmación, el reproceso y la identidad usan el mismo día. La de un job completado es su `import_jobs.snapshot_date`.
+- **Scope:** se compara el declarado (`FULL`, `FILTERED` o sin declarar; sin declarar solo coincide con sin declarar). La nota del scope no participa: describe los filtros, no cambia la estrategia.
+- Una declaración que el tipo no usa no cambia nada: el mismo archivo de comprobantes con otro scope sigue siendo `duplicate`.
+- La identidad calculada queda en `metadata.identity`.
+- Si coincide, el job nuevo queda `duplicate` con `duplicate_of_job_id`. Se registra un issue informativo (`platform.import.duplicate_file`, uno por identidad) y no se escribe nada.
+- **El nombre del archivo nunca participa.**
+- Un import nuevo por identidad (otra fecha, otro scope) pasa por todas las reglas de su tipo: filas `unchanged`, foto fuera de orden rechazada, reemplazo de ventas que se bloquea y espera la decisión de un admin.
+- Un reproceso deliberado es otra operación (admin, §7): no pasa por el control de duplicado y hereda las declaraciones del job original.
 
 ### 5.2 Clave natural (mismo contenido, otro archivo)
 
@@ -327,6 +345,7 @@ La estrategia definitiva se valida con una muestra de varios días antes de F1.3
 - La decisión es de un **admin del módulo**, con motivo: `POST /api/v1/imports/{id}/confirm` con `{"decision": "replace" | "additional", "reason": "…"}` (CLI: `--decision`, `--reason`). `replace` reemplaza todos los días superpuestos del período; `additional` carga sin reemplazar. Una decisión cuando no hace falta → 409 `import_decision_not_needed`.
 - Se auditan `platform.import.decision_applied` (acción y motivo) y `commercial.sales.lines_superseded` (líneas, días, jobs reemplazados, si fue automático).
 - **Pendiente:** validar con un export real de varios días antes de cerrar el adaptador (ADR 014 S7).
+- **Export de octubre recibido (2026-11-05), con otra estructura:** `descripcion, cantidad, art_proveedor, rubro, cod_cliente, cliente, vendedor, zona, fecha, lista_de_precios`. Trae **código de cliente** y proveedor, pero **no trae código de artículo**. El adaptador actual lo rechaza (`missing_columns`: falta `codigo`) y no se cambió: la estrategia la decide Enzo después del análisis (informe F1.3a).
 
 ### 5.4 Concurrencia
 - Lock consultivo de PostgreSQL por `import_type` al confirmar (`pg_advisory_xact_lock`, se libera con el commit o el rollback).
@@ -390,11 +409,11 @@ Zonas y productos **no usan mappings**: se identifican por `commercial.zones.nam
 - `platform.import.duplicate_file`, `invalid_row`, `missing_columns`;
 - `commercial.customer.without_zone`, `without_salesperson`, `missing_from_master`, `unresolved_code` (código STORE SYS sin mapping, desde comprobantes);
 - `commercial.seller.unmapped` (vendedor STORE SYS sin vincular);
-- `commercial.product.unknown` (código de ventas que no está en el maestro), `without_category`, `unmapped_category` (rubro sin mapping, con el maestro de artículos);
+- `commercial.product.unknown` (código de ventas que no está en el maestro), `without_category`, `unmapped_category` (rubro sin mapping; el export actual no trae rubro), `duplicate_code` (código repetido en el maestro), `missing_from_master` (info), `prices_not_loaded` (precio sin lista confirmada);
 - `commercial.sale_line.customer_pending` (por mapping de nombre), `product_pending` (por job);
 - `commercial.zone.unconfigured`;
 - `commercial.document.unclassified_type`, `changed`;
-- pendientes de su muestra: `commercial.product.duplicate_code` (maestro de artículos), `commercial.no_purchase.*` (AXUM, F1.4).
+- pendientes de su muestra: `commercial.no_purchase.*` (AXUM, F1.4).
 
 **Reproceso:**
 - **Re‑resolver:** al confirmar mappings, los hechos pendientes se completan solos.
