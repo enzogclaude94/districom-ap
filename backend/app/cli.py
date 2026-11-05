@@ -22,7 +22,7 @@ import logging
 import sys
 from collections.abc import Generator, Iterator
 from contextlib import contextmanager
-from datetime import timedelta
+from datetime import date, timedelta
 from pathlib import Path
 from typing import cast
 
@@ -38,6 +38,7 @@ from app.platform.auth.module_roles import ModuleRoleError, grant_module_role, r
 from app.platform.auth.service import create_user, set_temporary_password
 from app.platform.imports import service as imports
 from app.platform.imports.models import ImportJob
+from app.platform.imports.registry import DECISIONS, SCOPES, Decision, Declared
 
 logger = logging.getLogger("app.cli")
 
@@ -148,9 +149,17 @@ def _imports(args: argparse.Namespace) -> int:
             if args.action == "analyze":
                 path = Path(args.file)
                 with path.open("rb") as stream:
-                    job = imports.upload(db, user, settings, imports.Upload(stream, path.name, None), args.type)
+                    declared = Declared(
+                        date.fromisoformat(args.snapshot_date) if args.snapshot_date else None,
+                        args.scope,
+                        args.scope_note,
+                    )
+                    job = imports.upload(
+                        db, user, settings, imports.Upload(stream, path.name, None), args.type, declared
+                    )
             elif args.action == "confirm":
-                job = imports.confirm(db, user, settings, args.job)
+                decision = Decision(args.decision, args.reason or "") if args.decision else None
+                job = imports.confirm(db, user, settings, args.job, decision)
             else:
                 job = imports.reprocess(db, user, settings, args.job)
         except AppError as exc:
@@ -204,10 +213,16 @@ def main(argv: list[str] | None = None) -> int:
     analyze.add_argument("--file", required=True)
     analyze.add_argument("--email", required=True, help="Usuario que importa (necesita rol operator)")
     analyze.add_argument("--type", default=None, help="Tipo de importación; sin él se detecta por encabezados")
+    analyze.add_argument("--snapshot-date", default=None, help="Fecha de la foto de un maestro (AAAA-MM-DD)")
+    analyze.add_argument("--scope", default=None, choices=SCOPES, help="Alcance del export de ventas")
+    analyze.add_argument("--scope-note", default=None, help="Filtros usados, si el alcance es FILTERED")
     for name, text in (("confirm", "Confirmar un job pendiente"), ("reprocess", "Reprocesar un job (rol admin)")):
         action = actions.add_parser(name, help=text)
         action.add_argument("--job", required=True, type=int)
         action.add_argument("--email", required=True)
+        if name == "confirm":
+            action.add_argument("--decision", default=None, choices=DECISIONS, help="Decisión de admin (bloqueada)")
+            action.add_argument("--reason", default=None, help="Motivo de la decisión")
     recover = actions.add_parser("recover", help="Pasar a failed los jobs interrumpidos en processing")
     recover.add_argument("--older-than-minutes", type=int, default=30)
     imports_cmd.set_defaults(func=_imports)

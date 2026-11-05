@@ -29,6 +29,7 @@ from sqlalchemy import func, insert, select, text, update
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
+from app.core.clock import business_today
 from app.core.config import Settings
 from app.core.errors import AppError
 from app.platform.audit.service import record_event
@@ -38,10 +39,15 @@ from app.platform.imports.formats import UnsupportedFormatError, detect_format, 
 from app.platform.imports.models import COMPLETED_STATUSES, ImportFile, ImportJob, ImportRow
 from app.platform.imports.readers import read_workbook
 from app.platform.imports.registry import (
+    DECISIONS,
     DETECTION_THRESHOLD,
     ROW_OUTCOMES,
+    SCOPES,
     AnalyzeContext,
+    ConfirmationBlockedError,
     ConfirmContext,
+    Decision,
+    Declared,
     RegisteredType,
     StagedRow,
     StructuralError,
@@ -118,9 +124,27 @@ def visible_jobs_filter(user: User) -> Any:
 # --- upload, detect, analyze ------------------------------------------------------------------------------------
 
 
-def upload(db: Session, user: User, settings: Settings, upload: Upload, import_type: str | None) -> ImportJob:
+def _check_declared(declared: Declared) -> Declared:
+    if declared.scope is not None and declared.scope not in SCOPES:
+        raise AppError(422, "invalid_scope", "El alcance tiene que ser FULL o FILTERED.", {"allowed": list(SCOPES)})
+    if declared.snapshot_date is not None and declared.snapshot_date > business_today():
+        raise AppError(422, "snapshot_in_future", "La fecha de la foto no puede ser futura.")
+    note = " ".join(declared.scope_note.split())[:300] if declared.scope_note else None
+    return Declared(declared.snapshot_date, declared.scope, note or None)
+
+
+def upload(
+    db: Session,
+    user: User,
+    settings: Settings,
+    upload: Upload,
+    import_type: str | None,
+    declared: Declared | None = None,
+) -> ImportJob:
     """Store the file and run detection and analysis. Returns the job: `pending` with its preview, or already
-    `failed` / `duplicate`. Raises only for what is no attempt at all (permissions, extension, size)."""
+    `failed` / `duplicate`. Raises only for what is no attempt at all (permissions, extension, size, an invalid
+    declaration). `declared` is what the operator says the file does not: a snapshot date, an export's scope."""
+    declared = _check_declared(declared or Declared())
     candidates = [_require_type(user, import_type, "operator")] if import_type else types_for(user, "operator")
     if not candidates:
         raise AppError(403, "forbidden", "No tenés permisos para importar archivos.")
@@ -145,7 +169,13 @@ def upload(db: Session, user: User, settings: Settings, upload: Upload, import_t
     )
     db.add(file)
     db.flush()
-    job = ImportJob(status="processing", file_id=file.id, created_by=user.id, started_at=func.now())
+    job = ImportJob(
+        status="processing",
+        file_id=file.id,
+        created_by=user.id,
+        started_at=func.now(),
+        job_metadata={"declared": declared.as_json()},
+    )
     db.add(job)
     db.flush()
     record_event(
@@ -175,6 +205,7 @@ def reprocess(db: Session, user: User, settings: Settings, job_id: int) -> Impor
         created_by=user.id,
         started_at=func.now(),
         reprocess_of_job_id=original.id,
+        job_metadata={"declared": (original.job_metadata or {}).get("declared") or Declared().as_json()},
     )
     db.add(job)
     db.flush()
@@ -208,7 +239,11 @@ def _detect_and_analyze(
         workbook = read_workbook(path, detected.format)
     except UnsupportedFormatError as exc:
         return _fail(db, job, exc.reason, exc.message)
-    metadata: dict[str, Any] = {"reader": dict(workbook.metadata), "extension_mismatch": detected.extension_mismatch}
+    metadata: dict[str, Any] = {
+        "declared": (job.job_metadata or {}).get("declared") or Declared().as_json(),
+        "reader": dict(workbook.metadata),
+        "extension_mismatch": detected.extension_mismatch,
+    }
 
     scores = {entry.spec.key: _score(entry, workbook) for entry in candidates}
     metadata["detection"] = {key: round(score, 3) for key, score in scores.items()}
@@ -247,7 +282,12 @@ def _score(entry: RegisteredType, workbook: Workbook) -> float:
 
 def _analyze(db: Session, job: ImportJob, entry: RegisteredType, workbook: Workbook) -> ImportJob:
     job_id = job.id
-    context = AnalyzeContext(job_id=job_id, import_type=entry.spec.key, source_system_id=job.source_system_id or 0)
+    context = AnalyzeContext(
+        job_id=job_id,
+        import_type=entry.spec.key,
+        source_system_id=job.source_system_id or 0,
+        declared=Declared.from_json((job.job_metadata or {}).get("declared")),
+    )
     db.commit()
     try:
         db.execute(text("SET TRANSACTION READ ONLY"))
@@ -399,7 +439,27 @@ def _source_system_id(db: Session, code: str) -> int:
 # --- confirm, cancel, recover -----------------------------------------------------------------------------------
 
 
-def confirm(db: Session, user: User, settings: Settings, job_id: int) -> ImportJob:
+def _check_decision(user: User, job_id: int, db: Session, decision: Decision | None) -> Decision | None:
+    if decision is None:
+        return None
+    job = db.get(ImportJob, job_id)
+    if job is None or not can_view(user, job):
+        raise AppError(404, "import_job_not_found", "Esa importación no existe.")
+    entry = _require_type(user, job.import_type or "", "operator")
+    if not has_module_access(user, entry.module_key, "admin"):
+        raise AppError(403, "forbidden", "Solo un administrador decide cómo aplicar esta importación.")
+    if decision.action not in DECISIONS:
+        raise AppError(422, "invalid_decision", "La decisión no es válida.", {"allowed": list(DECISIONS)})
+    reason = " ".join((decision.reason or "").split())
+    if len(reason) < 5:
+        raise AppError(422, "decision_reason_required", "Indicá el motivo de la decisión.")
+    return Decision(decision.action, reason[:500])
+
+
+def confirm(db: Session, user: User, settings: Settings, job_id: int, decision: Decision | None = None) -> ImportJob:
+    """Write the analyzed job. `decision` is an admin's explicit answer to a confirmation the adapter stopped
+    (`ConfirmationBlockedError`): without it such a confirmation answers 409 and the job stays `pending`."""
+    decision = _check_decision(user, job_id, db, decision)
     job = _claim(db, user, job_id)
     entry = registry.get(job.import_type or "")
     assert entry is not None  # _claim checked it
@@ -421,7 +481,11 @@ def confirm(db: Session, user: User, settings: Settings, job_id: int) -> ImportJ
     if job.reprocess_of_job_id is None and (original := _completed_twin(db, job, file_sha)) is not None:
         return _mark_duplicate(db, job, original, file_sha)
     try:
-        _write(db, user, job, entry)
+        _write(db, user, job, entry, decision)
+    except ConfirmationBlockedError as exc:
+        db.rollback()
+        _release(db, job_id)
+        raise AppError(409, exc.code, exc.message, exc.details) from exc
     except StructuralError as exc:
         db.rollback()
         return _fail(db, db.get_one(ImportJob, job_id), exc.reason, exc.message, details=exc.details)
@@ -478,7 +542,7 @@ def _lock_type(db: Session, settings: Settings, import_type: str) -> None:
     db.execute(text(f"SET LOCAL statement_timeout = {int(settings.db_statement_timeout_ms)}"))
 
 
-def _write(db: Session, user: User, job: ImportJob, entry: RegisteredType) -> None:
+def _write(db: Session, user: User, job: ImportJob, entry: RegisteredType, decision: Decision | None) -> None:
     rows = db.scalars(
         select(ImportRow)
         .where(ImportRow.job_id == job.id, ImportRow.status.in_(WRITABLE_STATUSES))
@@ -487,7 +551,14 @@ def _write(db: Session, user: User, job: ImportJob, entry: RegisteredType) -> No
     staged = [
         StagedRow(r.id, r.sheet, r.row_number, r.status, r.normalized, r.business_key, r.entity_type) for r in rows
     ]
-    context = ConfirmContext(job.id, entry.spec.key, job.source_system_id or 0, user.id)
+    context = ConfirmContext(
+        job.id,
+        entry.spec.key,
+        job.source_system_id or 0,
+        user.id,
+        declared=Declared.from_json((job.job_metadata or {}).get("declared")),
+        decision=decision,
+    )
     outcomes = entry.spec.adapter.write(db, context, staged)
 
     ids = {row.id for row in staged}
@@ -529,8 +600,22 @@ def _write(db: Session, user: User, job: ImportJob, entry: RegisteredType) -> No
         user_id=user.id,
         entity_type="import_job",
         entity_id=str(job.id),
-        payload={"import_type": job.import_type, "status": job.status, "outcomes": dict(counts)},
+        payload={
+            "import_type": job.import_type,
+            "status": job.status,
+            "outcomes": dict(counts),
+            "decision": decision.action if decision else None,
+        },
     )
+    if decision is not None:
+        record_event(
+            db,
+            "platform.import.decision_applied",
+            user_id=user.id,
+            entity_type="import_job",
+            entity_id=str(job.id),
+            payload={"import_type": job.import_type, "action": decision.action, "reason": decision.reason},
+        )
     db.commit()
     logger.info("import_confirmed", extra={"import_job_id": job.id, "import_type": job.import_type, **counts})
 

@@ -1,7 +1,7 @@
 from datetime import date, datetime
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ImportTypeOut(BaseModel):
@@ -82,7 +82,15 @@ class ImportJobDetail(BaseModel):
     reprocess_of_job_id: int | None
     duplicate_of_job_id: int | None
     can_confirm: bool
+    can_decide: bool  # an admin of the type's module, who may answer a blocked confirmation
     can_reprocess: bool
+
+
+class ConfirmRequest(BaseModel):
+    """Only to answer a confirmation the importer stopped (409 `import_decision_required`): admin, with a reason."""
+
+    decision: Literal["replace", "additional"] | None = None
+    reason: str | None = Field(default=None, max_length=500)
 
 
 class ImportRowOut(BaseModel):

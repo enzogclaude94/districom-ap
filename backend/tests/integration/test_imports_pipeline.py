@@ -119,7 +119,9 @@ def test_analysis_stages_every_row_and_writes_nothing_canonical(
     assert (job.period_from, job.period_to) == (date(2026, 10, 23), date(2026, 10, 24))
     assert job.job_metadata["preview"] == {"new_codes": 3}
     assert job.job_metadata["reader"]["biff_version"] == 70
-    assert job.job_metadata["detection"] == {TYPE_KEY: 1.0, OTHER_TYPE_KEY: 0.5}
+    detection = job.job_metadata["detection"]
+    assert (detection[TYPE_KEY], detection[OTHER_TYPE_KEY]) == (1.0, 0.5)
+    assert all(score < 0.8 for key, score in detection.items() if key not in (TYPE_KEY, OTHER_TYPE_KEY))
     raw = db.scalar(select(ImportRow.raw).where(ImportRow.job_id == job.id, ImportRow.row_number == 4))
     assert raw == [{"n": "1002"}, "Caña Ñandú", {"n": "1.5"}, {"d": "2026-10-24"}]
 

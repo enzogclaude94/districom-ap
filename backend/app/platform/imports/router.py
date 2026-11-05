@@ -2,9 +2,10 @@
 type: `viewer` reads, `operator` uploads, confirms and cancels, `admin` reprocesses. A user only ever sees the types
 and jobs of the modules they can open."""
 
-from typing import Annotated
+from datetime import date
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, File, Form, Query, UploadFile
+from fastapi import APIRouter, Body, File, Form, Query, UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -13,8 +14,9 @@ from app.platform.auth.deps import AppSettings, CurrentUser, DbSession
 from app.platform.auth.models import User
 from app.platform.imports import service
 from app.platform.imports.models import ImportFile, ImportJob
-from app.platform.imports.registry import ROW_STATUSES, registry
+from app.platform.imports.registry import ROW_STATUSES, Decision, Declared, registry
 from app.platform.imports.schemas import (
+    ConfirmRequest,
     ImportFileOut,
     ImportJobDetail,
     ImportJobItem,
@@ -97,6 +99,7 @@ def _detail(db: Session, user: User, job: ImportJob) -> ImportJobDetail:
         can_confirm=job.status == "pending"
         and entry is not None
         and has_module_access(user, entry.module_key, "operator"),
+        can_decide=job.status == "pending" and entry is not None and has_module_access(user, entry.module_key, "admin"),
         can_reprocess=entry is not None
         and job.status in ("completed", "completed_with_warnings", "failed", "cancelled")
         and has_module_access(user, entry.module_key, "admin"),
@@ -124,6 +127,13 @@ def upload(
     settings: AppSettings,
     file: Annotated[UploadFile, File(description="Archivo .xls, .xlsx o .csv tal como sale del sistema")],
     import_type: Annotated[str | None, Form(max_length=80)] = None,
+    snapshot_date: Annotated[
+        date | None, Form(description="Fecha de la foto de un maestro; sin ella, la fecha de negocio de hoy")
+    ] = None,
+    scope: Annotated[
+        Literal["FULL", "FILTERED"] | None, Form(description="Alcance declarado del export: sin filtros o filtrado")
+    ] = None,
+    scope_note: Annotated[str | None, Form(max_length=300, description="Filtros usados, si es FILTERED")] = None,
 ) -> ImportJobDetail:
     job = service.upload(
         db,
@@ -131,6 +141,7 @@ def upload(
         settings,
         service.Upload(stream=file.file, filename=file.filename or "", content_type=file.content_type),
         import_type or None,
+        Declared(snapshot_date, scope, scope_note),
     )
     return _detail(db, user, job)
 
@@ -233,8 +244,15 @@ def list_issues(job_id: int, db: DbSession, user: CurrentUser) -> list[QualityIs
 
 
 @router.post("/{job_id}/confirm", response_model=ImportJobDetail, summary="Confirmar y escribir la importación")
-def confirm(job_id: int, db: DbSession, user: CurrentUser, settings: AppSettings) -> ImportJobDetail:
-    return _detail(db, user, service.confirm(db, user, settings, job_id))
+def confirm(
+    job_id: int,
+    db: DbSession,
+    user: CurrentUser,
+    settings: AppSettings,
+    body: Annotated[ConfirmRequest | None, Body()] = None,
+) -> ImportJobDetail:
+    decision = Decision(body.decision, body.reason or "") if body is not None and body.decision else None
+    return _detail(db, user, service.confirm(db, user, settings, job_id, decision))
 
 
 @router.post("/{job_id}/cancel", response_model=ImportJobDetail, summary="Descartar el análisis")
