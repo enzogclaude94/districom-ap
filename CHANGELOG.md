@@ -23,6 +23,19 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 - **Códigos de calidad nuevos:** `commercial.customer.without_zone`, `without_salesperson`, `missing_from_master`, `unresolved_code`; `commercial.seller.unmapped`; `commercial.product.unknown`, `unmapped_category`; `commercial.sale_line.customer_pending`, `product_pending`; `commercial.document.changed`.
 - Tests (≈45 nuevos): los tres importadores con archivos BIFF7 sintéticos de la misma estructura que los exports reales, los casos de Enzo (alta, reimport, cambios, CUIT vacío o repetido, zona y vendedor, MISA, Boca, ausente, tipos de comprobante, codcli 0, clave duplicada o modificada, resolución de clientes, listas 1–5, cantidades, filas idénticas, períodos iguales y parciales, FULL/FILTERED, bloqueo y decisión), flujo de punta a punta por la API, CLI y migraciones `0036`/`0037`. Validado localmente contra las tres muestras reales (no commiteadas).
 - `docs/IMPORTS.md` §3.2–§3.5, §5.3, §7, §8, `DATA_MODEL.md` §5–§6, `ROADMAP.md`, `PLAN.md` y `CLAUDE.md §2` actualizados. F1.2 **DONE** (PR #71).
+### Added — Servidor: W2‑A, prueba de concepto de backups físicos en Windows
+- **`deploy/windows/backup/`**: paquete aislado. Usa solo la biblioteca estándar de Python, sobre las herramientas de PostgreSQL 17 y `rclone`, porque pgBackRest no existe en Windows. Nada de la aplicación ni del despliegue Linux lo usa. Incluye:
+  - `archive_command` y `restore_command`: escritura durable con reintentos ante archivos abiertos. No sobrescribe un archivo con contenido distinto, y no escribe sin la marca del repositorio;
+  - backups base en formato plain, verificados con `pg_verifybackup`;
+  - PITR en una instancia aparte por hora, por nombre, por LSN o hasta el final, con resultado COMPLETE, INCOMPLETE o FAILED;
+  - detección de huecos que sigue los archivos `.history`;
+  - copia externa con `rclone crypt`: `copy --immutable` y un manifiesto SHA‑256 que se verifica al traerla;
+  - retención que conserva todo lo que necesita un backup conservado.
+- **Tests:** 56 tests (A‑1 a A‑17) con datos ficticios contra un PostgreSQL real. En el job de Windows (PostgreSQL 17.6) pasan los 56 y A‑1 a A‑17 quedan en PASS. Un plugin de pytest escribe el reporte PASS/FAIL por criterio y lista lo PENDIENTE (Defender, disco físico, corte de energía, bucket real, servicio de Windows, Windows 11 Pro, esquema real).
+- **CI:** job nuevo «Windows backup PoC (W2-A)» en `windows-latest`, con PostgreSQL 17.6 oficial y `rclone` con checksum verificado. Los 4 jobs existentes no cambian.
+- **Docs:**
+  - `WINDOWS_DEPLOYMENT.md §8.2` (resultados) y §6: requisitos obligatorios de W2‑C para el bloqueo de escrituras y la comprobación del WAL en el cierre de jornada;
+  - `ROADMAP.md`: W1 DONE y W2‑A en revisión.
 
 ### Added — F1.2: maestros, configuración y núcleo de mappings
 - **Migración `0034`** (`platform: …`): `customers` (CUIT opcional, validado con `cuit_is_valid` y **no único**; `display_name_key` solo para candidatos exactos) y `external_entity_mappings` (`UNIQUE (entity_type, source_system, namespace, external_id)`, estados `pending` / `ambiguous` / `confirmed` / `rejected` / `excluded`, métodos, candidatos y decisión). Sin DELETE (triggers); el downgrade se niega si hay filas.

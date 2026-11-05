@@ -159,3 +159,73 @@ jobs:
         run: docker compose logs
       - if: always()
         run: docker compose down -v
+
+  windows-backup-poc:
+    # W2-A (ADR 016, proposed): physical backups, WAL archiving, PITR and restore on Windows with
+    # PostgreSQL 17 and fictitious data. Isolated: it does not touch the four jobs above.
+    # The runner is Windows Server, not Windows 11 Pro: what it cannot reproduce stays PENDIENTE.
+    name: Windows backup PoC (W2-A)
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: deploy/windows/backup
+    env:
+      PG_VERSION: "17.6"
+      # Never RCLONE_*: rclone reads RCLONE_<FLAG> variables as its own flags.
+      DISTRICOM_RCLONE_RELEASE: "v1.68.2"
+      DISTRICOM_POC_TIMING_MB: "1024"
+      DISTRICOM_POC_RESULTS: ${{ github.workspace }}/deploy/windows/backup/test-results
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: deploy/windows/backup/uv.lock
+      - run: uv python install ${{ env.PYTHON_VERSION }}
+      - name: Install PostgreSQL ${{ env.PG_VERSION }} (official binaries)
+        run: |
+          $zip = "$env:RUNNER_TEMP\pg.zip"
+          Invoke-WebRequest "https://get.enterprisedb.com/postgresql/postgresql-$env:PG_VERSION-1-windows-x64-binaries.zip" -OutFile $zip
+          (Get-FileHash $zip -Algorithm SHA256).Hash
+          Expand-Archive $zip -DestinationPath "$env:RUNNER_TEMP\pg"
+          $bin = "$env:RUNNER_TEMP\pg\pgsql\bin"
+          $version = & "$bin\postgres.exe" --version
+          $version
+          if ($version -notmatch "PostgreSQL\) $([regex]::Escape($env:PG_VERSION))$") { throw "unexpected version: $version" }
+          "DISTRICOM_PG_BIN=$bin" >> $env:GITHUB_ENV
+          "DISTRICOM_PG_VERSION=$version" >> $env:GITHUB_ENV
+      - name: Install rclone ${{ env.DISTRICOM_RCLONE_RELEASE }} (checksum verified)
+        run: |
+          $base = "https://downloads.rclone.org/$env:DISTRICOM_RCLONE_RELEASE"
+          $name = "rclone-$env:DISTRICOM_RCLONE_RELEASE-windows-amd64.zip"
+          Invoke-WebRequest "$base/$name" -OutFile "$env:RUNNER_TEMP\$name"
+          Invoke-WebRequest "$base/SHA256SUMS" -OutFile "$env:RUNNER_TEMP\SHA256SUMS"
+          $line = Get-Content "$env:RUNNER_TEMP\SHA256SUMS" | Where-Object { $_ -match "^[0-9a-f]{64}\s+$([regex]::Escape($name))\s*$" }
+          $expected = if ($line) { ($line -split "\s+")[0] } else { "" }
+          $actual = (Get-FileHash "$env:RUNNER_TEMP\$name" -Algorithm SHA256).Hash.ToLower()
+          if (-not $expected -or $expected.Trim() -ne $actual) { throw "rclone checksum mismatch: '$expected' vs '$actual'" }
+          Expand-Archive "$env:RUNNER_TEMP\$name" -DestinationPath "$env:RUNNER_TEMP\rclone"
+          $exe = (Get-ChildItem "$env:RUNNER_TEMP\rclone" -Recurse -Filter rclone.exe).FullName
+          & $exe version
+          "DISTRICOM_RCLONE=$exe" >> $env:GITHUB_ENV
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy
+      - run: uv run pytest -v
+      - name: W2-A results
+        if: always()
+        run: |
+          # Also printed to the job log, which stays readable with read-only API access.
+          if (Test-Path test-results\w2a-results.md) {
+            Get-Content test-results\w2a-results.md >> $env:GITHUB_STEP_SUMMARY
+            Get-Content test-results\w2a-results.md
+          }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: w2a-results
+          path: deploy/windows/backup/test-results
+          retention-days: 30
