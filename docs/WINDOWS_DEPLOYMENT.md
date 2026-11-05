@@ -196,11 +196,30 @@ Si un paso falla antes del 4, la app vuelve a quedar disponible. Si falla despu�
 - **Qué se probó:**
   - criterios A‑1 a A‑17, más calidad (A‑18) y diseño Linux intacto (A‑19);
   - el reporte del job da PASS o FAIL por criterio y lista lo PENDIENTE.
+- **Resultado en CI (2026-11-05, commit `7217b24`):**
+  - entorno: Windows Server 2025 (`windows-latest`), PostgreSQL 17.6 y Python 3.12;
+  - 56 de 56 tests en verde, y A‑1 a A‑17 en PASS;
+  - A‑18: ruff, ruff format y mypy estricto en verde;
+  - A‑19: los 4 jobs existentes en verde, y el diff solo toca este paquete, el job nuevo y la documentación.
+  - En A‑4, A‑5, A‑11 y A‑13 el PASS cubre solo lo que se reproduce en CI; la variante real de cada uno sigue PENDIENTE.
+- **Mediciones en el runner (no son límites ni una predicción del servidor):**
+  - `archive_timeout` efectivo de 63 s;
+  - base de 1 GB: el backup base con verificación tarda 22,5 s y la restauración (copia, recuperación y promoción) 40,2 s;
+  - A‑11, corte durante escrituras:
+    - 836 transacciones confirmadas;
+    - 563 archivadas, y las mismas 563 recuperadas desde el repositorio;
+    - 273 confirmadas que no estaban archivadas en el momento del corte; el reinicio local las conserva todas;
+    - esto confirma que el RPO desde el repositorio no es cero.
 - **Decisiones que surgieron de las pruebas:**
   - **Segmento del cambio de timeline:** el que contiene el punto de cambio existe en las dos timelines, y recuperar con cualquiera de las dos copias alcanza. Que falte solo una no es un hueco.
   - **Huecos sin objetivo:** si se restaura hasta el final y hay un hueco, PostgreSQL se detiene en él y promueve sin avisar. Por eso la herramienta revisa los huecos antes de restaurar y, en ese caso, informa **INCOMPLETE**, nunca COMPLETE.
   - **Configuración heredada:** el backup de un servidor restaurado trae su configuración de recuperación. La restauración la limpia explícitamente antes de fijar el objetivo nuevo.
   - **Directorios vacíos:** `rclone` no copia directorios vacíos, y un backup base los necesita. El manifiesto de la copia externa los registra y se recrean al traerla.
+  - **Texto en Windows:**
+    - las herramientas de PostgreSQL se leen siempre en UTF‑8 (`PGCLIENTENCODING`);
+    - el SQL con texto no ASCII se envía por entrada estándar, porque Windows pasa los argumentos de línea de comandos en la página de códigos ANSI.
+  - **Salida de `pg_ctl start`:** va a un archivo y nunca a una tubería, porque el servidor hereda el handle y la lectura no terminaría nunca.
+  - **Reinicio tras un corte:** los procesos del servidor terminado pueden retener el log un instante. El arranque reintenta solo ese error, durante 60 s como máximo.
   - **Archivos abiertos por otro proceso en Windows:** se cubren con nombre temporal y renombre con reintentos. Con Defender real queda PENDIENTE.
 - **PENDIENTE, nunca PASS:**
   - Defender real;

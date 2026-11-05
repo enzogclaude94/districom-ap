@@ -12,7 +12,7 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
   - detección de huecos que sigue los archivos `.history`;
   - copia externa con `rclone crypt`: `copy --immutable` y un manifiesto SHA‑256 que se verifica al traerla;
   - retención que conserva todo lo que necesita un backup conservado.
-- **Tests:** 56 tests (A‑1 a A‑17) con datos ficticios contra un PostgreSQL real. Un plugin de pytest escribe el reporte PASS/FAIL por criterio y lista lo PENDIENTE (Defender, disco físico, corte de energía, bucket real, servicio de Windows, Windows 11 Pro, esquema real).
+- **Tests:** 56 tests (A‑1 a A‑17) con datos ficticios contra un PostgreSQL real. En el job de Windows (PostgreSQL 17.6) pasan los 56 y A‑1 a A‑17 quedan en PASS. Un plugin de pytest escribe el reporte PASS/FAIL por criterio y lista lo PENDIENTE (Defender, disco físico, corte de energía, bucket real, servicio de Windows, Windows 11 Pro, esquema real).
 - **CI:** job nuevo «Windows backup PoC (W2-A)» en `windows-latest`, con PostgreSQL 17.6 oficial y `rclone` con checksum verificado. Los 4 jobs existentes no cambian.
 - **Docs:**
   - `WINDOWS_DEPLOYMENT.md §8.2` (resultados) y §6: requisitos obligatorios de W2‑C para el bloqueo de escrituras y la comprobación del WAL en el cierre de jornada;
