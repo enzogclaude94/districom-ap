@@ -4,6 +4,16 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Changed — Servidor: cierre de W2‑A
+- `ROADMAP.md` y `docs/WINDOWS_DEPLOYMENT.md`:
+  - W2‑A queda completada **como prueba de concepto y CI** (PR #72, merge `f2a7555`);
+  - las pruebas de laboratorio siguen PENDIENTES como condición previa a producción: Windows 11 Pro, PostgreSQL como servicio, Defender, discos reales, corte de energía y UPS, bucket real e inmutabilidad, y esquema real;
+  - ADR 016 sigue «Propuesto».
+- `docs/WINDOWS_DEPLOYMENT.md §8.3`, requisitos nuevos de Enzo para el desarrollo posterior:
+  - la retención se valida restaurando completo cada backup conservado, incluidas las timelines;
+  - los manifiestos y las copias externas deben ser consistentes mientras se archiva WAL;
+  - criterios precisos de COMPLETE, INCOMPLETE y FAILED, con el último punto realmente recuperable.
+
 ### Added — Servidor: W2‑A, prueba de concepto de backups físicos en Windows
 - **`deploy/windows/backup/`**: paquete aislado. Usa solo la biblioteca estándar de Python, sobre las herramientas de PostgreSQL 17 y `rclone`, porque pgBackRest no existe en Windows. Nada de la aplicación ni del despliegue Linux lo usa. Incluye:
   - `archive_command` y `restore_command`: escritura durable con reintentos ante archivos abiertos. No sobrescribe un archivo con contenido distinto, y no escribe sin la marca del repositorio;

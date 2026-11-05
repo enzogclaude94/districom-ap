@@ -172,7 +172,7 @@ Si un paso falla antes del 4, la app vuelve a quedar disponible. Si falla despu�
 | Etapa | Qué | Dónde se prueba | Estado |
 |---|---|---|---|
 | **W1** | ADR 016 (Propuesto) y este plan | CI (documentación) | DONE (PR #70, 2026-11-04) |
-| **W2‑A** | Prueba de concepto aislada de backups físicos, WAL, PITR y restauración (`deploy/windows/backup/`) | GitHub Actions (Windows); lo no reproducible queda PENDIENTE | Implementada (autorizada el 2026-11-04), en revisión: ver §8.2 |
+| **W2‑A** | Prueba de concepto aislada de backups físicos, WAL, PITR y restauración (`deploy/windows/backup/`) | GitHub Actions (Windows); lo no reproducible queda PENDIENTE | DONE como prueba de concepto y CI (PR #72, 2026-11-05); lo de laboratorio sigue PENDIENTE: ver §8.2 |
 | **W2‑B** | Pruebas automatizadas de los componentes compatibles con Windows (backend en Windows, orden de textos, frontend) | GitHub Actions (Windows) | Por definir |
 | **W2‑C** | El resto (operación, `install.ps1`, servicios, firewall, cierre de jornada, suite de aceptación) | CI y laboratorio Windows 11 Pro | Se planifica solo después de validar W2‑A |
 | W3 | Laboratorio Windows 11 Pro: suite completa y pruebas pendientes | PC de laboratorio (no el servidor) | Sin laboratorio confirmado |
@@ -191,6 +191,10 @@ Si un paso falla antes del 4, la app vuelve a quedar disponible. Si falla despu�
 - **Servidor físico (S3):** Intel RST RAID 1, discos reales, tiempos reales, convivencia con Store Sys, UPS. Sin ensayos destructivos mientras Store Sys funcione en él.
 
 ### 8.2 W2‑A: prueba de concepto
+- **Estado (Enzo, 2026-11-05):**
+  - completada **a nivel de prueba de concepto y CI** (PR #72, merge `f2a7555`);
+  - no valida nada de lo PENDIENTE de abajo, que es **condición previa a producción**;
+  - ADR 016 sigue «Propuesto».
 - **Dónde está:** `deploy/windows/backup/` (README), un paquete Python que solo usa la biblioteca estándar. Nada de la aplicación ni del despliegue Linux lo usa.
 - **Cómo corre:** en el job de CI «Windows backup PoC (W2-A)», sobre `windows-latest`, con los binarios oficiales de PostgreSQL 17.6 y `rclone`, todo con datos ficticios.
 - **Qué se probó:**
@@ -231,6 +235,17 @@ Si un paso falla antes del 4, la app vuelve a quedar disponible. Si falla despu�
   - el esquema real de DistriCom.
 
   Se completan en un laboratorio adecuado antes de aprobar la instalación productiva, nunca en el servidor donde funciona Store Sys.
+
+### 8.3 Requisitos de backups para el desarrollo posterior
+Enzo los fijó el 2026-11-05 al cerrar W2‑A. Se suman a los dos requisitos del cierre de jornada de §6: el bloqueo de escrituras reversible y la verificación correcta del WAL.
+1. **Retención contra restauraciones completas:**
+   - después de aplicar la retención, restaurar completo **cada** backup conservado, no solo algunos, incluidos los de otras timelines;
+   - comparar cada uno con su estado esperado.
+2. **Consistencia con archivado en curso:** comprobar que los manifiestos y las copias externas siguen siendo consistentes y verificables mientras PostgreSQL sigue archivando WAL. Un segmento que llega durante la copia no puede dejar un manifiesto inválido ni una copia que no se pueda restaurar.
+3. **Criterios precisos de COMPLETE, INCOMPLETE y FAILED:**
+   - definir por escrito qué condiciones dan cada resultado;
+   - informar siempre el **último punto realmente recuperable** (LSN, hora y timeline);
+   - distinguirlo del punto pedido y del último WAL archivado.
 
 ## 9. Pendientes que no dependen del desarrollo
 - Requisitos de Store Sys (RAM, disco, puertos, su base de datos, cómo se detiene).
