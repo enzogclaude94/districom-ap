@@ -39,8 +39,23 @@ def tool(name: str, bin_dir: Path | None = None) -> str:
 
 
 def run(args: list[str], *, check: bool = True, timeout: float = 600, env: dict[str, str] | None = None) -> str:
-    """Run a binary without a shell and return its stdout. stderr is included in the error."""
-    completed = subprocess.run(args, capture_output=True, text=True, timeout=timeout, env=env, check=False)
+    """Run a binary without a shell and return its stdout. stderr is included in the error.
+
+    Output is always UTF-8: ``PGCLIENTENCODING`` makes psql send UTF-8, and it is decoded as UTF-8.
+    Without both, Windows decodes with the ANSI code page (cp1252) and psql converts to it, so
+    Spanish text such as "ñandú" would arrive altered or fail to decode.
+    """
+    environment = {**(os.environ if env is None else env), "PGCLIENTENCODING": "UTF8"}
+    completed = subprocess.run(
+        args,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=timeout,
+        env=environment,
+        check=False,
+    )
     if check and completed.returncode != 0:
         message = completed.stderr.strip() or completed.stdout.strip()
         raise PgToolError(f"{Path(args[0]).name} exited {completed.returncode}: {message}")
