@@ -1,6 +1,6 @@
 # PLAN — DistriCom · Plataforma de Inteligencia Comercial
 
-> Estado del documento: **v0.5 — Fase 0 DONE; plataforma modular DONE; Fase 1 de Comercial IN_PROGRESS (F1.0, F1.1a y F1.1b aprobados, F1.2 en revisión)**
+> Estado del documento: **v0.5 — Fase 0 DONE; plataforma modular DONE; Fase 1 de Comercial IN_PROGRESS (F1.0, F1.1a, F1.1b y F1.2 aprobados, F1.3a en revisión)**
 > Última actualización: 2026-10-30 (secciones de Comercial; las de Rendiciones las mantiene su hilo)
 > Fuente de requisitos: prompt maestro adjunto por Enzo (`message.md`, 165 secciones).
 
@@ -268,8 +268,10 @@ Estado: **IN_PROGRESS.** Diseño F1.0 aprobado por Enzo el 2026-10-30 con las de
 | F1.0 diseño técnico | Aprobado (2026-10-30) |
 | F1.1a documentación | Aprobada y mergeada (PR #56, 2026-11-02) |
 | F1.1b infraestructura de importación | Aprobada y mergeada (PR #69, 2026-11-03) |
-| F1.2 maestros, configuración y mappings | En revisión (este PR) |
-| F1.3 – F1.8 | Pendientes de aprobación sucesiva |
+| F1.2 maestros, configuración y mappings | Aprobada y mergeada (PR #71, 2026-11-05) |
+| F1.3a importadores STORE SYS (backend) | En revisión: clientes y comprobantes cerrados contra el export real; ventas implementado sin cerrar (falta muestra de varios días); artículos bloqueado (falta muestra) |
+| F1.3b pantalla mínima de Importaciones | Pendiente (PR aparte) |
+| F1.4 – F1.8 | Pendientes de aprobación sucesiva |
 
 **Confirmaciones de ADR 014 §3:** Enzo respondió S1–S8 el 2026-11-01; ninguna afecta F1.1b y se vuelcan en los documentos de F1.2/F1.3, que las aplican. Lista original:
 - S1 días de visita de las zonas `RUTA 03` y `RUTA 05` (MISA) · S2 `LUVI` = Lumivi y `MAJU` = Majusa → antes de sembrar reglas (F1.2).

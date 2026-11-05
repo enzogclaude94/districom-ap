@@ -354,16 +354,21 @@ Agrupación **explícita** de SKUs que comercialmente son lo mismo (QUILMES 1L X
 | zone_id | FK `zones` (solo zona) |
 | salesperson_id | FK `public.employees` **NULL** mientras el vendedor fuente no está mapeado (solo vendedor) |
 | source_seller_label | text — etiqueta tal cual (solo vendedor; también para pseudo‑vendedores `excluded`) |
+| source_seller_key, seller_mapping_id | solo vendedor: etiqueta normalizada (decide si cambió) y el mapping `employee/STORE_SYS/seller` que la resuelve |
 | valid_from DATE NOT NULL | fecha de la foto que la abrió |
 | valid_to DATE NULL | NULL = vigente |
 | source | `STORE_SYS`, `AXUM`, `MANUAL` |
 | import_job_id | FK NULL |
 | created_by | FK users NULL |
+| voided_by_job_id, voided_at | anulación por una segunda foto del mismo día (sale de la exclusión) |
+
+Migración `0036` (F1.3a). Sin DELETE (triggers); el downgrade se niega si hay filas.
 
 - Exclusion constraint: un cliente no tiene dos asignaciones solapadas del mismo tipo.
 - Cada import del maestro es una **foto** con fecha declarada: si la asignación cambió, se cierra la vigente en `foto - 1` y se abre otra; si viene vacía, se cierra y queda issue. Nunca UPDATE in place ni borrado.
 - La foto no puede ser anterior a la última aplicada para ese cliente (se rechaza con mensaje; reordenar historia es reproceso de admin).
-- Vista `customer_current_assignment(customer_id, zone_id, salesperson_id)` y función `assignment_at(customer_id, date)` para atribución histórica.
+- Atribución histórica: `assignments.service.zone_on` / `seller_on` (F1.3a). La vista `customer_current_assignment` se crea cuando la use la analítica.
+- La foto no puede ser anterior a la última aplicada: se compara con `import_jobs.snapshot_date` de los jobs completados del tipo (falla `snapshot_out_of_order`).
 
 ## 6. Hechos (Fase 1, `commercial`)
 
@@ -386,10 +391,13 @@ Un comprobante, **sin ítems** (la fuente no los trae).
 | total_amount | numeric(14,2) — `total` tal cual (con signo en la fuente) |
 | discount_amount | numeric(14,2) |
 | import_job_id | FK NOT NULL |
+| import_row_id | FK `import_rows` NULL — la fila del staging que lo trajo |
 | source_row_hash | bytea |
 
 - **Universo comercial** = `document_types.commercial_universe`; `RETIRO PR.` queda fuera por configuración, no por código.
 - Reimport con el mismo `source_row_hash` → `duplicate`; con otro → fila rechazada + issue `document.changed` (nunca se pisa).
+- Migración `0037` (F1.3a), con `sale_lines`. Sin DELETE (triggers); el downgrade se niega si hay filas.
+- `codcli` no se vincula en las clases `EMPLOYEE_VOUCHER` e `INTERNAL_MOVEMENT` (su código no es de cliente).
 - La clase, el signo y el universo se leen **siempre** del tipo vigente: el neto con signo se calcula al leer (`net_amount × document_types.sign`), no se guarda. Reclasificar un tipo (admin, auditado) cambia su interpretación sin reescribir comprobantes.
 
 ### 6.2 sale_lines (Ventas artículos/clientes de STORE SYS)
@@ -409,7 +417,9 @@ Unidades vendidas por cliente, producto y día. **Sin importe y sin vínculo a `
 | status | `ACTIVE`, `SUPERSEDED` |
 | superseded_by_job_id | FK `import_jobs` NULL |
 | import_job_id | FK NOT NULL |
-| occurrence | int — orden dentro del archivo; las filas idénticas se conservan |
+| import_row_id | FK `import_rows` NULL — la fila del staging |
+| customer_mapping_id, seller_mapping_id | FK `external_entity_mappings` NULL — el mapping que resuelve el nombre de cliente / el vendedor |
+| occurrence | int ≥ 1 — 1 para la primera fila con ese contenido, 2 para una idéntica… las filas idénticas se conservan |
 
 - `source_seller` / `source_zone` coinciden con la asignación del maestro (no son atribución del documento); la atribución se resuelve con §5.
 - Idempotencia: reemplazo por **período y scope** (`docs/IMPORTS.md §5.3`); las líneas reemplazadas quedan `SUPERSEDED`, nunca se borran.

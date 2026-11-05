@@ -122,6 +122,15 @@ SUBIR → DETECTAR → ANALIZAR ─────────────► PREVI
 - CUIT válido en 80; vacío o placeholder en 739; uno de 10 dígitos.
 - 10 nombres de fantasía repetidos entre clientes distintos.
 
+**Implementado en F1.3a** (contrato: el export original `clientes`, BIFF7; los `.xlsx` derivados no son contrato):
+- La fecha de la foto se declara al subir (`snapshot_date` del formulario o `--snapshot-date` en la CLI); sin ella, la fecha de negocio de hoy. Una foto anterior a la última aplicada falla con `snapshot_out_of_order` (en el análisis y otra vez bajo el lock); dos fotos del mismo día anulan (`voided_by_job_id`) la asignación que abrió la primera.
+- Un código repetido en el archivo rechaza todas sus filas (`duplicate_code`). Un código con mapping no confirmado (alguien lo dejó pendiente) nunca crea un segundo cliente: fila `unchanged` + issue `commercial.customer.unresolved_code`.
+- Vendedor: `observe` crea el mapping `employee/STORE_SYS/seller` en `pending` (nunca un empleado, nunca `employees.external_store_id`) con el issue `commercial.seller.unmapped`; la fila queda `pending_resolution`. Un admin lo vincula o lo excluye (BOCA DE EXPENDIO): excluido, la asignación guarda la etiqueta con `salesperson_id NULL` y sin issue. El cambio de vendedor se decide por la **etiqueta** normalizada, no por el empleado.
+- La zona nueva se crea con su regla una sola vez (MISA queda `UNCLASSIFIED` con issue; Boca de Expendio sin días de visita).
+- Los issues `without_zone`, `without_salesperson` y `missing_from_master` se cierran solos cuando el cliente vuelve con zona, vendedor o en la foto.
+- El mismo archivo (mismo `sha256`) subido otro día es `duplicate` (§5.1) y no se aplica: para registrar una foto nueva tiene que ser otro export.
+- Validado con la muestra real (820 clientes): 820 altas, 557 asignaciones de zona, 604 de vendedor, 8 zonas (2 MISA sin configurar), 6 vendedores pendientes; el reproceso queda 820 `unchanged`.
+
 ### 3.3 STORE SYS · Ventas artículos/clientes (`commercial.store_sys.sales_lines`)
 
 **Estructura:**
@@ -153,6 +162,15 @@ SUBIR → DETECTAR → ANALIZAR ─────────────► PREVI
 - **Producto desconocido.** Si no existe en el maestro, la línea se guarda con `product_id NULL` y se abre el issue `commercial.product.unknown`. Las ventas no crean productos.
 - **Filas idénticas.** Son legítimas (9 en la muestra) y **no se deduplican**: cada una conserva su `occurrence`.
 - **Idempotencia por período y scope.** Ver §5.3.
+
+**Implementado en F1.3a, sin cerrar** (contrato: el export original `ventas` de un solo día; falta la muestra de varios días, ADR 014 S7):
+- El scope se declara al subir (`scope` = `FULL` o `FILTERED`, `scope_note` con los filtros; `--scope` / `--scope-note` en la CLI). Sin declarar, cuenta como no `FULL`.
+- `import_jobs.scope` guarda `declared`, `note`, `days`, `sellers`, `zones`, `price_lists` y `filters_detected` (vacío: el export no muestra filtros).
+- Cliente por nombre: la confirmación hace `observe` de `customer/STORE_SYS/customer_name` con el candidato exacto como propuesta (`pending` con uno, `ambiguous` con dos o más, `pending` sin candidato con ninguno) y abre `commercial.sale_line.customer_pending` por mapping. Nunca confirma.
+- Producto desconocido: línea con `product_id NULL`, issue `commercial.product.unknown` por código y `commercial.sale_line.product_pending` por job. Vendedor sin vincular: `commercial.seller.unmapped`.
+- Zona: se resuelve por `name_key`; una zona que no existe queda `zone_id NULL` con warning (las ventas no crean zonas). Lista: `LISTA n` → `price_lists.list_number`; una lista no configurada queda `price_list_id NULL` con warning (nunca se inventa).
+- Cantidades negativas y fraccionarias (hasta 3 decimales) se guardan tal cual; las filas idénticas se numeran con `occurrence`.
+- Validado con la muestra real (236 líneas, 1 día): 236 líneas, 78 nombres de cliente con una propuesta cada uno, 63 códigos de artículo pendientes (no hay maestro de artículos), 9 filas idénticas conservadas; el reproceso reemplaza las 236 (`FULL` + `FULL`).
 
 ### 3.4 STORE SYS · Comprobantes emitidos (`commercial.store_sys.documents`)
 
@@ -196,6 +214,15 @@ SUBIR → DETECTAR → ANALIZAR ─────────────► PREVI
   - Un reimport con contenido distinto → fila `rejected` + issue `commercial.document.changed`. **Nunca se pisa.**
 - **`codcli = 0`:** sin cliente, válido para tipos fuera del universo. En un tipo del universo es un warning.
 
+**Implementado en F1.3a** (contrato: el export original `comprobantes emitidos`):
+- La clasificación de §3.4 ya está confirmada por Enzo y sembrada (F1.2): solo `COMP. INTERNO X` y `FACTURA` sin letra quedan `UNCLASSIFIED`. La tabla de arriba conserva la propuesta original.
+- `nommov` se lee como `<tipo> PPPP-NNNNNNNN`; el tipo incluye su letra tal como STORE SYS lo nombra (`FACTURA A`, `RECIBOS X`, `VALE PERSONAL V`, `RETIRO PR.` y `FACTURA` sin letra). `document_key = name_key(tipo) | PPPP | NNNNNNNN`.
+- `codcli` se resuelve por mapping exacto `customer/STORE_SYS/customer`, **salvo** en las clases `EMPLOYEE_VOUCHER` e `INTERNAL_MOVEMENT`, cuyo código no es de cliente (vale de personal, retiro): se guarda en `source_customer_code` y nunca se vincula. Un código sin mapping deja la fila `pending_resolution` y el issue `commercial.customer.unresolved_code`; los comprobantes no crean clientes ni mappings de clientes (solo el maestro).
+- Una fila con contenido distinto para una clave ya importada se rechaza y abre `commercial.document.changed` (uno por comprobante); la misma clave dos veces en el archivo: igual → la segunda `duplicate`; distinta → ambas rechazadas.
+- Un tipo `UNCLASSIFIED` (nuevo o sembrado) suma ocurrencias al issue `commercial.document.unclassified_type` de su tipo.
+- `fechor` se guarda como `timestamptz` en `BUSINESS_TIMEZONE`.
+- Validado con la muestra real (182 comprobantes): 182 altas, 175 vinculados a un cliente, 80 de tipos sin clasificar (78 `COMP. INTERNO X`, 2 `FACTURA`); los vales y retiros sin cliente; el reproceso queda 182 `duplicate`.
+
 ### 3.5 STORE SYS · Maestro de artículos (`commercial.store_sys.products`) — *pendiente de muestra*
 
 Campos esperados según Enzo:
@@ -212,6 +239,8 @@ Reglas aprobadas:
 - **Rubro → categoría canónica:** se traduce por `source_category_mappings`. Un rubro vacío no se infiere: el producto queda sin categoría, con `analytics_eligible = false` (D‑D) y el issue `commercial.product.without_category`.
 - **Precios:** cada `listaN` con valor actualiza `product_prices` por vigencia (§5.2). Que una lista vacía signifique «sin precio» o «0» se define con la muestra.
 - **Código repetido** en el archivo: todas las filas con ese código se rechazan y se abre `commercial.product.duplicate_code`.
+
+**Bloqueado en F1.3a:** sin muestra del maestro de artículos no se implementa el adaptador (ni su estructura). El tipo no se registra. Los códigos `commercial.product.unmapped_category` (rubro sin mapping) y `commercial.product.duplicate_code` se usan cuando llegue la muestra.
 
 ### 3.6 AXUM · No Compra (`commercial.axum.no_purchase`) — *pendiente de muestra*
 
@@ -291,6 +320,14 @@ El archivo no trae número de comprobante, y dos líneas idénticas pueden ser v
 
 La estrategia definitiva se valida con una muestra de varios días antes de F1.3 (ADR 014 S7).
 
+**Implementado en F1.3a** (`app/modules/commercial/sales/service.py`):
+- El preview anuncia `replacement`: `action` (`insert`, `replace` o `blocked`), los días superpuestos, los jobs y líneas que reemplazaría, los días sin filas en el archivo nuevo y los motivos (`new_scope_not_full`, `previous_scope_not_full`, `days_without_rows`).
+- Un período que se superpone en parte se reemplaza **por día**: solo los días compartidos, si las condiciones se cumplen.
+- `blocked` sin decisión → la confirmación responde 409 `import_decision_required` y el job sigue `pending` sin escribir nada.
+- La decisión es de un **admin del módulo**, con motivo: `POST /api/v1/imports/{id}/confirm` con `{"decision": "replace" | "additional", "reason": "…"}` (CLI: `--decision`, `--reason`). `replace` reemplaza todos los días superpuestos del período; `additional` carga sin reemplazar. Una decisión cuando no hace falta → 409 `import_decision_not_needed`.
+- Se auditan `platform.import.decision_applied` (acción y motivo) y `commercial.sales.lines_superseded` (líneas, días, jobs reemplazados, si fue automático).
+- **Pendiente:** validar con un export real de varios días antes de cerrar el adaptador (ADR 014 S7).
+
 ### 5.4 Concurrencia
 - Lock consultivo de PostgreSQL por `import_type` al confirmar (`pg_advisory_xact_lock`, se libera con el commit o el rollback).
 - Una transacción por job.
@@ -349,15 +386,15 @@ Zonas y productos **no usan mappings**: se identifican por `commercial.zones.nam
 - Un issue abierto con el mismo `(code, dedupe_key)` suma ocurrencias en lugar de duplicarse.
 - Estados: `open`, `resolved` (automático cuando la condición desaparece, o manual) e `ignored` (manual, con nota).
 
-**Códigos de Fase 1:**
+**Códigos de Fase 1** (registrados en el `ModuleSpec`; F1.3a implementa los que tienen fuente hoy):
 - `platform.import.duplicate_file`, `invalid_row`, `missing_columns`;
-- `commercial.customer.without_zone`, `without_salesperson`, `unmapped_store_sys`, `unmapped_axum`, `ambiguous`, `missing_from_master`;
-- `commercial.product.unknown`, `without_category`, `duplicate_code`;
-- `commercial.sale_line.invalid_customer`, `invalid_product`;
-- `commercial.no_purchase.unidentified_customer`, `unmapped_reason`;
+- `commercial.customer.without_zone`, `without_salesperson`, `missing_from_master`, `unresolved_code` (código STORE SYS sin mapping, desde comprobantes);
+- `commercial.seller.unmapped` (vendedor STORE SYS sin vincular);
+- `commercial.product.unknown` (código de ventas que no está en el maestro), `without_category`, `unmapped_category` (rubro sin mapping, con el maestro de artículos);
+- `commercial.sale_line.customer_pending` (por mapping de nombre), `product_pending` (por job);
 - `commercial.zone.unconfigured`;
-- `commercial.seller.unknown`;
-- `commercial.document.unclassified_type`, `changed`.
+- `commercial.document.unclassified_type`, `changed`;
+- pendientes de su muestra: `commercial.product.duplicate_code` (maestro de artículos), `commercial.no_purchase.*` (AXUM, F1.4).
 
 **Reproceso:**
 - **Re‑resolver:** al confirmar mappings, los hechos pendientes se completan solos.
@@ -402,13 +439,14 @@ El admin de plataforma es admin del módulo (ARCHITECTURE §8). Cada tipo toma l
 | Método y ruta | Rol | Qué hace |
 |---|---|---|
 | `GET /types` | `viewer` | Tipos visibles, con `can_import` |
-| `POST /` (multipart `file`, `import_type` opcional) | `operator` | Sube, detecta y analiza; 201 con el job (`pending`, `failed` o `duplicate`) |
+| `POST /` (multipart `file`, `import_type`, `snapshot_date`, `scope`, `scope_note` opcionales) | `operator` | Sube, detecta y analiza; 201 con el job (`pending`, `failed` o `duplicate`). Lo declarado queda en `metadata.declared` y lo hereda un reproceso |
 | `GET /` (`status`, `import_type`, `limit`, `offset`) | `viewer` | Jobs visibles |
 | `GET /{id}`, `GET /{id}/rows` (`status`), `GET /{id}/issues` | `viewer` | Detalle con preview y contadores, filas del staging, issues |
-| `POST /{id}/confirm`, `POST /{id}/cancel` | `operator` | Confirma o descarta un job `pending` (409 `import_job_not_pending` si no lo está) |
+| `POST /{id}/confirm`, `POST /{id}/cancel` | `operator` | Confirma o descarta un job `pending` (409 `import_job_not_pending` si no lo está). 409 `import_decision_required` si el adaptador no puede probar qué reemplaza |
+| `POST /{id}/confirm` con `{decision, reason}` | `admin` | Responde una confirmación bloqueada (§5.3); `can_decide` en el detalle |
 | `POST /{id}/reprocess` | `admin` | Job nuevo sobre el mismo archivo |
 
-Errores: 413 `request_too_large` (supera `UPLOAD_MAX_SIZE_MB`), 422 `invalid_extension`, 409 `import_in_progress`.
+Errores: 413 `request_too_large` (supera `UPLOAD_MAX_SIZE_MB`), 422 `invalid_extension`, `invalid_scope`, `snapshot_in_future`, `decision_reason_required`, 409 `import_in_progress`, `import_decision_required`, `import_decision_not_needed`.
 
 ## 9. Seguridad y privacidad
 
