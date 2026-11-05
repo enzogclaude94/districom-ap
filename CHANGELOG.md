@@ -4,6 +4,20 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Added — Servidor: W2‑A, prueba de concepto de backups físicos en Windows
+- **`deploy/windows/backup/`**: paquete aislado. Usa solo la biblioteca estándar de Python, sobre las herramientas de PostgreSQL 17 y `rclone`, porque pgBackRest no existe en Windows. Nada de la aplicación ni del despliegue Linux lo usa. Incluye:
+  - `archive_command` y `restore_command`: escritura durable con reintentos ante archivos abiertos. No sobrescribe un archivo con contenido distinto, y no escribe sin la marca del repositorio;
+  - backups base en formato plain, verificados con `pg_verifybackup`;
+  - PITR en una instancia aparte por hora, por nombre, por LSN o hasta el final, con resultado COMPLETE, INCOMPLETE o FAILED;
+  - detección de huecos que sigue los archivos `.history`;
+  - copia externa con `rclone crypt`: `copy --immutable` y un manifiesto SHA‑256 que se verifica al traerla;
+  - retención que conserva todo lo que necesita un backup conservado.
+- **Tests:** 56 tests (A‑1 a A‑17) con datos ficticios contra un PostgreSQL real. En el job de Windows (PostgreSQL 17.6) pasan los 56 y A‑1 a A‑17 quedan en PASS. Un plugin de pytest escribe el reporte PASS/FAIL por criterio y lista lo PENDIENTE (Defender, disco físico, corte de energía, bucket real, servicio de Windows, Windows 11 Pro, esquema real).
+- **CI:** job nuevo «Windows backup PoC (W2-A)» en `windows-latest`, con PostgreSQL 17.6 oficial y `rclone` con checksum verificado. Los 4 jobs existentes no cambian.
+- **Docs:**
+  - `WINDOWS_DEPLOYMENT.md §8.2` (resultados) y §6: requisitos obligatorios de W2‑C para el bloqueo de escrituras y la comprobación del WAL en el cierre de jornada;
+  - `ROADMAP.md`: W1 DONE y W2‑A en revisión.
+
 ### Added — F1.2: maestros, configuración y núcleo de mappings
 - **Migración `0034`** (`platform: …`): `customers` (CUIT opcional, validado con `cuit_is_valid` y **no único**; `display_name_key` solo para candidatos exactos) y `external_entity_mappings` (`UNIQUE (entity_type, source_system, namespace, external_id)`, estados `pending` / `ambiguous` / `confirmed` / `rejected` / `excluded`, métodos, candidatos y decisión). Sin DELETE (triggers); el downgrade se niega si hay filas.
 - **Migración `0035`** (`commercial: …`): schema `commercial` con `zones`, `zone_visit_days` (historia sin solapes, anulación el mismo día), `zone_classification_rules`, `price_lists`, `product_categories`, `source_category_mappings`, `document_types`, `no_purchase_reason_categories`, `no_purchase_reason_mappings`, `product_families`, `products` (campos `source_*` separados de los canónicos) y `product_prices` (historia sin solapes). Zonas, días, tipos, productos y precios sin DELETE.
