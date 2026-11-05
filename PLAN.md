@@ -1,6 +1,6 @@
 # PLAN — DistriCom · Plataforma de Inteligencia Comercial
 
-> Estado del documento: **v0.5 — Fase 0 DONE; plataforma modular DONE; Fase 1 de Comercial IN_PROGRESS (F1.0 y F1.1a aprobados, F1.1b en revisión)**
+> Estado del documento: **v0.5 — Fase 0 DONE; plataforma modular DONE; Fase 1 de Comercial IN_PROGRESS (F1.0, F1.1a y F1.1b aprobados, F1.2 en revisión)**
 > Última actualización: 2026-10-30 (secciones de Comercial; las de Rendiciones las mantiene su hilo)
 > Fuente de requisitos: prompt maestro adjunto por Enzo (`message.md`, 165 secciones).
 
@@ -126,7 +126,7 @@ Ninguna modificación cambia el alcance funcional.
 | D1 | ~~¿Repo nuevo o existente?~~ **Resuelto:** `districom-ap`. | — | — |
 | D2 | Exports reales de AXUM y STORE SYS. | **Parcial (2026-10-30):** recibidos clientes, ventas y comprobantes de STORE SYS; faltan maestro de artículos y AXUM No Compra. | F1.3 (artículos) y F1.4 (AXUM). |
 | D3 | ¿AXUM y STORE SYS comparten código de cliente / producto? | **Decidido (D‑B, 2026-10-30):** espacios independientes hasta comprobarlo con muestras. | — |
-| D4 | ¿Cómo se registran NC y devoluciones en STORE SYS? ¿Importes con o sin IVA? | Comprobantes separados; `netosa` sin signo y `total` con signo; signo canónico por `document_types`. **Pendiente:** clasificación de cada tipo (ADR 014 S3). | Siembra de `document_types` (F1.2). |
+| D4 | ¿Cómo se registran NC y devoluciones en STORE SYS? ¿Importes con o sin IVA? | Comprobantes separados; `netosa` sin signo y `total` con signo; signo canónico por `document_types`. Clasificación confirmada por Enzo (2026-11-03) y sembrada en F1.2; `COMP. INTERNO X` y `FACTURA` sin letra quedan `UNCLASSIFIED`. | Siembra de `document_types` (F1.2). |
 | D5 | Desfase típico pedido → factura en preventa. | 2 días. | Conversión facturada. |
 | D6 | ¿Cómo se distingue boca de expendio en STORE SYS? | Regla configurable de mapping. | Se decide en la fase que lo use (DATA_MODEL §6.4). |
 | D7 | Hosting objetivo (VPS propio, cloud, on‑premise). | Docker Compose en un VPS. | Fase 0 (deploy), no bloquea desarrollo local. |
@@ -267,8 +267,9 @@ Estado: **IN_PROGRESS.** Diseño F1.0 aprobado por Enzo el 2026-10-30 con las de
 | Muestras: maestro de artículos y AXUM No Compra | **Pendiente (Enzo)** — necesarias para F1.3 / F1.4 |
 | F1.0 diseño técnico | Aprobado (2026-10-30) |
 | F1.1a documentación | Aprobada y mergeada (PR #56, 2026-11-02) |
-| F1.1b infraestructura de importación | En revisión (este PR) |
-| F1.2 – F1.8 | Pendientes de aprobación sucesiva |
+| F1.1b infraestructura de importación | Aprobada y mergeada (PR #69, 2026-11-03) |
+| F1.2 maestros, configuración y mappings | En revisión (este PR) |
+| F1.3 – F1.8 | Pendientes de aprobación sucesiva |
 
 **Confirmaciones de ADR 014 §3:** Enzo respondió S1–S8 el 2026-11-01; ninguna afecta F1.1b y se vuelcan en los documentos de F1.2/F1.3, que las aplican. Lista original:
 - S1 días de visita de las zonas `RUTA 03` y `RUTA 05` (MISA) · S2 `LUVI` = Lumivi y `MAJU` = Majusa → antes de sembrar reglas (F1.2).

@@ -453,3 +453,77 @@ def test_import_framework_migration_goes_down_and_up_and_never_drops_history() -
             conn.execute(text("DELETE FROM users WHERE email = 'm@x.test'"))
         engine.dispose()
         command.upgrade(cfg, "head")
+
+
+# F1.2 (0034 platform, 0035 commercial).
+MASTER_TABLES = {"customers", "external_entity_mappings"}
+COMMERCIAL_TABLES = {
+    "zones",
+    "zone_visit_days",
+    "zone_classification_rules",
+    "price_lists",
+    "product_categories",
+    "source_category_mappings",
+    "document_types",
+    "no_purchase_reason_categories",
+    "no_purchase_reason_mappings",
+    "products",
+    "product_families",
+    "product_prices",
+}
+
+
+def _commercial_tables(url: str) -> set[str]:
+    engine = create_engine(url)
+    try:
+        return set(inspect(engine).get_table_names(schema="commercial"))
+    finally:
+        engine.dispose()
+
+
+def test_masters_migrations_go_down_and_up_and_refuse_to_drop_data() -> None:
+    """F1.2: 0035 creates the `commercial` schema and exactly its twelve tables; 0034 the platform's customers and
+    mappings. Empty they go down and up; with a customer or a zone, the downgrade is refused."""
+    cfg = alembic_config()
+    url = cfg.get_main_option("sqlalchemy.url")
+    assert url
+
+    command.upgrade(cfg, "head")
+    assert _tables(url) >= MASTER_TABLES
+    assert _commercial_tables(url) == COMMERCIAL_TABLES
+    command.downgrade(cfg, "0034")
+    assert "commercial" not in _schemas(url)
+    command.downgrade(cfg, "0033")
+    assert _tables(url).isdisjoint(MASTER_TABLES)
+    assert _tables(url) >= EXPECTED_TABLES | IMPORT_TABLES
+    command.upgrade(cfg, "head")
+    assert _commercial_tables(url) == COMMERCIAL_TABLES
+
+    engine = create_engine(url)
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO commercial.zones (source_name, name_key, display_name, zone_type, requires_visit, "
+                    "configuration_origin) VALUES ('RUTA 03 - MISA', 'RUTA 03 - MISA', 'MISA', 'UNCLASSIFIED', false, "
+                    "'NONE')"
+                )
+            )
+            conn.execute(text("INSERT INTO customers (display_name, display_name_key) VALUES ('X', 'X')"))
+        with pytest.raises(DBAPIError, match="downgrade refused"):
+            command.downgrade(cfg, "0034")
+        assert _commercial_tables(url) == COMMERCIAL_TABLES
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE commercial.zones DISABLE TRIGGER trg_zones_no_delete"))
+            conn.execute(text("DELETE FROM commercial.zones"))
+            conn.execute(text("ALTER TABLE commercial.zones ENABLE TRIGGER trg_zones_no_delete"))
+        command.downgrade(cfg, "0034")
+        with pytest.raises(DBAPIError, match="downgrade refused"):
+            command.downgrade(cfg, "0033")
+        assert _tables(url) >= MASTER_TABLES
+    finally:
+        command.upgrade(cfg, "0034")
+        with engine.begin() as conn:
+            conn.execute(text("TRUNCATE customers"))
+        engine.dispose()
+        command.upgrade(cfg, "head")

@@ -157,6 +157,7 @@ Identidad **única** del cliente para toda la plataforma. Asignaciones y datos c
 |---|---|---|
 | id | bigint PK | |
 | display_name | text NOT NULL | nombre de fantasía (`fantasia`) |
+| display_name_key | text NOT NULL, índice **no único** | mayúsculas, sin tildes, espacios colapsados (F1.2). Solo sirve para proponer candidatos **exactos** a un nombre de ventas; nunca confirma un vínculo |
 | legal_name | text NULL | razón social (`razons`) |
 | tax_id | text NULL | CUIT normalizado a 11 dígitos con dígito verificador válido; **no único** (sucursales, errores de carga) |
 | address, phone | text NULL | PII: nunca en logs ni auditoría |
@@ -168,6 +169,8 @@ Identidad **única** del cliente para toda la plataforma. Asignaciones y datos c
 
 > El código de STORE SYS, el de AXUM y cualquier otro identificador externo **no** son columnas: viven en `external_entity_mappings` (§7.4), que admite varios códigos por cliente y guarda estado y decisión. La API los expone igual.
 > Zona y vendedor **no** son columnas de `customers`: viven en tablas de asignación con vigencia (§5).
+
+> **Implementado en F1.2** (migración `0034`, `app/platform/customers/`): CHECK `public.cuit_is_valid(tax_id)`; un CUIT inválido del maestro se guarda NULL con warning `invalid_tax_id` (el `"  -        -"` de STORE SYS es «sin CUIT», sin warning); sin DELETE (trigger). Solo un admin del módulo cambia `is_generic` / `active`, con motivo, auditado `platform.customer.updated` sin datos personales. **API con mínimo privilegio** (Enzo, 2026-11-04): un `viewer` de Comercial recibe id, nombres, `is_generic`, `active`, `last_seen_on` y timestamps; `tax_id`, `address` y `phone` llegan **solo** a `operator` y `admin`, y para el viewer las claves no existen en la respuesta (ni enmascaradas ni nulas).
 
 #### financial_institutions (R4‑1 · migración `0011`)
 Catálogo **único** de entidades bancarias por código BCRA, para cualquier módulo (decisión D‑I de Enzo). Un cheque nombra su banco por FK, nunca con un código escrito en cada fila.
@@ -246,7 +249,9 @@ Zona comercial de STORE SYS (`RUTA 01 - LUVI`, `RUTA 08 - BOCA DE EXPENDIO`…).
 | display_name | text NOT NULL |
 | zone_type | `PRESALE`, `BANDERA`, `OUTLET`, `OTHER`, `UNCLASSIFIED` |
 | requires_visit | bool NOT NULL |
-| configuration_origin | `RULE` (propuesta por `zone_classification_rules` al crearse), `MANUAL` (definida por un admin) |
+| configuration_origin | `RULE` (propuesta por `zone_classification_rules` al crearse), `MANUAL` (definida por un admin), `NONE` (ninguna regla aplicó y nadie la configuró: la zona es `UNCLASSIFIED`, sin visita) |
+| rule_id | FK `zone_classification_rules` NULL — la regla que la configuró al crearse |
+| first_seen_job_id | FK `import_jobs` NULL |
 | active | bool |
 | configured_by, configured_at | quién y cuándo fijó la configuración vigente |
 | timestamps | |
@@ -257,8 +262,8 @@ Zona comercial de STORE SYS (`RUTA 01 - LUVI`, `RUTA 08 - BOCA DE EXPENDIO`…).
 
 #### zone_visit_days
 Días programados de visita, con historia.
-`id`, `zone_id` FK, `weekday` smallint (1 = lunes … 7 = domingo), `valid_from` date NOT NULL, `valid_to` date NULL, `created_by`, timestamps.
-Exclusion constraint `(zone_id, weekday, daterange(valid_from, valid_to, '[]'))`. Cambiar los días cierra las vigencias y abre otras; nunca UPDATE in place. Una zona con `requires_visit = false` no tiene filas vigentes (lo verifica el servicio).
+`id`, `zone_id` FK, `weekday` smallint (1 = lunes … 7 = domingo), `valid_from` date NOT NULL, `valid_to` date NULL, `created_by`, `voided_at` NULL, timestamps.
+Exclusion constraint `(zone_id, weekday, daterange(valid_from, valid_to, '[]')) WHERE voided_at IS NULL`. Una fila que se cambia el mismo día que empezó (terminaría antes de empezar) se **anula** (`voided_at`) en lugar de borrarse o editarse. Cambiar los días cierra las vigencias y abre otras; nunca UPDATE in place. Una zona con `requires_visit = false` no tiene filas vigentes (lo verifica el servicio).
 
 #### zone_classification_rules
 Propuesta de configuración para zonas **nuevas**.
@@ -266,11 +271,13 @@ Propuesta de configuración para zonas **nuevas**.
 
 | Patrón observado en STORE SYS | Regla de negocio (Enzo) | Estado |
 |---|---|---|
-| `LUVI` (`RUTA 01`, `RUTA 02`) | Lumivi: lunes, miércoles, viernes | alias inferido, **confirmar** antes de sembrar |
-| `MAJU` (`RUTA 04`, `RUTA 06`) | Majusa: martes, jueves, viernes | alias inferido, **confirmar** |
+| `LUVI` / `LUMIVI` (`RUTA 01`, `RUTA 02`) | Lumivi: lunes, miércoles, viernes | **confirmado** (Enzo, 2026-11-03), sembrado |
+| `MAJU` / `MAJUSA` (`RUTA 04`, `RUTA 06`) | Majusa: martes, jueves, viernes | **confirmado**, sembrado |
 | `BANDERA` (`RUTA 07 - TACAÑITAS/BANDERA`) | Bandera: jueves | confirmado por regla |
 | `BOCA DE EXPENDIO` (`RUTA 08`) | sin visita (`OUTLET`) | confirmado por regla |
 | `MISA` (`RUTA 03`, `RUTA 05`) | — | **sin regla**: entra `UNCLASSIFIED` hasta que Enzo defina días |
+
+`pattern` se compara como **palabras completas** del `name_key` (`LUVI` coincide con `RUTA 01 - LUVI`, no con `LUVIANO`; por eso cada alias tiene su regla). Una regla nueva o modificada solo afecta zonas creadas después.
 
 #### price_lists
 Listas de precio de STORE SYS **con semántica**.
@@ -278,7 +285,7 @@ Listas de precio de STORE SYS **con semántica**.
 Seed: 1 Precio oficial de preventa · 2 Boca de Expendio · 3 Promocional por 3 bultos o más · 4 Precios especiales · 5 Bandera. Las listas 6 y 7 (esperadas según Enzo) se siembran `UNASSIGNED` solo si la muestra del maestro de artículos las confirma (ADR 014 S5). Una lista nueva se agrega como fila, sin tocar código.
 
 #### product_categories
-`id`, `code` UNIQUE, `name`, `default_product_kind`, `default_analytics_eligible` bool, `parent_id` FK self NULL (reservado; un nivel en Fase 1), `sort_order`, `active`. El listado inicial sale de los rubros reales (`GASEOSAS`, `VINOS`, `CERVEZAS`, `JUGOS`, `AGUAS`, `MERCADERIA`, `BEBIDAS BLANCAS` en la muestra) y se siembra con confirmación de Enzo.
+`id`, `code` UNIQUE, `name`, `default_product_kind`, `default_analytics_eligible` bool, `parent_id` FK self NULL (reservado; un nivel en Fase 1), `sort_order`, `active`. Sembradas (Enzo, 2026-11-04): `GASEOSAS`, `VINOS`, `CERVEZAS`, `JUGOS`, `AGUAS`, `BEBIDAS_BLANCAS`, `MERCADERIA`, todas `PRODUCT` y `default_analytics_eligible = true`. El seed no crea `source_category_mappings`: un rubro se mapea cuando aparece en el maestro real. Un producto puntual puede quedar `analytics_eligible = false` (override manual) sin excluir su rubro.
 
 #### source_category_mappings
 Traducción explícita **rubro fuente → categoría canónica**.
@@ -296,7 +303,8 @@ Clasificación de los tipos de comprobante de STORE SYS.
 | commercial_universe | bool NOT NULL — **única** definición de "cuenta como actividad comercial" |
 | active, decided_by, decided_at | |
 
-- `RETIRO PR.` → `INTERNAL_MOVEMENT`, `commercial_universe = false` (regla confirmada).
+- Sembrados en F1.2 (Enzo, 2026-11-03): `FACTURA A` y `FACTURA B` → `INVOICE` +1 · `NOTA DE CREDITO A` → `CREDIT_NOTE` −1 · `DEVOLUCION X` → `RETURN` −1 (los cuatro en el universo) · `RETIRO PR.` → `INTERNAL_MOVEMENT` · `RECIBOS X` → `RECEIPT` · `VALE PERSONAL V` → `EMPLOYEE_VOUCHER` (fuera del universo, signo 0) · `COMP. INTERNO X` y `FACTURA` sin letra (punto de venta 0000) → `UNCLASSIFIED`, fuera del universo.
+- Clasificar un tipo es interpretación contable: solo un admin del módulo, con motivo, auditado (`commercial.config.document_type_classified`).
 - Un tipo nuevo entra `UNCLASSIFIED`, `commercial_universe = false`, con issue. La clasificación del resto de los tipos observados requiere confirmación de Enzo (`docs/IMPORTS.md §3.4`).
 
 #### no_purchase_reason_categories / no_purchase_reason_mappings
@@ -318,7 +326,7 @@ Un SKU de STORE SYS. Campos **fuente** (se actualizan en cada import del maestro
 | canonical_category_id | FK `product_categories` NULL |
 | category_origin | `SOURCE_MAPPING`, `MANUAL`, `NONE` |
 | product_kind | `PRODUCT`, `CONTAINER`, `CRATE`, `SERVICE`, `BONUS`, `COMBO`, `PROMO`, `MERCH`, `UNCLASSIFIED` |
-| analytics_eligible | bool NOT NULL DEFAULT false |
+| analytics_eligible | bool NOT NULL DEFAULT false — CHECK: sin categoría nunca es `true` |
 | eligibility_origin | `NONE` (sin categoría → `false`), `CATEGORY_DEFAULT`, `MANUAL` |
 | family_id | FK `product_families` NULL |
 | active | bool — estado en DistriCom |
@@ -334,7 +342,7 @@ Agrupación **explícita** de SKUs que comercialmente son lo mismo (QUILMES 1L X
 `id`, `code` UNIQUE, `name`, `description`, `active`, timestamps. La asignación es `products.family_id`, por API y auditada. **Nunca se infiere por similitud de texto.** Pantalla en la fase de portfolio (D‑K).
 
 #### product_prices
-`id`, `product_id` FK, `price_list_id` FK, `price` numeric(14,2), `valid_from` date NOT NULL, `valid_to` date NULL, `import_job_id` FK. Exclusion constraint `(product_id, price_list_id, daterange)`. Cada foto del maestro: precio igual → nada; distinto → cierre + alta.
+`id`, `product_id` FK, `price_list_id` FK, `price` numeric(14,2), `valid_from` date NOT NULL, `valid_to` date NULL, `import_job_id` FK, `voided_by_job_id` FK NULL, `voided_at` NULL. Exclusion constraint `(product_id, price_list_id, daterange) WHERE voided_by_job_id IS NULL`. Cada foto del maestro: precio igual → nada; distinto → cierre + alta (dos fotos del mismo día: la fila abierta ese día se anula). Una foto anterior a la historia se rechaza. Productos y precios no se borran (triggers).
 
 ## 5. Asignaciones con historia (Fase 1, `commercial`)
 
@@ -466,7 +474,7 @@ Sin purga por defecto (`platform.imports.row_retention_days`); habilita auditor�
 | entity_id | bigint NULL — id en la tabla del dueño; NULL si pendiente |
 | status | `pending`, `confirmed`, `ambiguous`, `rejected`, `excluded` |
 | method | `created_from_master`, `exact_external_id`, `rule`, `manual` |
-| candidates | jsonb NULL — ids candidatos (propuesta o ambigüedad) |
+| candidates | jsonb NOT NULL DEFAULT `[]` — ids candidatos: `pending` admite como máximo uno (propuesta), `ambiguous` exige dos o más (CHECKs) |
 | first_seen_job_id, last_seen_job_id | FK `import_jobs` |
 | decided_by, decided_at, decision_reason | |
 
