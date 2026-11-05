@@ -218,7 +218,11 @@ jobs:
       - name: W2-A results
         if: always()
         run: |
-          if (Test-Path test-results\w2a-results.md) { Get-Content test-results\w2a-results.md >> $env:GITHUB_STEP_SUMMARY }
+          # Also printed to the job log, which stays readable with read-only API access.
+          if (Test-Path test-results\w2a-results.md) {
+            Get-Content test-results\w2a-results.md >> $env:GITHUB_STEP_SUMMARY
+            Get-Content test-results\w2a-results.md
+          }
       - uses: actions/upload-artifact@v4
         if: always()
         with:
