@@ -58,3 +58,20 @@ def issues_of_job(db: Session, job_id: int) -> list[DataQualityIssue]:
     return list(
         db.scalars(select(DataQualityIssue).where(DataQualityIssue.job_id == job_id).order_by(DataQualityIssue.id))
     )
+
+
+def resolve_open(db: Session, code: str, dedupe_key: str, *, user_id: int | None, note: str) -> bool:
+    """Close the open issue `(code, dedupe_key)` because its condition went away (a zone configured, a document type
+    classified), in the caller's transaction. True when one was open."""
+    issue = db.scalars(
+        select(DataQualityIssue).where(
+            DataQualityIssue.code == code, DataQualityIssue.dedupe_key == dedupe_key, DataQualityIssue.status == "open"
+        )
+    ).first()
+    if issue is None:
+        return False
+    issue.status = "resolved"
+    issue.resolved_by = user_id
+    issue.resolved_at = func.now()
+    issue.resolution_note = note[:500]
+    return True

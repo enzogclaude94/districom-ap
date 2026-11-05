@@ -8,6 +8,9 @@ Module access (ARCHITECTURE.md §8): `grant-module-role --email ... --module set
 the user named by `--email` with that user's permissions; `recover` fails the jobs a dead process left `processing`.
 Each command prints the job's id, status and counters as JSON, never row values.
 
+`commercial seed-config` (F1.2) loads the commercial configuration Enzo confirmed (zone rules, price lists, document
+types, no-purchase reasons): it only inserts what is missing, never changes a row an admin edited.
+
 `reset-password --email ...` (S2) gives a user a temporary password and closes all their sessions: the way back in
 when nobody who can administer users can log in. The password is printed once on stdout, never logged.
 """
@@ -160,6 +163,15 @@ def _imports(args: argparse.Namespace) -> int:
     return 0 if job.status not in ("failed",) else 2
 
 
+def _commercial(args: argparse.Namespace) -> int:
+    from app.modules.commercial.config.seed import seed_config
+
+    with _session() as db:
+        result = seed_config(db)
+    sys.stdout.write(json.dumps({"inserted": vars(result)}) + "\n")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     configure_logging(get_settings().log_level)
     parser = argparse.ArgumentParser(prog="app.cli")
@@ -199,6 +211,10 @@ def main(argv: list[str] | None = None) -> int:
     recover = actions.add_parser("recover", help="Pasar a failed los jobs interrumpidos en processing")
     recover.add_argument("--older-than-minutes", type=int, default=30)
     imports_cmd.set_defaults(func=_imports)
+    commercial = sub.add_parser("commercial", help="Inteligencia Comercial: configuración")
+    commercial_actions = commercial.add_subparsers(dest="action", required=True)
+    commercial_actions.add_parser("seed-config", help="Cargar la configuración confirmada (solo agrega lo que falta)")
+    commercial.set_defaults(func=_commercial)
     args = parser.parse_args(argv)
     result: int = args.func(args)
     return result
