@@ -14,6 +14,7 @@ dev = [
     "mypy>=1.13",
     "psycopg[binary]>=3.2",
     "pytest>=8.3",
+    "pytest-timeout>=2.3",
     "ruff>=0.8",
 ]
 
@@ -44,6 +45,8 @@ files = ["src", "tests"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
+# A hung test fails on its own instead of holding the CI job until its time limit.
+timeout = 1200
 markers = [
     "criterion(id): W2-A acceptance criterion (A-1 ... A-19) that the test provides evidence for",
     "integration: needs PostgreSQL binaries (DISTRICOM_PG_BIN)",

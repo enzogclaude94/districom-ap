@@ -97,28 +97,37 @@ class Instance:
             handle.write("\n# districom_backup\n" + lines)
 
     def start(self, *, timeout: int = 300, check: bool = True) -> bool:
-        """Start and wait. With ``check=False`` return whether the server came up."""
-        completed = subprocess.run(
-            [
-                tool("pg_ctl", self.bin_dir),
-                "-D",
-                str(self.data_dir),
-                "-l",
-                str(self.log_file),
-                "-o",
-                self._server_options(),
-                "-w",
-                "-t",
-                str(timeout),
-                "start",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=timeout + 60,
-            check=False,
-        )
+        """Start and wait. With ``check=False`` return whether the server came up.
+
+        pg_ctl's output goes to a file, never to a pipe: the server it launches inherits those
+        handles, and on Windows a pipe held open by the running server never reaches end-of-file,
+        so reading pg_ctl's output would wait forever.
+        """
+        output = self.data_dir.parent / f"{self.data_dir.name}.pg_ctl.txt"
+        with output.open("w", encoding="utf-8") as handle:
+            completed = subprocess.run(
+                [
+                    tool("pg_ctl", self.bin_dir),
+                    "-D",
+                    str(self.data_dir),
+                    "-l",
+                    str(self.log_file),
+                    "-o",
+                    self._server_options(),
+                    "-w",
+                    "-t",
+                    str(timeout),
+                    "start",
+                ],
+                stdin=subprocess.DEVNULL,
+                stdout=handle,
+                stderr=subprocess.STDOUT,
+                timeout=timeout + 60,
+                check=False,
+            )
         if completed.returncode != 0 and check:
-            raise PgToolError(f"pg_ctl start failed: {completed.stdout}{completed.stderr}\n{self.read_log()}")
+            message = output.read_text(encoding="utf-8", errors="replace")
+            raise PgToolError(f"pg_ctl start failed: {message}\n{self.read_log()}")
         return completed.returncode == 0
 
     def _server_options(self) -> str:
