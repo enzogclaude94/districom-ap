@@ -87,7 +87,8 @@ def test_the_original_export_is_detected_and_creates_products_without_category(d
     assert (job.status, job.import_type, job.snapshot_date) == ("pending", PRODUCTS, D1), job.failure_detail
     preview = job.job_metadata["preview"]
     assert preview["products"] == {"new": 2, "updated": 0, "unchanged": 0}
-    assert preview["prices"] == {"rows_with_price": 2, "price_list_number": None, "loaded": False}
+    # `precio` feeds Lista 1: confirmed by Enzo and loaded by the seed as an audited setting, not by the export.
+    assert preview["prices"] == {"rows_with_price": 2, "price_list_number": 1, "loaded": True}
     job = confirm(db, operator, job)
     assert job.rows_inserted == 2
     agua = product(db, "187")
@@ -99,7 +100,32 @@ def test_the_original_export_is_detected_and_creates_products_without_category(d
         agua.id,
         product(db, "9000102").id,
     }
-    # `precio` does not say its list: without the confirmed parameter no price is loaded, and an issue says so.
+    lista1 = db.scalars(select(PriceList).where(PriceList.list_number == 1)).one()
+    assert [(p.price_list_id, p.price) for p in db.scalars(select(ProductPrice).order_by(ProductPrice.id))] == [
+        (lista1.id, Decimal("8100.00")),
+        (lista1.id, Decimal("1000.00")),
+    ]
+    assert open_issues(db, "commercial.product.prices_not_loaded") == []
+
+
+def test_the_seed_sets_lista_1_once_with_its_reason_and_never_undoes_a_decision(
+    db: Session, operator: User, admin: User
+) -> None:
+    from app.platform.audit.models import AuditEvent
+    from app.platform.settings.models import AppSetting
+
+    setting = db.get_one(AppSetting, PRICE_LIST_SETTING)
+    assert (setting.value, setting.updated_by) == (1, None)
+    assert "Lista 1" in (setting.description or "")
+    event = db.scalars(
+        select(AuditEvent).where(AuditEvent.event_type == "commercial.config.articles_price_list_set")
+    ).one()
+    assert event.payload["after"]["list_number"] == 1
+    # An admin stops loading those prices; running the seed again leaves that decision.
+    price_list_is(db, admin, None)
+    assert seed_config(db).settings == 0
+    job = run(db, operator, articles_file([article(1)]), PRODUCTS, snapshot_date=D1)
+    assert job.job_metadata["preview"]["prices"] == {"rows_with_price": 1, "price_list_number": None, "loaded": False}
     assert db.scalar(select(func.count()).select_from(ProductPrice)) == 0
     assert len(open_issues(db, "commercial.product.prices_not_loaded")) == 1
 
@@ -262,15 +288,19 @@ def test_an_admin_confirms_the_list_of_precio_with_a_reason(client, db: Session,
         assert client.post("/api/v1/auth/login", json={"email": email, "password": PASSWORD}).status_code == 200
 
     login("operator@districom.test")
-    assert client.get(url).json() == {"list_number": None}
+    assert client.get(url).json() == {"list_number": 1}  # the seed's confirmed value
     assert client.put(url, json={"list_number": 1, "reason": "Confirmado"}).status_code == 403
     login("admin@districom.test")
     assert client.put(url, json={"list_number": 1, "reason": " "}).json()["code"] == "reason_required"
     assert client.put(url, json={"list_number": 9, "reason": "No existe"}).json()["code"] == "price_list_not_found"
-    response = client.put(url, json={"list_number": 1, "reason": "Precio de preventa, confirmado por Enzo"})
-    assert (response.status_code, response.json()) == (200, {"list_number": 1})
-    event = db.scalars(
-        select(AuditEvent).where(AuditEvent.event_type == "commercial.config.articles_price_list_set")
-    ).one()
-    assert event.payload["after"] == {"list_number": 1, "reason": "Precio de preventa, confirmado por Enzo"}
+    response = client.put(url, json={"list_number": 2, "reason": "Cambio de lista, decidido por Enzo"})
+    assert (response.status_code, response.json()) == (200, {"list_number": 2})
+    events = db.scalars(
+        select(AuditEvent)
+        .where(AuditEvent.event_type == "commercial.config.articles_price_list_set")
+        .order_by(AuditEvent.id)
+    ).all()
+    assert [e.payload["after"]["list_number"] for e in events] == [1, 2]  # the seed's, then the admin's
+    assert events[-1].payload["before"] == {"list_number": 1}
+    assert events[-1].payload["after"] == {"list_number": 2, "reason": "Cambio de lista, decidido por Enzo"}
     assert client.put(url, json={"list_number": None, "reason": "Se deja de cargar"}).json() == {"list_number": None}

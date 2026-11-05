@@ -4,6 +4,7 @@ Idempotent and conservative: it inserts the rows that are missing and never chan
 again after an admin edited a list, a rule, a category or a type leaves the admin's decision. Product categories are
 the seven Enzo confirmed (2026-11-04); no rubro is mapped to them here: a rubro is mapped by an admin when the real
 articles master shows it (F1.3). MISA has no rule on purpose: it stays UNCLASSIFIED.
+The articles master's `precio` feeds Lista 1 (Enzo, 2026-11-05), set once as an audited setting.
 """
 
 from dataclasses import dataclass
@@ -19,11 +20,22 @@ from app.modules.commercial.config.models import (
     ProductCategory,
     ZoneClassificationRule,
 )
-from app.modules.commercial.config.service import source_key
-from app.platform.audit.service import record_event
+from app.modules.commercial.config.service import ARTICLES_PRICE_LIST_SETTING, source_key
+from app.platform.audit.service import record_change, record_event
 from app.platform.mappings.service import source_system_id
+from app.platform.settings.models import AppSetting
 
 CONFIRMED = "Confirmado por Enzo (F1.2, 2026-11-03)"
+
+# The list the STORE SYS articles master's `precio` feeds (docs/IMPORTS.md §3.5). STORE SYS does not declare it; Enzo
+# confirmed it (2026-11-05) from the real October sales export with amounts. Kept as an audited setting, never code.
+ARTICLES_PRICE_LIST = 1
+ARTICLES_PRICE_LIST_REASON = (
+    "Confirmado por Enzo (2026-11-05) por análisis de exports reales de STORE SYS: el precio del maestro corresponde "
+    "operativamente a Lista 1 (mediana precio cobrado/precio maestro = 1,000; 135/155 últimos precios con Lista 1 "
+    "coinciden dentro de ±$0,05; las diferencias son bonificaciones, descuentos y redondeos). STORE SYS no declara "
+    "la relación."
+)
 
 # (priority, pattern, zone_type, requires_visit, weekdays, description). Patterns match whole words of the zone's
 # name: MAJU does not match MAJUSA, so both aliases get a rule, like LUVI and LUMIVI.
@@ -98,6 +110,7 @@ class SeedResult:
     product_categories: int = 0
     reason_categories: int = 0
     reason_mappings: int = 0
+    settings: int = 0
 
     def total(self) -> int:
         return (
@@ -107,6 +120,7 @@ class SeedResult:
             + self.product_categories
             + self.reason_categories
             + self.reason_mappings
+            + self.settings
         )
 
 
@@ -197,6 +211,24 @@ def seed_config(db: Session) -> SeedResult:
                 )
             )
             result.reason_mappings += 1
+    if db.get(AppSetting, ARTICLES_PRICE_LIST_SETTING) is None:
+        # Only while nobody set it: an admin's later decision (another list, or none) is never undone here.
+        db.add(
+            AppSetting(
+                key=ARTICLES_PRICE_LIST_SETTING, value=ARTICLES_PRICE_LIST, description=ARTICLES_PRICE_LIST_REASON
+            )
+        )
+        record_change(
+            db,
+            "commercial.config.articles_price_list_set",
+            action="create",
+            user_id=None,
+            entity_type="app_setting",
+            entity_id=ARTICLES_PRICE_LIST_SETTING,
+            before={"list_number": None},
+            after={"list_number": ARTICLES_PRICE_LIST, "reason": ARTICLES_PRICE_LIST_REASON},
+        )
+        result.settings += 1
     if result.total():
         record_event(db, "commercial.config.seeded", payload=vars(result))
     db.commit()
