@@ -24,6 +24,8 @@ def test_registering_a_scope_twice_replaces_it() -> None:
 def test_commercial_parameters_match_metrics_defaults() -> None:
     """METRICS.md §6 defaults, now owned by the commercial module."""
     defaults = {spec.key: spec.default for spec in COMMERCIAL.specs}
+    # Not a metric parameter: the list of the articles master's `precio` (docs/IMPORTS.md §3.5), unset by default.
+    assert defaults.pop("store_sys_articles_price_list") is None
     assert defaults == {
         "history_start_date": "2026-01-01",
         "new_customer_warmup_days": 60,

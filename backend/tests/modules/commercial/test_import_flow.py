@@ -12,22 +12,23 @@ from sqlalchemy.orm import Session
 
 import app.api.v1.router  # noqa: F401  (composition root: installs the modules)
 from app.modules.commercial.assignments.service import zone_on
-from app.modules.commercial.catalog.service import SourceProduct, upsert_from_source
+from app.modules.commercial.catalog.models import Product
 from app.modules.commercial.config.models import PriceList, Zone
 from app.modules.commercial.config.seed import seed_config
 from app.modules.commercial.documents.models import Document
 from app.modules.commercial.sales.models import SaleLine
-from app.platform.auth.models import User
 from app.platform.customers.models import Customer
 from app.platform.imports.models import ImportJob
 from app.platform.mappings import service as mappings
 from app.platform.mappings.models import ExternalEntityMapping
 from tests.conftest import PASSWORD
-from tests.imports.jobs import make_job
 from tests.modules.commercial.store_sys import (
     CUSTOMERS,
     DOCUMENTS,
+    PRODUCTS,
     SALES,
+    article,
+    articles_file,
     customer,
     customers_file,
     document,
@@ -79,8 +80,7 @@ def test_customers_products_documents_and_sales_end_to_end(
     grant("operator", "commercial", "operator")
     seed_config(db)
     types = {t["key"] for t in operator.get("/api/v1/imports/types").json()}
-    assert {CUSTOMERS, DOCUMENTS, SALES} <= types
-    assert "commercial.store_sys.products" not in types  # blocked until the real articles master
+    assert {CUSTOMERS, PRODUCTS, DOCUMENTS, SALES} <= types
 
     # 1. Customers, as a snapshot of the 20th.
     job = post(
@@ -95,12 +95,10 @@ def test_customers_products_documents_and_sales_end_to_end(
     assert not job["can_decide"]  # an operator does not decide blocked confirmations
     assert confirm(operator, job["id"])["counts"]["inserted"] == 2
 
-    # 2. Products: the articles master is blocked, so the catalog gets them as a master import would.
-    importer = db.scalars(select(User).where(User.email == "operator@districom.test")).one()
-    job_id = make_job(db, importer.id)
-    for code in ("100", "200"):
-        upsert_from_source(db, SourceProduct(code=code, description=f"ARTICULO {code}"), job_id=job_id)
-    db.commit()
+    # 2. The articles master, as a snapshot of the 20th.
+    job = post(operator, articles_file([article(100), article(200)]), snapshot_date="2026-10-20")
+    assert (job["import_type"], job["metadata"]["identity"]) == (PRODUCTS, {"snapshot_date": "2026-10-20"})
+    assert confirm(operator, job["id"])["counts"]["inserted"] == 2
 
     # 3. Documents of the 23rd.
     job = post(
@@ -148,6 +146,8 @@ def test_customers_products_documents_and_sales_end_to_end(
     assert [line.price_list_id for line in sold[:5]] == [lists[n] for n in range(1, 6)]
     assert [line.quantity for line in sold[:5]] == [Decimal(n) for n in range(1, 6)]
     assert {line.customer_id for line in sold} == {None}  # by name: proposed, never auto-confirmed
+    products = dict(db.execute(select(Product.source_code, Product.id)).all())
+    assert {line.source_product_code: line.product_id for line in sold} == products
     proposal = db.scalars(
         select(ExternalEntityMapping).where(
             ExternalEntityMapping.namespace == "customer_name", ExternalEntityMapping.external_id == "ALMACEN UNO"

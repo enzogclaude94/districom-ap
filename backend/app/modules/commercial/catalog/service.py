@@ -63,7 +63,7 @@ SOURCE_FIELDS = {
 }
 
 
-def _row_hash(record: SourceProduct) -> bytes:
+def row_hash(record: SourceProduct) -> bytes:
     payload = {k: (str(v) if isinstance(v, Decimal) else v) for k, v in asdict(record).items()}
     return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str).encode()).digest()
 
@@ -122,14 +122,14 @@ def upsert_from_source(db: Session, record: SourceProduct, *, job_id: int) -> tu
     code = " ".join(record.code.split())
     if not code:
         raise ValueError("A product needs a code")
-    row_hash = _row_hash(record)
+    digest = row_hash(record)
     product = db.scalars(select(Product).where(Product.source_code == code).with_for_update()).first()
     if product is None:
         product = Product(
-            source_code=code[:40], source_row_hash=row_hash, first_seen_job_id=job_id, last_seen_job_id=job_id
+            source_code=code[:40], source_row_hash=digest, first_seen_job_id=job_id, last_seen_job_id=job_id
         )
         outcome = "inserted"
-    elif product.source_row_hash == row_hash:
+    elif product.source_row_hash == digest:
         product.last_seen_job_id = job_id
         db.flush()
         return product, "unchanged"
@@ -137,7 +137,7 @@ def upsert_from_source(db: Session, record: SourceProduct, *, job_id: int) -> tu
         outcome = "updated"
     for name, column in SOURCE_FIELDS.items():
         setattr(product, column, getattr(record, name))
-    product.source_row_hash = row_hash
+    product.source_row_hash = digest
     product.last_seen_job_id = job_id
     if product.id is None:
         db.add(product)

@@ -1,4 +1,4 @@
-"""Synthetic STORE SYS exports with the structure of the real originals (docs/IMPORTS.md §3.2-§3.4, inputs.md):
+"""Synthetic STORE SYS exports with the structure of the real originals (docs/IMPORTS.md §3.2-§3.5, inputs.md):
 BIFF7, cp1252, one sheet named as STORE SYS names it, the raw field names in row 1, codes as numbers, dates as
 date-formatted numbers. No value comes from a real file."""
 
@@ -20,10 +20,12 @@ from tests.imports.files import biff7_xls
 CUSTOMERS = "commercial.store_sys.customers"
 DOCUMENTS = "commercial.store_sys.documents"
 SALES = "commercial.store_sys.sales_lines"
+PRODUCTS = "commercial.store_sys.products"
 
 NO_CUIT = "  -        -"  # how STORE SYS writes an empty CUIT
 
 CUSTOMER_HEADER = ["codigo", "fantasia", "razons", "direccion", "telefono", "cuit", "zona", "vend"]
+ARTICLE_HEADER = ["codart", "desart", "precio"]
 DOCUMENT_HEADER = ["fechor", "nommov", "nombre", "codcli", "netosa", "total", "descue", "fechas"]
 SALES_HEADER = [
     "codigo",
@@ -54,6 +56,14 @@ def customer(
 
 def customers_file(rows: Sequence[Sequence[Any]]) -> bytes:
     return biff7_xls([CUSTOMER_HEADER, *rows], sheet_name="clientes")
+
+
+def article(code: Any, description: str | None = "ARTICULO SINTETICO X6", price: Any = Decimal("1000.00")) -> list[Any]:
+    return [code, description, price]
+
+
+def articles_file(rows: Sequence[Sequence[Any]], header: Sequence[str] = ARTICLE_HEADER) -> bytes:
+    return biff7_xls([list(header), *rows], sheet_name="lista de articulos")
 
 
 def document(
