@@ -20,8 +20,8 @@ import json
 import logging
 from collections import Counter
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
-from datetime import timedelta
+from dataclasses import dataclass, replace
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, BinaryIO
 
@@ -264,12 +264,26 @@ def _detect_and_analyze(
     job.import_type = entry.spec.key
     job.source_system_id = _source_system_id(db, entry.spec.source_system)
     job.parser_version = entry.spec.adapter.version
+    declared = Declared.from_json(metadata["declared"])
+    if "snapshot_date" in entry.spec.identity and declared.snapshot_date is None:
+        # A snapshot nobody dated is the photo of the upload's business day; written down so that analysis,
+        # confirmation, a reprocess and the duplicate check all use the same day.
+        declared = replace(declared, snapshot_date=business_today())
+        metadata["declared"] = declared.as_json()
+        metadata["defaulted"] = ["snapshot_date"]
+    metadata["identity"] = identity_of(entry, declared)
     job.job_metadata = metadata
     db.commit()
 
     if check_duplicate and (original := _completed_twin(db, job, file.sha256)) is not None:
         return _mark_duplicate(db, job, original, file.sha256)
     return _analyze(db, job, entry, workbook)
+
+
+def identity_of(entry: RegisteredType, declared: Declared) -> dict[str, Any]:
+    """The declarations that, with sha256 + type, identify the import (`ImportTypeSpec.identity`)."""
+    values = declared.as_json()
+    return {name: values[name] for name in entry.spec.identity}
 
 
 def _score(entry: RegisteredType, workbook: Workbook) -> float:
@@ -361,8 +375,23 @@ def _analyze(db: Session, job: ImportJob, entry: RegisteredType, workbook: Workb
     return job
 
 
+def _identity_condition(name: str, value: Any) -> Any:
+    """How a completed job matches one identity declaration. The snapshot is the day the job applied (its
+    `snapshot_date`, also for jobs from before the date was written into the declaration); the scope is the one
+    declared at upload, an undeclared scope matching only an undeclared one."""
+    if name == "snapshot_date":
+        return (
+            ImportJob.snapshot_date.is_(None) if value is None else ImportJob.snapshot_date == date.fromisoformat(value)
+        )
+    column = ImportJob.job_metadata["declared"][name].astext
+    return column.is_(None) if value is None else column == value
+
+
 def _completed_twin(db: Session, job: ImportJob, sha256: str) -> ImportJob | None:
-    """A completed job of the same type over a file with the same content; the file name never matters."""
+    """A completed job of the same type, over a file with the same content and with the same identity declarations
+    (docs/IMPORTS.md §5.1); the file name never matters."""
+    entry = registry.get(job.import_type or "")
+    identity = identity_of(entry, Declared.from_json((job.job_metadata or {}).get("declared"))) if entry else {}
     return db.scalars(
         select(ImportJob)
         .join(ImportFile, ImportFile.id == ImportJob.file_id)
@@ -371,6 +400,7 @@ def _completed_twin(db: Session, job: ImportJob, sha256: str) -> ImportJob | Non
             ImportJob.status.in_(COMPLETED_STATUSES),
             ImportFile.sha256 == sha256,
             ImportJob.id != job.id,
+            *(_identity_condition(name, value) for name, value in identity.items()),
         )
         .order_by(ImportJob.id)
         .limit(1)
@@ -381,12 +411,13 @@ def _mark_duplicate(db: Session, job: ImportJob, original: ImportJob, sha256: st
     job.status = "duplicate"
     job.duplicate_of_job_id = original.id
     job.finished_at = func.now()
+    identity = (job.job_metadata or {}).get("identity") or {}
     record_issue(
         db,
         "platform.import.duplicate_file",
-        f"{job.import_type}:{sha256}",
+        ":".join([job.import_type or "", sha256, *(f"{k}={v}" for k, v in sorted(identity.items()))]),
         job_id=job.id,
-        details={"duplicate_of_job_id": original.id, "import_type": job.import_type},
+        details={"duplicate_of_job_id": original.id, "import_type": job.import_type, "identity": identity},
     )
     record_event(
         db,

@@ -28,6 +28,9 @@ DETECTION_THRESHOLD = 0.8
 SCOPES = ("FULL", "FILTERED")
 # What an admin decides when a confirmation stops because the system cannot prove what it would replace.
 DECISIONS = ("replace", "additional")
+# Declarations an import type may make part of its identity (docs/IMPORTS.md §5.1): with the file's sha256 and the
+# type, they decide whether an upload repeats a completed import. The file name never takes part.
+IDENTITY_DECLARATIONS = ("snapshot_date", "scope")
 
 ROW_STATUSES = ("valid", "warning", "rejected", "duplicate", "pending_resolution", "skipped")
 ROW_OUTCOMES = ("inserted", "updated", "unchanged", "superseded")
@@ -173,10 +176,21 @@ class ImportAdapter(Protocol):
 
 @dataclass(frozen=True)
 class ImportTypeSpec:
+    """`identity` names the declarations that, with sha256 + type, make two uploads the same import
+    (docs/IMPORTS.md §5.1). A snapshot names `snapshot_date` (undeclared, it is the business day of the upload): the
+    same file as the photo of another day is a new import. An export whose declared scope drives what it replaces
+    names `scope`. A type that names none keeps sha256 + type."""
+
     key: str  # `<module>.<source>.<report>`
     name: str  # shown to users
     source_system: str  # code in `source_systems` (STORE_SYS, AXUM)
     adapter: ImportAdapter
+    identity: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        unknown = set(self.identity) - set(IDENTITY_DECLARATIONS)
+        if unknown:
+            raise ValueError(f"Import type {self.key}: unknown identity declarations {sorted(unknown)}")
 
 
 @dataclass(frozen=True)
