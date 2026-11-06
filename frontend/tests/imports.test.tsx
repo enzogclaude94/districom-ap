@@ -132,6 +132,7 @@ const item = (overrides: Partial<ImportJobItem> = {}): ImportJobItem => ({
   created_at: "2026-11-06T18:42:00Z",
   finished_at: "2026-11-06T18:42:07Z",
   rows_detected: 7415,
+  rows_processed: 7414,
   rows_rejected: 0,
   failure_reason: null,
   ...overrides,
@@ -147,6 +148,10 @@ describe("Imports history and upload", () => {
     expect(link).toHaveAttribute("href", "/comercial/datos/importaciones/3");
     expect(screen.getByText("Cargada con avisos")).toBeInTheDocument();
     expect(screen.getByRole("cell", { name: "Ventas" })).toBeInTheDocument();
+    // The data rows of the file, not the header STORE SYS writes above them.
+    expect(screen.getByRole("columnheader", { name: "Filas con datos" })).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: "7.414" })).toBeInTheDocument();
+    expect(screen.queryByText("7.415")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Subir y revisar" })).not.toBeInTheDocument();
     expect(String(calls(api, "GET", "/imports?")[0][0])).toContain("module=commercial");
   });

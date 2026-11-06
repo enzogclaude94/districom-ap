@@ -95,6 +95,8 @@ export interface ImportJobItem {
   created_at: string;
   finished_at: string | null;
   rows_detected: number;
+  /** Data rows: the detected ones minus the title and header rows the importer skips. */
+  rows_processed: number;
   rows_rejected: number;
   failure_reason: string | null;
 }

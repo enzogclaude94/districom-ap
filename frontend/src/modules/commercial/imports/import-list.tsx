@@ -118,7 +118,7 @@ export function ImportList() {
                     <TableHead>Reporte</TableHead>
                     <TableHead>Usuario</TableHead>
                     <TableHead>Estado</TableHead>
-                    <TableHead className="text-right">Filas</TableHead>
+                    <TableHead className="text-right">Filas con datos</TableHead>
                     <TableHead>Resultado</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -138,8 +138,8 @@ export function ImportList() {
                       <TableCell data-label="Estado">
                         <Badge tone={STATUS_TONES[job.status]}>{STATUS_LABELS[job.status]}</Badge>
                       </TableCell>
-                      <TableCell data-label="Filas" className="text-right tabular-nums">
-                        {job.rows_detected.toLocaleString("es-AR")}
+                      <TableCell data-label="Filas con datos" className="text-right tabular-nums">
+                        {job.rows_processed.toLocaleString("es-AR")}
                       </TableCell>
                       <TableCell data-label="Resultado" className="text-muted-foreground">
                         {result(job)}

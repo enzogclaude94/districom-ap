@@ -22,6 +22,8 @@ from app.platform.imports.schemas import (
     ImportJobItem,
     ImportJobPage,
     ImportMessageSummary,
+    ImportRowDetailOut,
+    ImportRowDetailPage,
     ImportRowOut,
     ImportRowPage,
     ImportTypeOut,
@@ -183,6 +185,7 @@ def list_jobs(
                 created_at=j.created_at,
                 finished_at=j.finished_at,
                 rows_detected=j.rows_detected,
+                rows_processed=j.rows_processed,
                 rows_rejected=j.rows_rejected,
                 failure_reason=j.failure_reason,
             )
@@ -197,7 +200,22 @@ def get_job(job_id: int, db: DbSession, user: CurrentUser) -> ImportJobDetail:
     return _detail(db, user, service.get_job(db, user, job_id))
 
 
-@router.get("/{job_id}/rows", response_model=ImportRowPage, summary="Filas del archivo en staging")
+def _sees_raw_rows(user: User, job: ImportJob) -> bool:
+    """Least privilege on the file's values: a module `viewer` gets the rows' state and messages; the raw cells and
+    normalized values go only to an `operator` or `admin` of the type's module. A job whose type was not detected is
+    visible only to its uploader and platform admins (`service.can_view`), who already hold the file."""
+    if job.import_type is None:
+        return True
+    entry = registry.get(job.import_type)
+    return entry is not None and has_module_access(user, entry.module_key, "operator")
+
+
+@router.get(
+    "/{job_id}/rows",
+    response_model=ImportRowDetailPage | ImportRowPage,
+    summary="Filas del archivo en staging",
+    description="Un `viewer` recibe estado, clave y mensajes de cada fila; `raw` y `normalized` solo operator o admin.",
+)
 def list_rows(
     job_id: int,
     db: DbSession,
@@ -206,9 +224,29 @@ def list_rows(
     code: Annotated[str | None, Query(max_length=80, description="Solo filas con este código de mensaje")] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
-) -> ImportRowPage:
-    service.get_job(db, user, job_id)
+) -> ImportRowDetailPage | ImportRowPage:
+    job = service.get_job(db, user, job_id)
     rows, total = service.staged_rows(db, job_id, status, offset, limit, code)
+    if _sees_raw_rows(user, job):
+        return ImportRowDetailPage(
+            items=[
+                ImportRowDetailOut(
+                    id=r.id,
+                    sheet=r.sheet,
+                    row_number=r.row_number,
+                    status=r.status,
+                    outcome=r.outcome,
+                    raw=r.raw,
+                    normalized=r.normalized,
+                    business_key=r.business_key,
+                    entity_type=r.entity_type,
+                    entity_id=r.entity_id,
+                    messages=r.messages,
+                )
+                for r in rows
+            ],
+            total=total,
+        )
     return ImportRowPage(
         items=[
             ImportRowOut(
@@ -217,8 +255,6 @@ def list_rows(
                 row_number=r.row_number,
                 status=r.status,
                 outcome=r.outcome,
-                raw=r.raw,
-                normalized=r.normalized,
                 business_key=r.business_key,
                 entity_type=r.entity_type,
                 entity_id=r.entity_id,
