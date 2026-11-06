@@ -47,6 +47,7 @@ class ImportJobItem(BaseModel):
     created_at: datetime
     finished_at: datetime | None
     rows_detected: int
+    rows_processed: int
     rows_rejected: int
     failure_reason: str | None
 
@@ -94,21 +95,44 @@ class ConfirmRequest(BaseModel):
 
 
 class ImportRowOut(BaseModel):
+    """A staged row as a module `viewer` sees it: its state and the adapter's messages, never the file's values."""
+
     id: int
     sheet: str
     row_number: int
     status: str
     outcome: str | None
-    raw: list[Any]
-    normalized: dict[str, Any] | None
     business_key: str | None
     entity_type: str | None
     entity_id: int | None
     messages: list[dict[str, Any]]
 
 
+class ImportRowDetailOut(ImportRowOut):
+    """The same row for an `operator` or `admin`, who diagnose the file: its raw cells (which may carry names, CUIT,
+    phone numbers or addresses) and the adapter's normalized values."""
+
+    raw: list[Any]
+    normalized: dict[str, Any] | None
+
+
+class ImportMessageSummary(BaseModel):
+    """One message of the analysis and how many rows carry it (adapter text, never row values)."""
+
+    code: str
+    severity: str
+    field: str | None
+    message: str
+    rows: int
+
+
 class ImportRowPage(BaseModel):
     items: list[ImportRowOut]
+    total: int
+
+
+class ImportRowDetailPage(BaseModel):
+    items: list[ImportRowDetailOut]
     total: int
 
 
