@@ -113,7 +113,7 @@ def test_the_original_export_is_detected_and_every_line_is_kept(db: Session, ope
     assert "customer_unresolved" not in statuses[5][1]
     assert statuses[6][0] == "pending_resolution"
     assert statuses[6][1] >= {"product_unknown", "customer_unresolved", "seller_unmapped", "unknown_price_list"}
-    assert job.job_metadata["preview"]["customers"] == {"unresolved_lines": 1}
+    assert job.job_metadata["preview"]["customers"] == {"unresolved": 1, "unresolved_lines": 1}
     assert db.scalar(select(func.count()).select_from(SaleLine)) == 0  # analysis writes nothing
 
     job = confirm(db, operator, job)

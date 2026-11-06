@@ -21,6 +21,7 @@ from app.platform.imports.schemas import (
     ImportJobDetail,
     ImportJobItem,
     ImportJobPage,
+    ImportMessageSummary,
     ImportRowOut,
     ImportRowPage,
     ImportTypeOut,
@@ -196,11 +197,12 @@ def list_rows(
     db: DbSession,
     user: CurrentUser,
     status: Annotated[str | None, Query(pattern="^(" + "|".join(ROW_STATUSES) + ")$")] = None,
+    code: Annotated[str | None, Query(max_length=80, description="Solo filas con este código de mensaje")] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> ImportRowPage:
     service.get_job(db, user, job_id)
-    rows, total = service.staged_rows(db, job_id, status, offset, limit)
+    rows, total = service.staged_rows(db, job_id, status, offset, limit, code)
     return ImportRowPage(
         items=[
             ImportRowOut(
@@ -220,6 +222,15 @@ def list_rows(
         ],
         total=total,
     )
+
+
+@router.get("/{job_id}/messages", response_model=list[ImportMessageSummary], summary="Mensajes del análisis, por tipo")
+def list_messages(job_id: int, db: DbSession, user: CurrentUser) -> list[ImportMessageSummary]:
+    service.get_job(db, user, job_id)
+    return [
+        ImportMessageSummary(code=m.code, severity=m.severity, field=m.field, message=m.message, rows=m.rows)
+        for m in service.message_summary(db, job_id)
+    ]
 
 
 @router.get("/{job_id}/issues", response_model=list[QualityIssueOut], summary="Problemas de calidad de la importación")

@@ -107,6 +107,16 @@ class ImportRowOut(BaseModel):
     messages: list[dict[str, Any]]
 
 
+class ImportMessageSummary(BaseModel):
+    """One message of the analysis and how many rows carry it (adapter text, never row values)."""
+
+    code: str
+    severity: str
+    field: str | None
+    message: str
+    rows: int
+
+
 class ImportRowPage(BaseModel):
     items: list[ImportRowOut]
     total: int
