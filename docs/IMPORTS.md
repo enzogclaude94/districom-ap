@@ -1,6 +1,6 @@
 # IMPORTS — Importación de AXUM y STORE SYS
 
-> v0.1 · 2026-10-30 · Fase 1 de Inteligencia Comercial. Decisiones: ADR 014. Tablas: `DATA_MODEL.md` §4–§7.
+> v0.1 · 2026-10-30 · Fase 1 de Inteligencia Comercial. Decisiones: ADR 014 (cliente de ventas: ADR 017). Tablas: `DATA_MODEL.md` §4–§7.
 > Estado: **diseño aprobado (F1.0); infraestructura de plataforma implementada en F1.1b** (lectores, pipeline, staging, lock, issues base, API y CLI; `app/platform/imports/`, `app/platform/quality/`). Los adaptadores de STORE SYS y AXUM llegan desde F1.2. Lo marcado *pendiente de muestra* se cierra con el archivo real antes de escribir su adaptador.
 
 Este documento dice qué fuente alimenta qué entidad, cómo se lee cada archivo, qué se excluye, cómo se evita duplicar y qué pasa con cada error. Si una regla de importación cambia, se actualiza acá en el mismo commit (`CLAUDE.md §9`).
@@ -153,13 +153,13 @@ SUBIR → DETECTAR → ANALIZAR ─────────────► PREVI
 
 - **Sin importes ni comprobante.** Este hecho mide **unidades** por cliente, producto y día. Los importes están en Comprobantes y **no se pueden enlazar** con las líneas.
 - **Atribución.** `vendedor` y `zona` coinciden con la asignación del maestro del cliente (236/236 en la muestra). Se guardan **como fuente**, no como atribución del documento. La atribución histórica se resuelve con las tablas de asignación (`DATA_MODEL §5`).
-- **Cliente por código exacto.** `cod_cliente` se resuelve con el mapping `customer/STORE_SYS/customer` que crea el maestro de clientes. El nombre **no** resuelve: se guarda como fuente. Un código sin mapping deja la línea con `customer_id NULL`, la fila `pending_resolution` y el issue `commercial.customer.unresolved_code`. Las ventas no crean clientes ni mappings.
+- **Cliente por código exacto** (ADR 017, reemplaza en esto a ADR 014 §2.6). `cod_cliente` se resuelve con el mapping `customer/STORE_SYS/customer` que crea el maestro de clientes. El nombre **no** resuelve: se guarda como fuente. Un código sin mapping deja la línea con `customer_id NULL`, la fila `pending_resolution` y el issue `commercial.customer.unresolved_code`. Las ventas no crean clientes ni mappings.
 - **Producto por código exacto.** `codigo` contra `products.source_code`; nunca por descripción.
 - **Producto desconocido.** Si no existe en el maestro, la línea se guarda con `product_id NULL` y se abre el issue `commercial.product.unknown`. Las ventas no crean productos.
 - **Filas idénticas.** Son legítimas (9 en la muestra) y **no se deduplican**: cada una conserva su `occurrence`.
 - **Idempotencia por período y scope.** Ver §5.3.
 
-**Implementado y cerrado en F1.3a** (contrato: export `ventas` con `codigo` y `cod_cliente`, ADR 014 S4/S7). El formato de un día sin `cod_cliente` ya no se acepta (`missing_columns`).
+**Implementado y cerrado en F1.3a** (contrato: export `ventas` con `codigo` y `cod_cliente`; ADR 014 S4/S7 cerrados, ADR 017). El formato de un día sin `cod_cliente` ya no se acepta (`missing_columns`).
 - El scope se declara al subir (`scope` = `FULL` o `FILTERED`, `scope_note` con los filtros; `--scope` / `--scope-note` en la CLI). Sin declarar, cuenta como no `FULL`.
 - `import_jobs.scope` guarda `declared`, `note`, `days`, `sellers`, `zones`, `price_lists` y `filters_detected` (vacío: el export no muestra filtros).
 - Producto desconocido: línea con `product_id NULL`, issue `commercial.product.unknown` por código y `commercial.sale_line.product_pending` por job. Vendedor sin vincular: `commercial.seller.unmapped`.

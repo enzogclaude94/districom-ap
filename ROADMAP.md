@@ -94,6 +94,14 @@ Cada etapa termina con un informe y la aprobación de Enzo. Despliegue, red, bac
 | F1.7 | UI mínima de maestros (clientes, productos, zonas, vendedores, listas) | PLANNED | F1.6 |
 | F1.8 | Hardening: reproceso, recuperación, performance con volumen realista, generador de demo por pipeline con seed fijo, documentación e informe de fase | PLANNED | F1.7 |
 
+**Riesgo registrado para F1.3b (medición, no bloquea F1.3a):** en la validación local con el export real, confirmar 3132 líneas de ventas tardó ≈35 s, y el export completo tiene 7414. F1.3b tiene que:
+- probar upload, analyze y confirm con el archivo completo;
+- verificar el timeout HTTP;
+- verificar la experiencia del usuario;
+- medir analyze y confirm por separado.
+
+No se agrega Celery, Redis, jobs externos ni arquitectura nueva sin una decisión aparte.
+
 Cada subfase es un PR propio que espera la aprobación de Enzo antes de la siguiente. Las migraciones se numeran desde el `main` vigente al abrir cada PR.
 
 **Criterios de cierre de la fase:**
