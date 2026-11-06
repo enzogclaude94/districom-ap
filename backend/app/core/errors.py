@@ -49,15 +49,35 @@ _TIMEOUTS = {
     "55P03": ("database_busy", "Hay otra operación en curso sobre los mismos datos. Probá de nuevo en unos segundos."),
 }
 
+# The connection to PostgreSQL was lost and the driver got no SQLSTATE: on Windows the server's own error (for example
+# 25P03 above) can be lost when it closes the socket (W2-B, ADR 016). The operation may or may not have been recorded
+# (a COMMIT under way), so the message asks to check before trying again. Nothing is retried automatically.
+CONNECTION_LOST = (
+    "database_connection_lost",
+    "Se perdió la conexión con la base de datos y no se pudo confirmar si la operación quedó registrada. "
+    "Revisá el resultado antes de volver a intentarla.",
+)
+
 
 def database_timeout(exc: DBAPIError) -> AppError | None:
     """The 503 for a database error caused by the connection limits, None for any other: a timeout is never a broken
-    rule, so code that turns database errors into rule errors asks this first."""
+    rule, so code that turns database errors into rule errors asks this first. A connection the driver saw closed
+    without a SQLSTATE (on Windows the server's FATAL can be lost with the socket, W2-B) is also a 503, with a message
+    that asks to check the result before retrying; any other error without SQLSTATE is left alone."""
     sqlstate = getattr(exc.orig, "sqlstate", None)
-    if sqlstate not in _TIMEOUTS:
-        return None
-    code, message = _TIMEOUTS[sqlstate]
-    return AppError(503, code, message)
+    if sqlstate in _TIMEOUTS:
+        code, message = _TIMEOUTS[sqlstate]
+        return AppError(503, code, message)
+    if connection_lost(exc):
+        return AppError(503, *CONNECTION_LOST)
+    return None
+
+
+def connection_lost(exc: DBAPIError) -> bool:
+    """The connection itself is gone, not a statement that failed: no SQLSTATE from the server, and SQLAlchemy found the
+    connection closed and invalidated it (its dialect checks the driver's connection state and disconnect messages).
+    An error without SQLSTATE on a connection that is still usable is not this."""
+    return getattr(exc.orig, "sqlstate", None) is None and exc.connection_invalidated
 
 
 def register_error_handlers(app: FastAPI) -> None:
@@ -83,7 +103,11 @@ def register_error_handlers(app: FastAPI) -> None:
         timeout = database_timeout(exc)
         if timeout is None:
             raise exc  # any other database error stays an unhandled 500, as before
-        logger.warning("database_timeout", extra=db_error_fields(exc))
+        if timeout.code == CONNECTION_LOST[0]:
+            # Only the driver's error class: its message may carry the server address.
+            logger.warning("database_connection_lost", extra={"db_error_class": type(exc.orig).__name__})
+        else:
+            logger.warning("database_timeout", extra=db_error_fields(exc))
         return JSONResponse(status_code=503, content=error_body(timeout.code, timeout.message))
 
     @app.exception_handler(Exception)
