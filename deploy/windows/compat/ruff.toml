@@ -1,0 +1,11 @@
+# Same rules as the backend, whose environment runs these checks.
+extend = "../../../backend/pyproject.toml"
+
+[lint.isort]
+known-first-party = ["app", "checks"]
+
+[lint.per-file-ignores]
+# S603: the checks run the backend, psql and Caddy as processes by design, never through a shell.
+# S608: the O7 check needs a statement that carries a (random, fictitious) literal, to prove it never reaches the log.
+"checks/**" = ["S603", "S608"]
+"frontend_standalone_smoke.py" = ["S603"]

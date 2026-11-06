@@ -1,0 +1,78 @@
+# W2-B (ADR 016, proposed): a disposable PostgreSQL on a Windows runner, started with pg_ctl.
+# Never a production database: the cluster lives in RUNNER_TEMP and disappears with the job.
+# PostgreSQL as a Windows service is a W2-C / laboratory item, not this.
+name: Windows PostgreSQL (disposable)
+description: Official PostgreSQL binaries, a UTF-8 cluster with ICU es-AR and the safe log settings (O7)
+inputs:
+  version:
+    description: PostgreSQL version of the official binaries zip
+    required: true
+  databases:
+    description: Space-separated databases to create (owned by districom)
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Install and start PostgreSQL ${{ inputs.version }}
+      shell: pwsh
+      env:
+        PG_VERSION: ${{ inputs.version }}
+        PG_DATABASES: ${{ inputs.databases }}
+      run: |
+        $zip = "$env:RUNNER_TEMP\pg.zip"
+        Invoke-WebRequest "https://get.enterprisedb.com/postgresql/postgresql-$env:PG_VERSION-1-windows-x64-binaries.zip" -OutFile $zip
+        (Get-FileHash $zip -Algorithm SHA256).Hash
+        Expand-Archive $zip -DestinationPath "$env:RUNNER_TEMP\pg"
+        $bin = "$env:RUNNER_TEMP\pg\pgsql\bin"
+        $version = & "$bin\postgres.exe" --version
+        $version
+        if ($version -notmatch "PostgreSQL\) $([regex]::Escape($env:PG_VERSION))$") { throw "unexpected version: $version" }
+
+        # Fictitious, CI-only credentials, the same the Linux jobs use. Data directory with the production choices of
+        # docs/WINDOWS_DEPLOYMENT.md §2: UTF-8, ICU es-AR and data checksums.
+        $data = "$env:RUNNER_TEMP\pgdata"
+        $pwfile = "$env:RUNNER_TEMP\pgpw.txt"
+        Set-Content -Path $pwfile -Value "districom" -NoNewline
+        & "$bin\initdb.exe" -D $data -U districom --pwfile=$pwfile -A scram-sha-256 --encoding=UTF8 `
+          --locale-provider=icu --icu-locale=es-AR --locale=C --data-checksums
+        if ($LASTEXITCODE -ne 0) { throw "initdb failed" }
+        Remove-Item $pwfile
+
+        # The safe log settings of O7 (deploy/docker-compose.prod.yml), as postgresql.conf would carry them on Windows.
+        @"
+        listen_addresses = '127.0.0.1'
+        port = 5432
+        max_connections = 200
+        log_error_verbosity = terse
+        log_min_error_statement = panic
+        log_statement = none
+        log_min_duration_statement = -1
+        log_min_duration_sample = -1
+        log_transaction_sample_rate = 0
+        log_duration = off
+        log_parameter_max_length = 0
+        log_parameter_max_length_on_error = 0
+        "@ -split "`n" | ForEach-Object { $_.Trim() } | Add-Content -Path "$data\postgresql.auto.conf"
+
+        # pg_ctl's output goes to files, never to a pipe: the server inherits those handles (W2-A finding).
+        $log = "$env:RUNNER_TEMP\postgresql.log"
+        $proc = Start-Process -FilePath "$bin\pg_ctl.exe" -ArgumentList @("-D", "`"$data`"", "-l", "`"$log`"", "-w", "-t", "120", "start") `
+          -RedirectStandardOutput "$env:RUNNER_TEMP\pg_ctl.out" -RedirectStandardError "$env:RUNNER_TEMP\pg_ctl.err" `
+          -NoNewWindow -PassThru
+        # Not Start-Process -Wait: it also waits for the descendants, and the server is one of them.
+        $proc.WaitForExit()
+        Get-Content "$env:RUNNER_TEMP\pg_ctl.out", "$env:RUNNER_TEMP\pg_ctl.err"
+        if ($proc.ExitCode -ne 0) { Get-Content $log; throw "pg_ctl start failed" }
+
+        $env:PGPASSWORD = "districom"
+        foreach ($db in ($env:PG_DATABASES -split "\s+" | Where-Object { $_ })) {
+          & "$bin\psql.exe" -X -h 127.0.0.1 -U districom -d postgres -v ON_ERROR_STOP=1 -c "CREATE DATABASE $db"
+          if ($LASTEXITCODE -ne 0) { throw "CREATE DATABASE $db failed" }
+        }
+        & "$bin\psql.exe" -X -At -h 127.0.0.1 -U districom -d postgres -c "SELECT version(); SELECT datlocprovider::text || ' ' || coalesce(to_jsonb(d) ->> 'datlocale', to_jsonb(d) ->> 'daticulocale') FROM pg_database d WHERE datname = 'postgres'"
+
+        "DISTRICOM_PG_BIN=$bin" >> $env:GITHUB_ENV
+        "DISTRICOM_PG_DATA=$data" >> $env:GITHUB_ENV
+        "DISTRICOM_PG_LOG=$log" >> $env:GITHUB_ENV
+        "DISTRICOM_PG_VERSION=$version" >> $env:GITHUB_ENV
+        $bin >> $env:GITHUB_PATH
