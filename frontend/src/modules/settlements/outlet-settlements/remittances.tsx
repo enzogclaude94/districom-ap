@@ -264,16 +264,20 @@ export function RemittanceDialog({
   employees: Person[];
   onClose: () => void;
 }) {
-  const main = boxes.find((box) => box.code === "main_cash") ?? boxes[0];
+  const mainId = boxes.find((box) => box.code === "main_cash")?.id ?? null;
   const suggested = settlement.responsible_suggestions ?? [];
   const [draft, setDraft] = useState<Draft>({
     amount: "",
-    destination: main?.id ?? null,
+    destination: mainId,
     time: settlement.business_date === todayInBuenosAires() ? nowInBuenosAires() : "",
     employeeId: suggested.length === 1 ? suggested[0]!.employee_id : null,
     reference: "",
   });
   const [preview, setPreview] = useState<RemittancePreview | null>(null);
+  // The receiving box defaults to the main one, also when the boxes arrive after the dialog opened. Only while the
+  // operator has not chosen and nothing is selected; with no active main box nothing is preselected (W2-B).
+  const [chosen, setChosen] = useState(false);
+  if (!chosen && draft.destination === null && mainId !== null) setDraft({ ...draft, destination: mainId });
   const [problem, setProblem] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const action = useDeliveryAction(`remittance:${settlement.id}`, onClose);
@@ -376,7 +380,10 @@ export function RemittanceDialog({
                 id={destinationId}
                 className={selectClass}
                 value={draft.destination ?? ""}
-                onChange={(event) => set({ destination: event.target.value ? Number(event.target.value) : null })}
+                onChange={(event) => {
+                  setChosen(true);
+                  set({ destination: event.target.value ? Number(event.target.value) : null });
+                }}
               >
                 <option value="">Elegí una caja…</option>
                 {boxes.map((box) => (
