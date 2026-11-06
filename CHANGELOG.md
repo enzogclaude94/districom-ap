@@ -29,6 +29,7 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 - **Códigos de calidad nuevos:** `commercial.customer.without_zone`, `without_salesperson`, `missing_from_master`, `unresolved_code`; `commercial.seller.unmapped`; `commercial.product.unknown`, `unmapped_category`; `commercial.sale_line.customer_pending`, `product_pending`; `commercial.document.changed`.
 - Tests (≈45 nuevos): los tres importadores con archivos BIFF7 sintéticos de la misma estructura que los exports reales, los casos de Enzo (alta, reimport, cambios, CUIT vacío o repetido, zona y vendedor, MISA, Boca, ausente, tipos de comprobante, codcli 0, clave duplicada o modificada, resolución de clientes, listas 1–5, cantidades, filas idénticas, períodos iguales y parciales, FULL/FILTERED, bloqueo y decisión), flujo de punta a punta por la API, CLI y migraciones `0036`/`0037`. Validado localmente contra las tres muestras reales (no commiteadas).
 - `docs/IMPORTS.md` §3.2–§3.5, §5.3, §7, §8, `DATA_MODEL.md` §5–§6, `ROADMAP.md`, `PLAN.md` y `CLAUDE.md §2` actualizados. F1.2 **DONE** (PR #71).
+
 ### Changed — Servidor: cierre de W2‑A
 - `ROADMAP.md` y `docs/WINDOWS_DEPLOYMENT.md`:
   - W2‑A queda completada **como prueba de concepto y CI** (PR #72, merge `f2a7555`);
