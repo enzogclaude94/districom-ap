@@ -4,6 +4,9 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Changed — Servidor: cierre de W2‑B
+- `ROADMAP.md` y `docs/WINDOWS_DEPLOYMENT.md`: W2‑B queda **DONE a nivel de compatibilidad y pruebas automatizadas** (PR #75, merge `b42efa0`, aprobada por Enzo el 2026-11-06), con B‑1 a B‑10 en PASS. Siguen PENDIENTES Windows 11 Pro real, servicios nativos, Defender, hardware y convivencia con Store Sys. ADR 016 sigue «Propuesto». W2‑C pasa a propuesta en subetapas, sin autorizar.
+
 ### Added — Servidor: W2‑B, compatibilidad de la aplicación en Windows (PR #75)
 - Tres jobs de CI nuevos sobre `windows-latest` con PostgreSQL 17.6 (ICU `es-AR`, logs de O7, bases descartables): backend (B‑1 a B‑6 y B‑10), frontend (B‑7) y E2E (B‑8 y B‑9, con la entrega parcial de boca repetida 10 veces). Los cinco jobs anteriores no cambian.
 - `.github/actions/windows-postgres` y `deploy/windows/compat/` (chequeos de orden de textos, zona horaria, arranque del backend y componentes reutilizables; smoke del frontend standalone).

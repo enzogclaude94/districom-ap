@@ -173,8 +173,8 @@ Si un paso falla antes del 4, la app vuelve a quedar disponible. Si falla despu�
 |---|---|---|---|
 | **W1** | ADR 016 (Propuesto) y este plan | CI (documentación) | DONE (PR #70, 2026-11-04) |
 | **W2‑A** | Prueba de concepto aislada de backups físicos, WAL, PITR y restauración (`deploy/windows/backup/`) | GitHub Actions (Windows); lo no reproducible queda PENDIENTE | DONE como prueba de concepto y CI (PR #72, 2026-11-05); lo de laboratorio sigue PENDIENTE: ver §8.2 |
-| **W2‑B** | Pruebas automatizadas de los componentes compatibles con Windows (backend en Windows, orden de textos, frontend) | GitHub Actions (Windows) | En revisión (PR #75): B‑1 a B‑10 en PASS en CI; lo de laboratorio sigue PENDIENTE: ver §8.4 |
-| **W2‑C** | El resto (operación, `install.ps1`, servicios, firewall, cierre de jornada, suite de aceptación) | CI y laboratorio Windows 11 Pro | Se planifica solo después de validar W2‑A |
+| **W2‑B** | Pruebas automatizadas de los componentes compatibles con Windows (backend en Windows, orden de textos, frontend) | GitHub Actions (Windows) | DONE a nivel de compatibilidad y pruebas automatizadas (PR #75, 2026-11-06); lo de laboratorio sigue PENDIENTE: ver §8.4 |
+| **W2‑C** | El resto (operación, `install.ps1`, servicios, firewall, cierre de jornada, suite de aceptación) | CI y laboratorio Windows 11 Pro | Propuesta en subetapas en preparación; sin autorizar |
 | W3 | Laboratorio Windows 11 Pro: suite completa y pruebas pendientes | PC de laboratorio (no el servidor) | Sin laboratorio confirmado |
 | W4 | Preparación del equipo: RAM, RAID, SMART, Windows 11 Pro, BitLocker, UPS | Servidor | No autorizado |
 | W5–W8 | Staging, pruebas en el servidor, transición y go‑live (O10) | Servidor | Equivalen a S3 |
@@ -248,7 +248,7 @@ Enzo los fijó el 2026-11-05 al cerrar W2‑A. Se suman a los dos requisitos del
    - distinguirlo del punto pedido y del último WAL archivado.
 
 ### 8.4 W2‑B: compatibilidad de la aplicación
-- **Estado (2026-11-06):** implementada en el PR #75, sin merge hasta la aprobación de Enzo. ADR 016 sigue «Propuesto».
+- **Estado (Enzo, 2026-11-06):** DONE a nivel de compatibilidad y pruebas automatizadas (PR #75, merge `b42efa0`). No valida lo PENDIENTE de abajo. ADR 016 sigue «Propuesto».
 - **Dónde está:** tres jobs de CI sobre `windows-latest` con PostgreSQL 17.6 (ICU `es-AR`, logs de O7, bases descartables y datos ficticios), la acción `.github/actions/windows-postgres` y los chequeos de `deploy/windows/compat/` (README). Los cinco jobs anteriores no cambian.
 - **Resultados en CI (B‑1 a B‑10 en PASS):**
 
