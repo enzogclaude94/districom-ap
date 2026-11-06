@@ -1,6 +1,6 @@
 # PLAN — DistriCom · Plataforma de Inteligencia Comercial
 
-> Estado del documento: **v0.5 — Fase 0 DONE; plataforma modular DONE; Fase 1 de Comercial IN_PROGRESS (F1.0, F1.1a y F1.1b aprobados, F1.2 en revisión)**
+> Estado del documento: **v0.5 — Fase 0 DONE; plataforma modular DONE; Fase 1 de Comercial IN_PROGRESS (F1.0, F1.1a, F1.1b y F1.2 aprobados, F1.3a en revisión)**
 > Última actualización: 2026-10-30 (secciones de Comercial; las de Rendiciones las mantiene su hilo)
 > Fuente de requisitos: prompt maestro adjunto por Enzo (`message.md`, 165 secciones).
 
@@ -56,7 +56,7 @@ En preventa, el pedido se toma el día de la visita y la **factura suele emitirs
 ### R2 — Identidad de clientes entre AXUM y STORE SYS (ALTO)
 Es el mayor riesgo de integración. No sabemos si ambos sistemas comparten un código de cliente.
 **Supuesto:** cliente canónico propio con IDs externos separados; matching automático solo por clave exacta (código compartido o CUIT normalizado); todo lo demás queda **pendiente de revisión manual**. Nunca fuzzy matching irreversible.
-**Actualización 2026-10-30 (D‑B, ADR 014):** AXUM y STORE SYS son espacios de IDs independientes (`commercial.axum_customer_code_matches_store_sys = false`). Además, *Ventas artículos/clientes* de STORE SYS trae el cliente por **nombre** (no código) y el maestro tiene nombres repetidos: esos vínculos se proponen y se confirman a mano. No hay matching automático por CUIT: en el maestro no es único ni confiable (739/820 vacíos).
+**Actualización 2026-10-30 (D‑B, ADR 014):** AXUM y STORE SYS son espacios de IDs independientes (`commercial.axum_customer_code_matches_store_sys = false`). Además, *Ventas artículos/clientes* de STORE SYS trae el cliente por **nombre** (no código) y el maestro tiene nombres repetidos: esos vínculos se proponen y se confirman a mano. *(Superado el 2026-11-06 por ADR 017: el export productivo de varios días trae `cod_cliente` y el cliente se resuelve por código exacto; el nombre ya no resuelve.)* No hay matching automático por CUIT: en el maestro no es único ni confiable (739/820 vacíos).
 
 ### R3 — Semántica de notas de crédito y devoluciones (ALTO, requiere confirmación)
 El prompt pide confirmación antes de decisiones contables. **Supuesto provisional:** documentos separados con `document_type` (INVOICE, CREDIT_NOTE, DEBIT_NOTE) e importes **con signo** (NC negativa); `net_sales` = suma de importes con signo, sin impuestos. Se valida con el primer export real antes de cerrar Fase 1.
@@ -124,7 +124,7 @@ Ninguna modificación cambia el alcance funcional.
 | ID | Pregunta | Default mientras tanto | Bloquea |
 |---|---|---|---|
 | D1 | ~~¿Repo nuevo o existente?~~ **Resuelto:** `districom-ap`. | — | — |
-| D2 | Exports reales de AXUM y STORE SYS. | **Parcial (2026-10-30):** recibidos clientes, ventas y comprobantes de STORE SYS; faltan maestro de artículos y AXUM No Compra. | F1.3 (artículos) y F1.4 (AXUM). |
+| D2 | Exports reales de AXUM y STORE SYS. | **Parcial (2026-11-05):** recibidos clientes, ventas (1 día y octubre), comprobantes y maestro de artículos de STORE SYS; falta AXUM No Compra. | F1.3 (artículos) y F1.4 (AXUM). |
 | D3 | ¿AXUM y STORE SYS comparten código de cliente / producto? | **Decidido (D‑B, 2026-10-30):** espacios independientes hasta comprobarlo con muestras. | — |
 | D4 | ¿Cómo se registran NC y devoluciones en STORE SYS? ¿Importes con o sin IVA? | Comprobantes separados; `netosa` sin signo y `total` con signo; signo canónico por `document_types`. Clasificación confirmada por Enzo (2026-11-03) y sembrada en F1.2; `COMP. INTERNO X` y `FACTURA` sin letra quedan `UNCLASSIFIED`. | Siembra de `document_types` (F1.2). |
 | D5 | Desfase típico pedido → factura en preventa. | 2 días. | Conversión facturada. |
@@ -264,12 +264,14 @@ Estado: **IN_PROGRESS.** Diseño F1.0 aprobado por Enzo el 2026-10-30 con las de
 |---|---|
 | Pedido de exportaciones (`docs/DATA_INTAKE.md`) | Hecho (2026-10-02) |
 | Muestras de formato STORE SYS: clientes, ventas, comprobantes | Recibidas y perfiladas (2026-10-30, `docs/IMPORTS.md §3`) |
-| Muestras: maestro de artículos y AXUM No Compra | **Pendiente (Enzo)** — necesarias para F1.3 / F1.4 |
+| Muestras: AXUM No Compra | **Pendiente (Enzo)** — necesaria para F1.4 (maestro de artículos recibido 2026-11-05) |
 | F1.0 diseño técnico | Aprobado (2026-10-30) |
 | F1.1a documentación | Aprobada y mergeada (PR #56, 2026-11-02) |
 | F1.1b infraestructura de importación | Aprobada y mergeada (PR #69, 2026-11-03) |
-| F1.2 maestros, configuración y mappings | En revisión (este PR) |
-| F1.3 – F1.8 | Pendientes de aprobación sucesiva |
+| F1.2 maestros, configuración y mappings | Aprobada y mergeada (PR #71, 2026-11-05) |
+| F1.3a importadores STORE SYS (backend) | En revisión: clientes, artículos, comprobantes y ventas (por `codigo` y `cod_cliente` exactos) cerrados contra exports reales; identidad semántica de imports |
+| F1.3b pantalla mínima de Importaciones | Pendiente (PR aparte) |
+| F1.4 – F1.8 | Pendientes de aprobación sucesiva |
 
 **Confirmaciones de ADR 014 §3:** Enzo respondió S1–S8 el 2026-11-01; ninguna afecta F1.1b y se vuelcan en los documentos de F1.2/F1.3, que las aplican. Lista original:
 - S1 días de visita de las zonas `RUTA 03` y `RUTA 05` (MISA) · S2 `LUVI` = Lumivi y `MAJU` = Majusa → antes de sembrar reglas (F1.2).

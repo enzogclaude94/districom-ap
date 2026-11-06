@@ -9,6 +9,8 @@ from fastapi import APIRouter, Depends
 from app.modules.commercial.config import service
 from app.modules.commercial.config.models import Zone
 from app.modules.commercial.config.schemas import (
+    ArticlesPriceListIn,
+    ArticlesPriceListOut,
     CategoryIn,
     CategoryOut,
     CategoryPatch,
@@ -113,6 +115,25 @@ def list_price_lists(db: DbSession, _: Viewer) -> list[PriceListOut]:
 @router.post("/price-lists", response_model=PriceListOut, status_code=201, summary="Crear lista de precios")
 def create_price_list(db: DbSession, user: Admin, body: PriceListIn) -> PriceListOut:
     return PriceListOut.model_validate(service.create_price_list(db, user, **body.model_dump()))
+
+
+@router.get(
+    "/price-lists/articles-master",
+    response_model=ArticlesPriceListOut,
+    summary="Lista que alimenta el precio del maestro de artículos",
+)
+def get_articles_price_list(db: DbSession, _: Viewer) -> ArticlesPriceListOut:
+    return ArticlesPriceListOut(list_number=service.articles_price_list(db))
+
+
+@router.put(
+    "/price-lists/articles-master",
+    response_model=ArticlesPriceListOut,
+    summary="Confirmar la lista del precio del maestro de artículos",
+)
+def set_articles_price_list(db: DbSession, user: Admin, body: ArticlesPriceListIn) -> ArticlesPriceListOut:
+    number = service.set_articles_price_list(db, user, body.list_number, reason=body.reason)
+    return ArticlesPriceListOut(list_number=number)
 
 
 @router.patch("/price-lists/{list_id}", response_model=PriceListOut, summary="Modificar lista de precios")

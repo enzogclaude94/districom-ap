@@ -35,6 +35,10 @@ pytest_plugins = ["tests.imports.fixtures"]
 # Tables emptied after each test that uses the database, in one TRUNCATE without CASCADE: the list is exact, so a
 # table that references one of these and is missing here makes the TRUNCATE fail instead of being emptied silently.
 TRUNCATED_TABLES = (
+    "commercial.sale_lines",
+    "commercial.documents",
+    "commercial.customer_salesperson_assignments",
+    "commercial.customer_zone_assignments",
     "commercial.product_prices",
     "commercial.products",
     "commercial.product_families",

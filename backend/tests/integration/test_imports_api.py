@@ -57,7 +57,7 @@ def operator(sign_in, grant) -> TestClient:  # type: ignore[no-untyped-def]
 
 def test_upload_preview_rows_issues_and_confirm(operator: TestClient, db: Session) -> None:
     types = operator.get("/api/v1/imports/types").json()
-    assert {(t["key"], t["can_import"]) for t in types} == {(TYPE_KEY, True), (OTHER_TYPE_KEY, True)}
+    assert {(t["key"], t["can_import"]) for t in types} >= {(TYPE_KEY, True), (OTHER_TYPE_KEY, True)}
 
     response = post_file(operator, REPORT)
     assert response.status_code == 201, response.text

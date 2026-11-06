@@ -32,6 +32,7 @@ from app.platform.audit.service import record_change
 from app.platform.auth.models import User
 from app.platform.mappings.service import source_system_id
 from app.platform.quality.service import record_issue, resolve_open
+from app.platform.settings.service import get_setting, set_setting
 
 REASON_LENGTH = 500
 
@@ -734,3 +735,39 @@ def list_reason_categories(db: Session) -> Sequence[NoPurchaseReasonCategory]:
 
 def list_reason_mappings(db: Session) -> Sequence[NoPurchaseReasonMapping]:
     return db.scalars(select(NoPurchaseReasonMapping).order_by(NoPurchaseReasonMapping.reason_key)).all()
+
+
+# --- the list the articles master's `precio` feeds ----------------------------------------------------------------
+
+ARTICLES_PRICE_LIST_SETTING = "commercial.store_sys_articles_price_list"
+
+
+def articles_price_list(db: Session) -> int | None:
+    value = get_setting(db, ARTICLES_PRICE_LIST_SETTING)
+    return None if value is None else int(value)
+
+
+def set_articles_price_list(db: Session, actor: User, list_number: int | None, *, reason: str | None) -> int | None:
+    """Which existing list the `precio` column of the STORE SYS articles master is (docs/IMPORTS.md §3.5): a module
+    admin's confirmed decision, with a reason, audited. None stops loading those prices. Never creates a list; it
+    applies from the next articles import (or a reprocess), never to prices already loaded."""
+    clean_reason = _clean(reason)
+    if not clean_reason:
+        raise AppError(422, "reason_required", "Indicá el motivo del cambio.")
+    if list_number is not None and db.scalar(select(PriceList.id).where(PriceList.list_number == list_number)) is None:
+        raise AppError(422, "price_list_not_found", "Esa lista de precios no está configurada.")
+    before = articles_price_list(db)
+    if before != list_number:
+        set_setting(db, ARTICLES_PRICE_LIST_SETTING, list_number, user_id=actor.id)
+        record_change(
+            db,
+            "commercial.config.articles_price_list_set",
+            action="update",
+            user_id=actor.id,
+            entity_type="app_setting",
+            entity_id=ARTICLES_PRICE_LIST_SETTING,
+            before={"list_number": before},
+            after={"list_number": list_number, "reason": clean_reason},
+        )
+    db.commit()
+    return list_number

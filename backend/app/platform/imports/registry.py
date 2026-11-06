@@ -24,6 +24,14 @@ from app.platform.imports.workbook import RawRow, RawSheet, Workbook
 # A workbook "is" a report when the share of its required columns found in one header row reaches this.
 DETECTION_THRESHOLD = 0.8
 
+# What the operator declares when uploading, because the file does not say it (docs/IMPORTS.md §3.2, §5.3).
+SCOPES = ("FULL", "FILTERED")
+# What an admin decides when a confirmation stops because the system cannot prove what it would replace.
+DECISIONS = ("replace", "additional")
+# Declarations an import type may make part of its identity (docs/IMPORTS.md §5.1): with the file's sha256 and the
+# type, they decide whether an upload repeats a completed import. The file name never takes part.
+IDENTITY_DECLARATIONS = ("snapshot_date", "scope")
+
 ROW_STATUSES = ("valid", "warning", "rejected", "duplicate", "pending_resolution", "skipped")
 ROW_OUTCOMES = ("inserted", "updated", "unchanged", "superseded")
 SEVERITIES = ("error", "warning", "info")
@@ -71,11 +79,55 @@ class Analysis:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+class ConfirmationBlockedError(Exception):
+    """The adapter cannot prove what the confirmation would replace and needs an admin decision (docs/IMPORTS.md
+    §5.3): nothing is written and the job stays `pending`. `details` must not carry row values."""
+
+    def __init__(self, code: str, message: str, details: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.details = details or {}
+
+
+@dataclass(frozen=True)
+class Declared:
+    """What the operator declared at upload: the date of a master snapshot, and the scope of an export (FULL, or
+    FILTERED with a note on the filters). None when not declared: each adapter decides its conservative default."""
+
+    snapshot_date: date | None = None
+    scope: str | None = None
+    scope_note: str | None = None
+
+    def as_json(self) -> dict[str, Any]:
+        return {
+            "snapshot_date": self.snapshot_date.isoformat() if self.snapshot_date else None,
+            "scope": self.scope,
+            "scope_note": self.scope_note,
+        }
+
+    @classmethod
+    def from_json(cls, data: dict[str, Any] | None) -> "Declared":
+        data = data or {}
+        day = data.get("snapshot_date")
+        return cls(date.fromisoformat(day) if day else None, data.get("scope"), data.get("scope_note"))
+
+
+@dataclass(frozen=True)
+class Decision:
+    """An admin's explicit decision on a blocked confirmation: `replace` the overlapping data, or load the file as
+    `additional`, with the reason, audited."""
+
+    action: str
+    reason: str
+
+
 @dataclass(frozen=True)
 class AnalyzeContext:
     job_id: int
     import_type: str
     source_system_id: int
+    declared: Declared = field(default_factory=Declared)
 
 
 @dataclass(frozen=True)
@@ -95,6 +147,8 @@ class ConfirmContext:
     import_type: str
     source_system_id: int
     user_id: int
+    declared: Declared = field(default_factory=Declared)
+    decision: Decision | None = None
 
 
 @dataclass(frozen=True)
@@ -122,10 +176,21 @@ class ImportAdapter(Protocol):
 
 @dataclass(frozen=True)
 class ImportTypeSpec:
+    """`identity` names the declarations that, with sha256 + type, make two uploads the same import
+    (docs/IMPORTS.md §5.1). A snapshot names `snapshot_date` (undeclared, it is the business day of the upload): the
+    same file as the photo of another day is a new import. An export whose declared scope drives what it replaces
+    names `scope`. A type that names none keeps sha256 + type."""
+
     key: str  # `<module>.<source>.<report>`
     name: str  # shown to users
     source_system: str  # code in `source_systems` (STORE_SYS, AXUM)
     adapter: ImportAdapter
+    identity: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        unknown = set(self.identity) - set(IDENTITY_DECLARATIONS)
+        if unknown:
+            raise ValueError(f"Import type {self.key}: unknown identity declarations {sorted(unknown)}")
 
 
 @dataclass(frozen=True)

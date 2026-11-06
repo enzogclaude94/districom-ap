@@ -106,6 +106,15 @@ class PriceListPatch(BaseModel):
     description: str | None = Field(default=None, max_length=500)
 
 
+class ArticlesPriceListIn(BaseModel):
+    list_number: int | None = Field(default=None, gt=0)
+    reason: str = Field(max_length=300)
+
+
+class ArticlesPriceListOut(BaseModel):
+    list_number: int | None
+
+
 class CategoryOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
