@@ -22,6 +22,9 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
   - frontend: `tests/imports.test.tsx` (10 casos);
   - E2E: `e2e/imports.spec.ts` (maestro, ventas completas, filtrado bloqueado con decisión de admin, archivo repetido, archivo que no es un reporte, historial), con archivos sintéticos de `e2e/store_sys_files.py`.
 
+### Changed — Servidor: cierre de W2‑B
+- `ROADMAP.md` y `docs/WINDOWS_DEPLOYMENT.md`: W2‑B queda **DONE a nivel de compatibilidad y pruebas automatizadas** (PR #75, merge `b42efa0`, aprobada por Enzo el 2026-11-06), con B‑1 a B‑10 en PASS. Siguen PENDIENTES Windows 11 Pro real, servicios nativos, Defender, hardware y convivencia con Store Sys. ADR 016 sigue «Propuesto». W2‑C pasa a propuesta en subetapas, sin autorizar.
+
 ### Fixed — Servidor: A‑11 de W2‑A dependía de una ventana fija de 8 s
 - `deploy/windows/backup/tests/integration/test_crash.py`: el corte abrupto ocurre recién cuando el repositorio **muestra** transacciones confirmadas ya archivadas y hay otras confirmadas en un segmento todavía abierto, sin depender de segundos fijos. Las aserciones de A‑11 no cambian; se agrega que exista al menos una confirmada sin archivar en el momento del corte. Nuevo test de regresión con un archivador 3 s más lento por segmento, que reproduce la falla del CI de `main` del 2026-11-06 (371 confirmadas y 0 archivadas).
 - `tests/integration/support.py`: cuando una espera de archivado vence, el error incluye `pg_stat_archiver` y las líneas del log del servidor sobre archivado y errores, para distinguir un archivador lento de uno que falla.
