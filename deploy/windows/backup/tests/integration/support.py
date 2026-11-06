@@ -3,8 +3,9 @@
 import re
 import shutil
 import socket
+import sys
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -93,15 +94,45 @@ class Primary:
     def switch_and_wait(self, timeout: float = 180) -> str:
         """Close the current WAL segment and wait until it is in the repository. Returns its name."""
         name = str(self.scalar("SELECT pg_walfile_name(pg_switch_wal())", "postgres"))
-        wait_for_file(self.repo / "wal" / name, timeout)
+        wait_for_file(self.repo / "wal" / name, timeout, self.archiver_report)
         return name
 
     def wait_lsn_archived(self, lsn: str, timeout: float = 180) -> list[str]:
         """Switch and wait until every segment up to the one holding ``lsn`` is archived."""
         self.switch_and_wait(timeout)
         name = str(self.scalar(f"SELECT pg_walfile_name('{lsn}')", "postgres"))
-        wait_for_file(self.repo / "wal" / name, timeout)
+        wait_for_file(self.repo / "wal" / name, timeout, self.archiver_report)
         return sorted(p.name for p in (self.repo / "wal").iterdir())
+
+    def archiver_report(self) -> str:
+        """What the archiver was doing, for a wait that timed out: tells a slow archiver from a failing one."""
+        lines = []
+        try:
+            with self.connect("postgres") as conn:
+                row = conn.execute(
+                    "SELECT archived_count, last_archived_wal, last_archived_time, failed_count, last_failed_wal,"
+                    " last_failed_time, pg_walfile_name(pg_current_wal_lsn()) FROM pg_stat_archiver"
+                ).fetchone()
+            assert row is not None
+            archived_count, last, last_at, failed, last_failed, failed_at, current = row
+            lines.append(
+                f"pg_stat_archiver: archived={archived_count} last={last} at {last_at}; "
+                f"failed={failed} last_failed={last_failed} at {failed_at}; current={current}"
+            )
+        except psycopg.Error as exc:
+            lines.append(f"pg_stat_archiver unavailable: {type(exc).__name__}")
+        archived = sorted(p.name for p in (self.repo / "wal").iterdir())
+        lines.append(f"repository wal: {len(archived)} files, last {archived[-3:]}")
+        log = self.instance.log_file
+        if log.exists():
+            interesting = [
+                line.rstrip()
+                for line in log.read_text(encoding="utf-8", errors="replace").splitlines()
+                if re.search(r"archiv|FATAL|ERROR|WARNING|PANIC", line)
+            ]
+            lines.append("server log (archiver, errors), last 20:")
+            lines.extend(interesting[-20:])
+        return "\n".join(lines)
 
     def restore(
         self,
@@ -129,11 +160,12 @@ class Primary:
         return outcome
 
 
-def wait_for_file(path: Path, timeout: float) -> None:
+def wait_for_file(path: Path, timeout: float, diagnose: Callable[[], str] | None = None) -> None:
     deadline = time.monotonic() + timeout
     while not path.exists():
         if time.monotonic() > deadline:
-            raise TimeoutError(f"{path.name} did not appear in {path.parent} within {timeout} s")
+            detail = f"\n{diagnose()}" if diagnose else ""
+            raise TimeoutError(f"{path.name} did not appear in {path.parent} within {timeout} s{detail}")
         time.sleep(0.25)
 
 
@@ -145,15 +177,20 @@ ICU_ARGS = ["--locale-provider=icu", "--icu-locale=es-AR", "--locale=C", "--data
 
 
 @contextmanager
-def make_primary(root: Path, *, archive_timeout: str = "60s") -> Iterator[Primary]:
+def make_primary(root: Path, *, archive_timeout: str = "60s", archive_delay_s: float = 0) -> Iterator[Primary]:
+    """``archive_delay_s`` makes every archive_command that much slower, like a loaded runner or disk."""
     repo = init_repo(root / "repo1")
+    command = archive_command(repo)
+    if archive_delay_s:
+        sleep = f'{pgtools.command_path(sys.executable)} -c "import time; time.sleep({archive_delay_s})"'
+        command = f"{sleep} && {command}"
     instance = pgtools.Instance(root / "primary", free_port())
     instance.initdb(extra=ICU_ARGS)
     instance.append_conf(
         {
             "wal_level": "'replica'",
             "archive_mode": "'on'",
-            "archive_command": pgtools.conf_quote(archive_command(repo)),
+            "archive_command": pgtools.conf_quote(command),
             "archive_timeout": pgtools.conf_quote(archive_timeout),
             "max_wal_senders": "10",
             "fsync": "on",
