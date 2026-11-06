@@ -26,5 +26,12 @@ SETTINGS = SettingsScope(
         ),
         SettingSpec("opportunity_attribution_window_days", 30, "Ventana de atribución de oportunidades (días)"),
         SettingSpec("category_level_for_mix", 1, "Nivel de categoría para mix"),
+        SettingSpec(
+            "store_sys_articles_price_list",
+            None,
+            "Lista de precios del maestro de artículos",
+            "Número de lista que representa la columna «precio» del maestro de artículos de STORE SYS. Sin valor, "
+            "los precios del maestro no se cargan (docs/IMPORTS.md §3.5).",
+        ),
     ),
 )

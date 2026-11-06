@@ -470,6 +470,11 @@ COMMERCIAL_TABLES = {
     "products",
     "product_families",
     "product_prices",
+    # F1.3 (0036, 0037)
+    "customer_zone_assignments",
+    "customer_salesperson_assignments",
+    "documents",
+    "sale_lines",
 }
 
 
@@ -478,6 +483,64 @@ def _commercial_tables(url: str) -> set[str]:
     try:
         return set(inspect(engine).get_table_names(schema="commercial"))
     finally:
+        engine.dispose()
+
+
+def test_store_sys_fact_migrations_go_down_and_up_and_refuse_to_drop_data() -> None:
+    """F1.3: 0036 creates the assignment history, 0037 documents and sale lines. Empty they go down and up; with a
+    document, the downgrade is refused and nothing is dropped."""
+    cfg = alembic_config()
+    url = cfg.get_main_option("sqlalchemy.url")
+    assert url
+
+    command.upgrade(cfg, "head")
+    command.downgrade(cfg, "0035")
+    assert _commercial_tables(url).isdisjoint({"documents", "sale_lines", "customer_zone_assignments"})
+    command.upgrade(cfg, "head")
+    assert _commercial_tables(url) == COMMERCIAL_TABLES
+
+    engine = create_engine(url)
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO commercial.document_types (source_name, source_name_key, document_class, sign, "
+                    "commercial_universe) VALUES ('FACTURA A', 'FACTURA A', 'INVOICE', 1, true)"
+                )
+            )
+            conn.execute(text("INSERT INTO users (email, full_name, role) VALUES ('m@districom.test', 'M', 'admin')"))
+            conn.execute(
+                text(
+                    "INSERT INTO import_files (original_filename, storage_key, size_bytes, sha256, uploaded_by) "
+                    "SELECT 'f.xls', 'k', 1, repeat('a', 64), id FROM users"
+                )
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO import_jobs (status, file_id, created_by) "
+                    "SELECT 'completed', f.id, f.uploaded_by FROM import_files f"
+                )
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO commercial.documents (document_type_id, source_type_name, point_of_sale, number, "
+                    "document_key, business_date, net_amount, total_amount, discount_amount, import_job_id, "
+                    "source_row_hash) SELECT t.id, 'FACTURA A', '0003', '00000001', 'FACTURA A|0003|00000001', "
+                    "'2026-10-23', 100, 121, 0, j.id, '\\x00' FROM commercial.document_types t, import_jobs j"
+                )
+            )
+        with pytest.raises(DBAPIError, match="downgrade refused"):
+            command.downgrade(cfg, "0036")
+        assert _commercial_tables(url) == COMMERCIAL_TABLES
+    finally:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE commercial.documents DISABLE TRIGGER trg_documents_no_delete"))
+            conn.execute(text("DELETE FROM commercial.documents"))
+            conn.execute(text("ALTER TABLE commercial.documents ENABLE TRIGGER trg_documents_no_delete"))
+            conn.execute(text("ALTER TABLE commercial.document_types DISABLE TRIGGER trg_document_types_no_delete"))
+            conn.execute(text("DELETE FROM commercial.document_types"))
+            conn.execute(text("ALTER TABLE commercial.document_types ENABLE TRIGGER trg_document_types_no_delete"))
+            conn.execute(text("TRUNCATE import_jobs, import_files, users CASCADE"))
         engine.dispose()
 
 

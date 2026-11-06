@@ -53,7 +53,7 @@ uv run python -m app.cli create-admin --email ... --name ...
 uv run python -m app.cli grant-module-role --email ... --module settlements --role operator
 uv run python -m app.cli grant-module-role --email ... --module settlements.employee_finance --role admin   # área protegida (ADR 010)
 uv run python -m app.cli reset-password --email ...   # contraseña temporal, se muestra una vez (ADR 015)
-uv run python -m app.cli imports analyze --file ... --email ... [--type ...]   # también confirm|reprocess --job, recover (docs/IMPORTS.md §2)
+uv run python -m app.cli imports analyze --file ... --email ... [--type ...] [--snapshot-date AAAA-MM-DD] [--scope FULL|FILTERED --scope-note ...]   # también confirm --job [--decision replace|additional --reason ...] (admin), reprocess --job, recover (docs/IMPORTS.md §2, §5.3)
 uv run python -m app.cli commercial seed-config   # configuración comercial confirmada; solo agrega lo que falta (DATA_MODEL §4.2)
 # Frontend
 cd frontend

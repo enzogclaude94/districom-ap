@@ -1,6 +1,6 @@
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -40,7 +40,9 @@ def record_issue(
         )
         .on_conflict_do_update(
             index_elements=["code", "dedupe_key"],
-            index_where=DataQualityIssue.status == "open",
+            # A literal, never a bound parameter: once psycopg prepares the statement (after a few executions) a
+            # parameter in the arbiter's WHERE no longer matches the partial unique index.
+            index_where=text("status = 'open'"),
             set_={
                 "occurrences": DataQualityIssue.occurrences + 1,
                 "last_seen_at": func.now(),
