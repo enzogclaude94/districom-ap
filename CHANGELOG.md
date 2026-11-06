@@ -4,6 +4,17 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Added — Servidor: W2‑B, compatibilidad de la aplicación en Windows (PR #75)
+- Tres jobs de CI nuevos sobre `windows-latest` con PostgreSQL 17.6 (ICU `es-AR`, logs de O7, bases descartables): backend (B‑1 a B‑6 y B‑10), frontend (B‑7) y E2E (B‑8 y B‑9, con la entrega parcial de boca repetida 10 veces). Los cinco jobs anteriores no cambian.
+- `.github/actions/windows-postgres` y `deploy/windows/compat/` (chequeos de orden de textos, zona horaria, arranque del backend y componentes reutilizables; smoke del frontend standalone).
+- `tzdata` como dependencia explícita del backend: Windows no trae base de zonas horarias.
+- `docs/WINDOWS_DEPLOYMENT.md §8.4`: resultados y lo que sigue PENDIENTE para el laboratorio y W2‑C.
+
+### Fixed — compatibilidad con Windows (autorizado por Enzo, 2026-11-06)
+- Plataforma: una conexión que el driver ve cerrada **sin SQLSTATE** y que SQLAlchemy invalidó (en Windows el FATAL de `idle_in_transaction_session_timeout` puede perderse con el socket) ya no es un 500: responde 503 `database_connection_lost`, que pide revisar el resultado antes de reintentar. 25P03 sigue siendo `database_timeout`; cualquier otro error sin SQLSTATE no cambia; sin reintentos; el log registra solo la clase del error.
+- Rendiciones › Bocas: el diálogo «Entregar efectivo» completa la caja principal si las cajas llegan después de abrirlo, sin pisar la elección del operador. Sin caja principal activa no preselecciona ninguna (antes tomaba la primera caja) y la validación sigue pidiendo una.
+- Tests del backend que asumían Linux: `SYSTEMROOT` en el chequeo de configuración, lectura en UTF‑8 y permisos de solo lectura.
+
 ### Changed — Servidor: cierre de W2‑A
 - `ROADMAP.md` y `docs/WINDOWS_DEPLOYMENT.md`:
   - W2‑A queda completada **como prueba de concepto y CI** (PR #72, merge `f2a7555`);
