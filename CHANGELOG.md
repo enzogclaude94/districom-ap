@@ -4,6 +4,16 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Added — Servidor: W2‑C1, base operativa en Windows
+- **`deploy/windows/ops/`** (`districom_ops`): solo biblioteca estándar, más `districom_backup` para las escrituras durables. Incluye:
+  - las carpetas de la instalación;
+  - la configuración de operación (`config.example.env`, solo nombres), que rechaza bases fuera de `127.0.0.1`, contraseñas débiles o de ejemplo, el mismo rol para la app y la operación y una LAN pública, y nombra cada problema sin mostrar su valor;
+  - logs JSON que enmascaran secretos, credenciales en URL y CUIT;
+  - el registro de operaciones de solo agregado, con un único final por operación;
+  - la ventana de mantenimiento con su operación dueña: el vencimiento genera una alerta, pero nunca la cierra ni habilita escrituras.
+- Job de CI «Windows ops (W2-C)», con ruff, formato, mypy estricto y los tests C1‑1 a C1‑3 en una tabla PASS/FAIL. Los demás jobs no cambian.
+- `ROADMAP.md` y `docs/WINDOWS_DEPLOYMENT.md §8.5`: W2‑C en curso por subetapas; C1 en revisión.
+
 ### Changed — Servidor: cierre de W2‑B
 - `ROADMAP.md` y `docs/WINDOWS_DEPLOYMENT.md`: W2‑B queda **DONE a nivel de compatibilidad y pruebas automatizadas** (PR #75, merge `b42efa0`, aprobada por Enzo el 2026-11-06), con B‑1 a B‑10 en PASS. Siguen PENDIENTES Windows 11 Pro real, servicios nativos, Defender, hardware y convivencia con Store Sys. ADR 016 sigue «Propuesto». W2‑C pasa a propuesta en subetapas, sin autorizar.
 
