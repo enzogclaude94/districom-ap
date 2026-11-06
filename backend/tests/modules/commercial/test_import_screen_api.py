@@ -195,3 +195,11 @@ def test_a_file_the_size_of_the_real_export_confirms_in_one_request(masters: Use
     # Before F1.3b every row's outcome was its own UPDATE and this took minutes. Generous bound: it guards against
     # the quadratic write coming back, not against a slow CI runner.
     assert elapsed < 60, elapsed
+
+
+def test_the_history_lists_one_modules_imports(masters: User, sign_in) -> None:  # type: ignore[no-untyped-def]
+    client = sign_in("operator", "operator")
+    job = upload(client, three_days(), scope="FULL")
+    commercial = client.get("/api/v1/imports", params={"module": "commercial"}).json()
+    assert job["id"] in {j["id"] for j in commercial["items"]}
+    assert client.get("/api/v1/imports", params={"module": "settlements"}).json()["total"] == 0

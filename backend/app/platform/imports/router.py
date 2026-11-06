@@ -153,10 +153,16 @@ def list_jobs(
     user: CurrentUser,
     status: Annotated[str | None, Query(max_length=30)] = None,
     import_type: Annotated[str | None, Query(max_length=80)] = None,
+    module: Annotated[
+        str | None, Query(max_length=40, description="Solo los tipos de ese módulo y los archivos sin tipo reconocido")
+    ] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> ImportJobPage:
     query = select(ImportJob).where(service.visible_jobs_filter(user))
+    if module:
+        keys = [entry.spec.key for entry in registry.all() if entry.module_key == module]
+        query = query.where(ImportJob.import_type.in_(keys) | ImportJob.import_type.is_(None))
     if status:
         query = query.where(ImportJob.status == status)
     if import_type:
