@@ -190,6 +190,7 @@ def test_seed_config_cli_only_adds_what_is_missing(capsys, db: Session) -> None:
     assert first["inserted"]["product_categories"] == 7
     assert first["inserted"]["price_lists"] == 5
     assert first["inserted"]["document_types"] == 9
+    assert first["inserted"]["settings"] == 1  # the articles master's `precio` → Lista 1
     assert cli(["commercial", "seed-config"]) == 0
     again = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert set(again["inserted"].values()) == {0}

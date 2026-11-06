@@ -22,7 +22,7 @@ DistriCom es una plataforma modular (ADR 006). Este roadmap tiene tres carriles:
 | Fase | Nombre | Estado | Depende de |
 |---|---|---|---|
 | 0 | Fundación y arquitectura | **DONE** (aprobada y mergeada el 2026-10-02, PR #1) | — |
-| 1 | Importación y maestros | **IN_PROGRESS** (F1.0, F1.1a y F1.1b DONE; F1.2 maestros en revisión) | 0 · PL‑1 · PL‑2a |
+| 1 | Importación y maestros | **IN_PROGRESS** (F1.0, F1.1a, F1.1b y F1.2 DONE; F1.3a importadores STORE SYS en revisión) | 0 · PL‑1 · PL‑2a |
 | 2 | Dashboard general | PLANNED | 1 |
 | 3 | Rutas y preventistas | PLANNED | 2 |
 | 4 | Cliente 360° y estados | PLANNED | 1 (puede ir en paralelo con 3) |
@@ -86,13 +86,21 @@ Cada etapa termina con un informe y la aprobación de Enzo. Despliegue, red, bac
 | F1.0 | Diseño técnico | **DONE** (aprobado 2026-10-30, decisiones D‑A…D‑K + ajustes 1–3) | — |
 | F1.1a | Documentación: ADR 014, `docs/IMPORTS.md`, DATA_MODEL, ARCHITECTURE, ROADMAP, PLAN, DATA_INTAKE, SECURITY | **DONE** (PR #56, aprobado 2026-11-02) | F1.0 |
 | F1.1b | Infraestructura de plataforma: archivos, jobs, lectores CSV/XLSX/XLS, staging, pipeline con lock y transacción, issues base, API y CLI | **DONE** (PR #69, aprobado y mergeado 2026-11-03; migración 0033) | F1.1a |
-| F1.2 | Maestros y configuración + núcleo de mappings: `customers`, `external_entity_mappings`, schema `commercial`, zonas, listas, categorías, tipos de comprobante, motivos, productos, familias, precios, seed controlado | IN_PROGRESS (PR en revisión; migraciones 0034–0035; S1–S3 confirmadas, MISA sin definir) | F1.1b |
-| F1.3 | Importadores STORE SYS (clientes, artículos, comprobantes, ventas) + pantalla Importaciones | PLANNED | F1.2 · muestra del maestro de artículos · muestra de ventas de varios días |
+| F1.2 | Maestros y configuración + núcleo de mappings: `customers`, `external_entity_mappings`, schema `commercial`, zonas, listas, categorías, tipos de comprobante, motivos, productos, familias, precios, seed controlado | **DONE** (PR #71, aprobado y mergeado 2026-11-05; migraciones 0034–0035; MISA sin definir) | F1.1b |
+| F1.3 | Importadores STORE SYS (clientes, artículos, comprobantes, ventas) + pantalla Importaciones | IN_PROGRESS (F1.3a backend en revisión: clientes, artículos, comprobantes y ventas cerrados contra exports reales; migraciones 0036–0037. F1.3b UI pendiente) | F1.2 |
 | F1.4 | Importador AXUM No Compra (motivo crudo + categoría, ocurrencias) | PLANNED | F1.3 · muestra del CSV |
 | F1.5 | Revisión manual de mappings (ambiguos, confirmación en lote, reasignación con motivo, re‑resolución) + pantalla Mapeos | PLANNED | F1.4 |
 | F1.6 | Calidad de datos completa + pantalla Calidad | PLANNED | F1.5 |
 | F1.7 | UI mínima de maestros (clientes, productos, zonas, vendedores, listas) | PLANNED | F1.6 |
 | F1.8 | Hardening: reproceso, recuperación, performance con volumen realista, generador de demo por pipeline con seed fijo, documentación e informe de fase | PLANNED | F1.7 |
+
+**Riesgo registrado para F1.3b (medición, no bloquea F1.3a):** en la validación local con el export real, confirmar 3132 líneas de ventas tardó ≈35 s, y el export completo tiene 7414. F1.3b tiene que:
+- probar upload, analyze y confirm con el archivo completo;
+- verificar el timeout HTTP;
+- verificar la experiencia del usuario;
+- medir analyze y confirm por separado.
+
+No se agrega Celery, Redis, jobs externos ni arquitectura nueva sin una decisión aparte.
 
 Cada subfase es un PR propio que espera la aprobación de Enzo antes de la siguiente. Las migraciones se numeran desde el `main` vigente al abrir cada PR.
 
