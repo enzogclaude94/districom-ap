@@ -1,6 +1,6 @@
 # PLAN — DistriCom · Plataforma de Inteligencia Comercial
 
-> Estado del documento: **v0.5 — Fase 0 DONE; plataforma modular DONE; Fase 1 de Comercial IN_PROGRESS (F1.0, F1.1a, F1.1b y F1.2 aprobados, F1.3a en revisión)**
+> Estado del documento: **v0.5 — Fase 0 DONE; plataforma modular DONE; Fase 1 de Comercial IN_PROGRESS (F1.0, F1.1a, F1.1b, F1.2 y F1.3a aprobados, F1.3b en revisión)**
 > Última actualización: 2026-10-30 (secciones de Comercial; las de Rendiciones las mantiene su hilo)
 > Fuente de requisitos: prompt maestro adjunto por Enzo (`message.md`, 165 secciones).
 
@@ -269,8 +269,8 @@ Estado: **IN_PROGRESS.** Diseño F1.0 aprobado por Enzo el 2026-10-30 con las de
 | F1.1a documentación | Aprobada y mergeada (PR #56, 2026-11-02) |
 | F1.1b infraestructura de importación | Aprobada y mergeada (PR #69, 2026-11-03) |
 | F1.2 maestros, configuración y mappings | Aprobada y mergeada (PR #71, 2026-11-05) |
-| F1.3a importadores STORE SYS (backend) | En revisión: clientes, artículos, comprobantes y ventas (por `codigo` y `cod_cliente` exactos) cerrados contra exports reales; identidad semántica de imports |
-| F1.3b pantalla mínima de Importaciones | Pendiente (PR aparte) |
+| F1.3a importadores STORE SYS (backend) | DONE (PR #73, 2026-11-06): clientes, artículos, comprobantes y ventas (por `codigo` y `cod_cliente` exactos) cerrados contra exports reales; identidad semántica de imports |
+| F1.3b pantalla mínima de Importaciones | En revisión: subir, revisar, confirmar, descartar, decisión de admin e historial; confirm de 7414 líneas en 4,7 s |
 | F1.4 – F1.8 | Pendientes de aprobación sucesiva |
 
 **Confirmaciones de ADR 014 §3:** Enzo respondió S1–S8 el 2026-11-01; ninguna afecta F1.1b y se vuelcan en los documentos de F1.2/F1.3, que las aplican. Lista original:

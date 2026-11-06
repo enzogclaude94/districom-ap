@@ -4,6 +4,23 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Added — F1.3b: pantalla Importaciones de Comercial
+- **`/comercial/datos/importaciones`** (Datos › Importaciones, ya habilitado en el menú):
+  - **Subir:** archivo de STORE SYS, tipo (o detección automática), día de la foto para los maestros y alcance para ventas (completo, o filtrado con sus filtros). Sin alcance declarado, se trata como filtrado.
+  - **Historial:** fecha, archivo, reporte, usuario, estado, filas y resultado.
+- **Detalle `/comercial/datos/importaciones/{id}`**, en lenguaje de negocio:
+  - qué encontró DistriCom: período y días, alcance, filas por estado y el resumen de cada reporte (artículos o clientes que no están en el maestro, vendedores sin vincular, listas desconocidas, zonas nuevas, precios, tipos de comprobante);
+  - qué requiere atención, con sus filas (número, estado, código y observaciones; nunca las celdas del archivo);
+  - qué pasa si se confirma, incluido el reemplazo previsto de ventas;
+  - confirmar o descartar, la decisión de un admin con motivo obligatorio cuando una venta queda bloqueada, y el resultado.
+  - La confirmación muestra su avance, no se puede mandar dos veces y, si el servidor no responde, avisa que puede haberse cargado igual.
+- **API** (`docs/IMPORTS.md §8`): `GET /imports/{id}/messages` (mensajes del análisis agrupados con su cantidad de filas), `GET /imports/{id}/rows?code=`, `GET /imports?module=`. El preview de ventas suma conteos de artículos desconocidos, clientes sin resolver, vendedores sin vincular y listas desconocidas. `apiFetch` acepta `FormData`.
+- **Fix de rendimiento (plataforma):** confirmar el export real de ventas (7414 líneas) tardaba 206 s porque el resultado de cada fila se escribía con su propio `UPDATE`, cuadrático en las filas. Ahora es un `UPDATE` masivo por clave primaria y las ventas se insertan con un solo flush. Por la UI: subir y analizar 2,9 s, confirmar 4,7 s. No cambia ninguna regla de los importadores.
+- **Tests:**
+  - backend: `test_import_screen_api.py` (resumen sin valores de filas, roles por paso, doble confirmación, archivo de 7500 líneas, historial por módulo);
+  - frontend: `tests/imports.test.tsx` (10 casos);
+  - E2E: `e2e/imports.spec.ts` (maestro, ventas completas, filtrado bloqueado con decisión de admin, archivo repetido, archivo que no es un reporte, historial), con archivos sintéticos de `e2e/store_sys_files.py`.
+
 ### Changed — F1.3a: ventas cerradas contra el export real de varios días
 - **`commercial.store_sys.sales_lines` cerrado** contra el export de octubre 2026 con `codigo` y `cod_cliente` (7414 líneas, 27 días; solo faltan los domingos). Contrato nuevo: `codigo, descripcion, cantidad, rubro, cod_cliente, cliente, vendedor, zona, fecha, lista_de_precios`.
 - **Cliente por código exacto** (`cod_cliente` → mapping `customer/STORE_SYS/customer` del maestro). Se quitó la propuesta por nombre: ya no existen el mapping `customer_name` ni el issue `commercial.sale_line.customer_pending`. Un código sin mapping deja la línea pendiente con `commercial.customer.unresolved_code`. El nombre se guarda solo como fuente.

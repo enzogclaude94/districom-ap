@@ -460,13 +460,22 @@ El admin de plataforma es admin del módulo (ARCHITECTURE §8). Cada tipo toma l
 |---|---|---|
 | `GET /types` | `viewer` | Tipos visibles, con `can_import` |
 | `POST /` (multipart `file`, `import_type`, `snapshot_date`, `scope`, `scope_note` opcionales) | `operator` | Sube, detecta y analiza; 201 con el job (`pending`, `failed` o `duplicate`). Lo declarado queda en `metadata.declared` y lo hereda un reproceso |
-| `GET /` (`status`, `import_type`, `limit`, `offset`) | `viewer` | Jobs visibles |
-| `GET /{id}`, `GET /{id}/rows` (`status`), `GET /{id}/issues` | `viewer` | Detalle con preview y contadores, filas del staging, issues |
+| `GET /` (`status`, `import_type`, `module`, `limit`, `offset`) | `viewer` | Jobs visibles; `module` deja solo los tipos de ese módulo y los archivos sin tipo reconocido (F1.3b) |
+| `GET /{id}`, `GET /{id}/rows` (`status`, `code`), `GET /{id}/issues` | `viewer` | Detalle con preview y contadores, filas del staging (`code`: solo las que tienen ese mensaje), issues |
+| `GET /{id}/messages` | `viewer` | Mensajes del análisis agrupados por código, severidad y columna, con la cantidad de filas (F1.3b). Solo textos del adaptador, nunca valores de las filas |
 | `POST /{id}/confirm`, `POST /{id}/cancel` | `operator` | Confirma o descarta un job `pending` (409 `import_job_not_pending` si no lo está). 409 `import_decision_required` si el adaptador no puede probar qué reemplaza |
 | `POST /{id}/confirm` con `{decision, reason}` | `admin` | Responde una confirmación bloqueada (§5.3); `can_decide` en el detalle |
 | `POST /{id}/reprocess` | `admin` | Job nuevo sobre el mismo archivo |
 
 Errores: 413 `request_too_large` (supera `UPLOAD_MAX_SIZE_MB`), 422 `invalid_extension`, `invalid_scope`, `snapshot_in_future`, `decision_reason_required`, 409 `import_in_progress`, `import_decision_required`, `import_decision_not_needed`.
+
+**Pantalla Importaciones (F1.3b)**, `/comercial/datos/importaciones`:
+- Subir: archivo, tipo (o detección automática), día de la foto (maestros) y alcance (ventas: completo o filtrado con la descripción de los filtros). Un alcance sin declarar se trata como filtrado: nunca reemplaza solo.
+- Revisar (`/comercial/datos/importaciones/{id}`): qué encontró DistriCom en palabras de negocio (período, días, alcance, filas por estado, resumen del adaptador), qué requiere atención (`/messages`) con sus filas (número, estado, código y observaciones; nunca las celdas del archivo) y qué pasa si se confirma (para ventas, el reemplazo previsto).
+- Confirmar o descartar (`operator`); una venta bloqueada la decide un `admin` con `replace` o `additional` y motivo obligatorio. La confirmación es un pedido síncrono: mientras corre, el botón queda deshabilitado y la pantalla muestra el avance; si no llega respuesta (sin conexión, 502, 503 o 504) avisa que puede haberse cargado igual y vuelve a leer el estado. El backend rechaza una segunda confirmación (409 `import_job_not_pending`).
+- Historial: fecha, archivo, reporte, usuario, estado, filas y resultado, con acceso al detalle.
+
+**Rendimiento medido con el export real de ventas de octubre (7414 líneas, local, a través del proxy de Next.js):** subir y analizar 2,9 s; confirmar 4,7 s. Antes de F1.3b la confirmación tardaba 206 s porque la plataforma escribía el resultado de cada fila con su propio `UPDATE` ORM, cuadrático en las filas; ahora es un `UPDATE` masivo por clave primaria. Un test de 7500 líneas por la API cuida que no vuelva.
 
 ## 9. Seguridad y privacidad
 
