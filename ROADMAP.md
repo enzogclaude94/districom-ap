@@ -62,9 +62,9 @@ Cada fase empieza solo con aprobación explícita de Enzo y termina con un infor
 | S4 | Producción de Rendiciones en paralelo con el método actual | PLANNED | S3 |
 | S5 | Endurecimiento y crecimiento (Comercial en el mismo servidor) | PLANNED | S4 |
 | W1 | ADR 016 (Propuesto): despliegue nativo en Windows 11 Pro, en el mismo equipo que Store Sys; plan `docs/WINDOWS_DEPLOYMENT.md` | **DONE** (PR #70, merge `7105fc2`, 2026-11-04; solo documentación). El ADR 016 sigue «Propuesto» hasta validar la infraestructura Windows | S2 |
-| W2‑A | Prueba de concepto aislada de backups físicos, WAL, PITR y restauración en Windows (`deploy/windows/backup/`, job de CI en Windows) | IN REVIEW (autorizada por Enzo el 2026-11-04; datos ficticios; lo no reproducible en CI queda PENDIENTE) | W1 |
-| W2‑B | Pruebas automatizadas de los componentes compatibles con Windows | PLANNED | W2‑A |
-| W2‑C | Resto de la infraestructura Windows (operación, instalación, servicios, firewall, cierre de jornada, suite de aceptación) | PLANNED: se planifica solo después de validar W2‑A. Requisitos obligatorios antes del cierre de jornada: bloqueo de escrituras efectivo y reversible, y comprobación correcta del WAL y del apagado (`docs/WINDOWS_DEPLOYMENT.md §6`) | W2‑A · W2‑B |
+| W2‑A | Prueba de concepto aislada de backups físicos, WAL, PITR y restauración en Windows (`deploy/windows/backup/`, job de CI en Windows) | DONE como prueba de concepto y CI (PR #72, merge `f2a7555`, 2026-11-05). Las pruebas de laboratorio y producción siguen PENDIENTES y son condición previa a producción (`docs/WINDOWS_DEPLOYMENT.md §8.2`) | W1 |
+| W2‑B | Pruebas automatizadas de los componentes compatibles con Windows | PLANNED: propuesta en preparación; no empieza sin autorización | W2‑A |
+| W2‑C | Resto de la infraestructura Windows (operación, instalación, servicios, firewall, cierre de jornada, suite de aceptación) | PLANNED: se planifica solo después de validar W2‑A. Requisitos obligatorios antes del cierre de jornada: bloqueo de escrituras efectivo y reversible, y comprobación correcta del WAL y del apagado (`docs/WINDOWS_DEPLOYMENT.md §6`). Requisitos de backups para el desarrollo posterior en `§8.3` | W2‑A · W2‑B |
 
 Desde el 2026-11-03 la plataforma definitiva es **Windows 11 Pro nativo** (ADR 016, propuesto): S3 se hará sobre ella después de W2‑C. El diseño Linux (ADR 013) se conserva hasta validar la alternativa Windows.
 
