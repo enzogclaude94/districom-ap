@@ -229,3 +229,263 @@ jobs:
           name: w2a-results
           path: deploy/windows/backup/test-results
           retention-days: 30
+
+  # --- W2-B (ADR 016, proposed): the application as it is, on Windows ----------------------------------------------
+  # Informative for main's branch protection (Enzo, 2026-11-06), but W2-B is only approved with all three in green.
+  # Windows Server runners, PostgreSQL 17 from the official binaries and fictitious data in disposable databases.
+  # What needs Windows 11 Pro, Windows services or real hardware stays PENDIENTE (deploy/windows/compat/README.md).
+  # git keeps LF on checkout: the repository's files are LF and prettier checks that (W2-B finding).
+
+  windows-compat-backend:
+    name: Windows compatibility - backend (W2-B)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      PG_VERSION: "17.6"
+      CADDY_VERSION: "2.10.2"
+      TEST_DATABASE_URL: postgresql+psycopg://districom:districom@127.0.0.1:5432/districom_test
+      DISTRICOM_COMPAT_DATABASE_URL: postgresql+psycopg://districom:districom@127.0.0.1:5432/districom_compat
+      DISTRICOM_COMPAT_RESULTS: ${{ github.workspace }}/w2b-results
+    steps:
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - run: uv python install ${{ env.PYTHON_VERSION }}
+      - uses: ./.github/actions/windows-postgres
+        with:
+          version: ${{ env.PG_VERSION }}
+          databases: districom_test districom_compat districom_migrations
+      - name: Install Caddy ${{ env.CADDY_VERSION }} (checksum verified)
+        run: |
+          $base = "https://github.com/caddyserver/caddy/releases/download/v$env:CADDY_VERSION"
+          $name = "caddy_$($env:CADDY_VERSION)_windows_amd64.zip"
+          Invoke-WebRequest "$base/$name" -OutFile "$env:RUNNER_TEMP\$name"
+          Invoke-WebRequest "$base/caddy_$($env:CADDY_VERSION)_checksums.txt" -OutFile "$env:RUNNER_TEMP\caddy-checksums.txt"
+          $line = Get-Content "$env:RUNNER_TEMP\caddy-checksums.txt" | Where-Object { $_ -match "^[0-9a-f]{128}\s+$([regex]::Escape($name))\s*$" }
+          $expected = if ($line) { ($line -split "\s+")[0] } else { "" }
+          $actual = (Get-FileHash "$env:RUNNER_TEMP\$name" -Algorithm SHA512).Hash.ToLower()
+          if (-not $expected -or $expected -ne $actual) { throw "caddy checksum mismatch: '$expected' vs '$actual'" }
+          Expand-Archive "$env:RUNNER_TEMP\$name" -DestinationPath "$env:RUNNER_TEMP\caddy"
+          & "$env:RUNNER_TEMP\caddy\caddy.exe" version
+          "DISTRICOM_CADDY=$env:RUNNER_TEMP\caddy\caddy.exe" >> $env:GITHUB_ENV
+      - name: Install backend
+        working-directory: backend
+        run: uv sync --frozen
+      - name: B-3 quality (ruff, format, mypy, import boundaries)
+        id: b3
+        if: success() || failure()
+        working-directory: backend
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          uv run ruff check .
+          uv run ruff format --check .
+          uv run mypy
+          uv run lint-imports
+      - name: B-1 backend test suite
+        id: b1
+        if: success() || failure()
+        working-directory: backend
+        run: |
+          $sw = [Diagnostics.Stopwatch]::StartNew()
+          uv run pytest
+          $code = $LASTEXITCODE
+          "B1_SECONDS=$([int]$sw.Elapsed.TotalSeconds)" >> $env:GITHUB_ENV
+          exit $code
+      - name: B-2 migrations from empty, down to base and up again, and models == migrations
+        id: b2
+        if: success() || failure()
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql+psycopg://districom:districom@127.0.0.1:5432/districom_migrations
+          SECRET_KEY: ci-only-secret-key-not-used-anywhere-else-0123456789
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          uv run alembic upgrade head
+          uv run alembic downgrade base
+          uv run alembic upgrade head
+          uv run alembic check
+      - name: B-4, B-5, B-6, B-10 compatibility checks
+        id: compat
+        if: success() || failure()
+        working-directory: deploy/windows/compat
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          uv run --project ../../../backend --frozen ruff check .
+          uv run --project ../../../backend --frozen ruff format --check .
+          $env:MYPYPATH = "../../../backend"
+          uv run --project ../../../backend --frozen mypy --strict --config-file ../../../backend/pyproject.toml .
+          uv run --project ../../../backend --frozen pytest -v
+      - name: W2-B results (backend)
+        if: always()
+        env:
+          B1: ${{ steps.b1.outcome }}
+          B2: ${{ steps.b2.outcome }}
+          B3: ${{ steps.b3.outcome }}
+        run: |
+          function Result($outcome) { switch ($outcome) { "success" { "PASS" } "failure" { "FAIL" } default { "NO CORRIÓ ($outcome)" } } }
+          $md = @(
+            "## W2-B: backend en Windows",
+            "",
+            "- $env:DISTRICOM_PG_VERSION",
+            "",
+            "| Criterio | Descripción | Resultado |",
+            "|---|---|---|",
+            "| B-1 | Suite completa del backend (unit e integración), $env:B1_SECONDS s | **$(Result $env:B1)** |",
+            "| B-2 | Migraciones: upgrade, downgrade base, upgrade y alembic check | **$(Result $env:B2)** |",
+            "| B-3 | ruff, ruff format, mypy estricto y límites de importación | **$(Result $env:B3)** |",
+            ""
+          )
+          $md += if (Test-Path "$env:DISTRICOM_COMPAT_RESULTS\w2b-compat.md") { Get-Content "$env:DISTRICOM_COMPAT_RESULTS\w2b-compat.md" } else { "Chequeos B-4, B-5, B-6 y B-10: sin resultados" }
+          $md | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+          $md
+      - name: Stop PostgreSQL
+        if: always()
+        run: if ($env:DISTRICOM_PG_BIN) { & "$env:DISTRICOM_PG_BIN\pg_ctl.exe" -D $env:DISTRICOM_PG_DATA -m fast -w stop *> $null; exit 0 }
+
+  windows-compat-frontend:
+    name: Windows compatibility - frontend (W2-B)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: frontend
+    steps:
+      - run: git config --global core.autocrlf false
+        working-directory: .
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: frontend/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: B-7 install, lint, format, types, tests and build
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $sw = [Diagnostics.Stopwatch]::StartNew()
+          pnpm install --frozen-lockfile
+          pnpm lint
+          pnpm format:check
+          pnpm typecheck
+          pnpm test
+          pnpm build
+          "B-7: PASS in $([int]$sw.Elapsed.TotalSeconds) s" | Tee-Object -Append -FilePath $env:GITHUB_STEP_SUMMARY
+
+  windows-compat-e2e:
+    name: Windows compatibility - E2E (W2-B)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      PG_VERSION: "17.6"
+      # The same fictitious users as the Linux E2E job.
+      DATABASE_URL: postgresql+psycopg://districom:districom@127.0.0.1:5432/districom
+      SECRET_KEY: ci-only-secret-key-not-used-anywhere-else-0123456789
+      COOKIE_SECURE: "false"
+      E2E_ADMIN_EMAIL: e2e-admin@districom.local
+      E2E_ADMIN_PASSWORD: e2e-password-123
+      E2E_VIEWER_EMAIL: e2e-viewer@districom.local
+      E2E_VIEWER_PASSWORD: viewer-password-123
+      E2E_OPERATOR_EMAIL: e2e-operator@districom.local
+      E2E_OPERATOR_PASSWORD: operator-password-123
+      E2E_CASH_VIEWER_EMAIL: e2e-cash-viewer@districom.local
+      E2E_CASH_VIEWER_PASSWORD: cash-viewer-password-123
+    steps:
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: frontend/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - uses: ./.github/actions/windows-postgres
+        with:
+          version: ${{ env.PG_VERSION }}
+          databases: districom
+      - name: Prepare backend
+        # The same commands as the Linux E2E job, in the bash that ships with Git for Windows.
+        shell: bash
+        working-directory: backend
+        run: |
+          uv python install ${{ env.PYTHON_VERSION }}
+          uv sync --frozen
+          uv run alembic upgrade head
+          echo "$E2E_ADMIN_PASSWORD" | uv run python -m app.cli create-admin --email "$E2E_ADMIN_EMAIL" --name "Admin E2E"
+          uv run python -m app.cli grant-module-role --email "$E2E_ADMIN_EMAIL" --module settlements.employee_finance --role admin
+          echo "$E2E_VIEWER_PASSWORD" | uv run python -m app.cli create-viewer --email "$E2E_VIEWER_EMAIL" --name "Viewer E2E"
+          uv run python -m app.cli grant-module-role --email "$E2E_VIEWER_EMAIL" --module commercial --role viewer
+          echo "$E2E_OPERATOR_PASSWORD" | uv run python -m app.cli create-viewer --email "$E2E_OPERATOR_EMAIL" --name "Operador E2E"
+          uv run python -m app.cli grant-module-role --email "$E2E_OPERATOR_EMAIL" --module settlements --role operator
+          echo "$E2E_CASH_VIEWER_PASSWORD" | uv run python -m app.cli create-viewer --email "$E2E_CASH_VIEWER_EMAIL" --name "Lector Cajas E2E"
+          uv run python -m app.cli grant-module-role --email "$E2E_CASH_VIEWER_EMAIL" --module settlements --role viewer
+      - name: Prepare frontend
+        working-directory: frontend
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          pnpm install --frozen-lockfile
+          pnpm exec playwright install --with-deps chromium
+      - name: B-9 Playwright (critical flows, every spec, no filter)
+        id: b9
+        working-directory: frontend
+        run: |
+          $sw = [Diagnostics.Stopwatch]::StartNew()
+          pnpm e2e
+          $code = $LASTEXITCODE
+          "B9_SECONDS=$([int]$sw.Elapsed.TotalSeconds)" >> $env:GITHUB_ENV
+          exit $code
+      - name: B-8 production frontend (standalone) through node server.js
+        id: b8
+        if: success() || failure()
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          Push-Location frontend
+          $env:NEXT_OUTPUT = "standalone"
+          $env:API_INTERNAL_URL = "http://127.0.0.1:8200"
+          pnpm build
+          Pop-Location
+          uv run --project backend --frozen python deploy/windows/compat/frontend_standalone_smoke.py frontend backend 8200 3200 w2b-results
+      - name: W2-B results (E2E)
+        if: always()
+        env:
+          B8: ${{ steps.b8.outcome }}
+          B9: ${{ steps.b9.outcome }}
+        run: |
+          function Result($outcome) { switch ($outcome) { "success" { "PASS" } "failure" { "FAIL" } default { "NO CORRIÓ ($outcome)" } } }
+          $md = @(
+            "## W2-B: E2E y frontend de producción en Windows",
+            "",
+            "| Criterio | Descripción | Resultado |",
+            "|---|---|---|",
+            "| B-8 | Frontend standalone con node server.js: páginas, headers y rewrite de /api | **$(Result $env:B8)** |",
+            "| B-9 | Playwright, todos los flujos críticos, $env:B9_SECONDS s | **$(Result $env:B9)** |",
+            ""
+          )
+          $md | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+          $md
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report-windows
+          path: frontend/playwright-report
+          retention-days: 7
+      - name: Stop PostgreSQL
+        if: always()
+        run: if ($env:DISTRICOM_PG_BIN) { & "$env:DISTRICOM_PG_BIN\pg_ctl.exe" -D $env:DISTRICOM_PG_DATA -m fast -w stop *> $null; exit 0 }
