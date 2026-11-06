@@ -4,6 +4,10 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Fixed — Servidor: A‑11 de W2‑A dependía de una ventana fija de 8 s
+- `deploy/windows/backup/tests/integration/test_crash.py`: el corte abrupto ocurre recién cuando el repositorio **muestra** transacciones confirmadas ya archivadas y hay otras confirmadas en un segmento todavía abierto, sin depender de segundos fijos. Las aserciones de A‑11 no cambian; se agrega que exista al menos una confirmada sin archivar en el momento del corte. Nuevo test de regresión con un archivador 3 s más lento por segmento, que reproduce la falla del CI de `main` del 2026-11-06 (371 confirmadas y 0 archivadas).
+- `tests/integration/support.py`: cuando una espera de archivado vence, el error incluye `pg_stat_archiver` y las líneas del log del servidor sobre archivado y errores, para distinguir un archivador lento de uno que falla.
+
 ### Added — Servidor: W2‑B, compatibilidad de la aplicación en Windows (PR #75)
 - Tres jobs de CI nuevos sobre `windows-latest` con PostgreSQL 17.6 (ICU `es-AR`, logs de O7, bases descartables): backend (B‑1 a B‑6 y B‑10), frontend (B‑7) y E2E (B‑8 y B‑9, con la entrega parcial de boca repetida 10 veces). Los cinco jobs anteriores no cambian.
 - `.github/actions/windows-postgres` y `deploy/windows/compat/` (chequeos de orden de textos, zona horaria, arranque del backend y componentes reutilizables; smoke del frontend standalone).
