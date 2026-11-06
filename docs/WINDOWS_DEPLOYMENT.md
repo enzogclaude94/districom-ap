@@ -173,7 +173,7 @@ Si un paso falla antes del 4, la app vuelve a quedar disponible. Si falla despu�
 |---|---|---|---|
 | **W1** | ADR 016 (Propuesto) y este plan | CI (documentación) | DONE (PR #70, 2026-11-04) |
 | **W2‑A** | Prueba de concepto aislada de backups físicos, WAL, PITR y restauración (`deploy/windows/backup/`) | GitHub Actions (Windows); lo no reproducible queda PENDIENTE | DONE como prueba de concepto y CI (PR #72, 2026-11-05); lo de laboratorio sigue PENDIENTE: ver §8.2 |
-| **W2‑B** | Pruebas automatizadas de los componentes compatibles con Windows (backend en Windows, orden de textos, frontend) | GitHub Actions (Windows) | Por definir |
+| **W2‑B** | Pruebas automatizadas de los componentes compatibles con Windows (backend en Windows, orden de textos, frontend) | GitHub Actions (Windows) | En revisión (PR #75): B‑1 a B‑10 en PASS en CI; lo de laboratorio sigue PENDIENTE: ver §8.4 |
 | **W2‑C** | El resto (operación, `install.ps1`, servicios, firewall, cierre de jornada, suite de aceptación) | CI y laboratorio Windows 11 Pro | Se planifica solo después de validar W2‑A |
 | W3 | Laboratorio Windows 11 Pro: suite completa y pruebas pendientes | PC de laboratorio (no el servidor) | Sin laboratorio confirmado |
 | W4 | Preparación del equipo: RAM, RAID, SMART, Windows 11 Pro, BitLocker, UPS | Servidor | No autorizado |
@@ -246,6 +246,30 @@ Enzo los fijó el 2026-11-05 al cerrar W2‑A. Se suman a los dos requisitos del
    - definir por escrito qué condiciones dan cada resultado;
    - informar siempre el **último punto realmente recuperable** (LSN, hora y timeline);
    - distinguirlo del punto pedido y del último WAL archivado.
+
+### 8.4 W2‑B: compatibilidad de la aplicación
+- **Estado (2026-11-06):** implementada en el PR #75, sin merge hasta la aprobación de Enzo. ADR 016 sigue «Propuesto».
+- **Dónde está:** tres jobs de CI sobre `windows-latest` con PostgreSQL 17.6 (ICU `es-AR`, logs de O7, bases descartables y datos ficticios), la acción `.github/actions/windows-postgres` y los chequeos de `deploy/windows/compat/` (README). Los cinco jobs anteriores no cambian.
+- **Resultados en CI (B‑1 a B‑10 en PASS):**
+
+  | Criterio | Qué | Resultado |
+  |---|---|---|
+  | B‑1 | Suite completa del backend (1965 tests) | PASS |
+  | B‑2 | `upgrade head`, `downgrade base`, `upgrade head`, `alembic check` | PASS |
+  | B‑3 | `ruff`, formato, `mypy` estricto, `lint-imports` | PASS |
+  | B‑4 | Orden ICU `es-AR` en los listados que ordena el backend (difiere de en‑US en la ñ) | PASS |
+  | B‑5 | `America/Argentina/Buenos_Aires` con `tzdata` explícito (Windows no trae base de zonas) | PASS |
+  | B‑6 | uvicorn en modo producción: health, login, cookies, parada ordenada, config insegura rechazada, logs sin secretos | PASS |
+  | B‑7 | Frontend: instalación, lint, formato, tipos, 377 tests y build | PASS |
+  | B‑8 | Frontend standalone con `node server.js`: headers, CSP y rewrite de `/api` | PASS |
+  | B‑9 | Los 107 flujos E2E, más la entrega parcial de boca repetida 10 veces | PASS |
+  | B‑10 | `verify.sql`, logs seguros de O7 y Caddyfile en modo interno | PASS |
+
+- **Incompatibilidades encontradas y corregidas (autorización de Enzo, 2026-11-06):**
+  - **Plataforma:** en Windows, el FATAL de `idle_in_transaction_session_timeout` puede perderse al cerrarse el socket; el driver ve la conexión cerrada sin SQLSTATE y el backend respondía un 500. Ahora ese caso verificable (sin SQLSTATE y con la conexión invalidada) es 503 `database_connection_lost`, que pide revisar el resultado antes de reintentar. 25P03 sigue siendo `database_timeout`; no hay reintentos automáticos (`docs/SECURITY.md`).
+  - **Rendiciones:** el diálogo «Entregar efectivo» tomaba la caja receptora solo al abrirse; si las cajas llegaban después, el campo quedaba vacío. Ahora completa la caja principal cuando llega, sin pisar una elección del operador; sin caja principal activa no preselecciona ninguna.
+  - Ajustes solo de tests para Windows: variable `SYSTEMROOT`, lectura en UTF‑8 y permisos de solo lectura.
+- **PENDIENTE (no se puede dar PASS en CI):** Windows 11 Pro (los runners son Windows Server), servicios de Windows (PostgreSQL como servicio; backend, frontend y Caddy con WinSW: W2‑C), Defender, rendimiento en el hardware real y convivencia con Store Sys. Caddy con el módulo de Cloudflare se valida en W2‑C o en el laboratorio.
 
 ## 9. Pendientes que no dependen del desarrollo
 - Requisitos de Store Sys (RAM, disco, puertos, su base de datos, cómo se detiene).

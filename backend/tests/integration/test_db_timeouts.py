@@ -2,6 +2,8 @@
 connections only, a statement or a lock over them is a standard 503 and never an opaque 500, and the connection is
 reusable afterwards."""
 
+import logging
+import sys
 import time
 from collections.abc import Callable, Iterator
 from typing import Annotated, Any
@@ -15,7 +17,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.core.errors import database_timeout
+from app.core.errors import CONNECTION_LOST, database_timeout
 from app.db.session import get_db, get_engine
 from tests.conftest import BACKEND_DIR
 
@@ -131,11 +133,57 @@ def test_a_transaction_left_idle_is_closed_by_the_server_and_the_pool_recovers(m
         session.execute(text("SELECT 1"))
     timeout = database_timeout(closed.value)  # answered as a standard 503, like the other two limits
     assert timeout is not None
-    assert (timeout.status_code, timeout.code) == (503, "database_timeout")
+    assert (timeout.status_code, timeout.code) == (503, _idle_code(closed.value))
     sessions.close()
     with get_engine().connect() as conn:  # a broken connection is never handed out again
         assert conn.execute(text("SELECT 1")).scalar_one() == 1
         assert _limits(conn) == LIMITS
+
+
+def _idle_code(error: DBAPIError) -> str:
+    """Linux: the server's FATAL arrives with 25P03. Windows: it can be lost with the socket, and then the driver only
+    sees the connection closed (W2-B, ADR 016); either way the answer is a temporary 503."""
+    if sys.platform != "win32":
+        assert getattr(error.orig, "sqlstate", None) == "25P03"
+        return "database_timeout"
+    if getattr(error.orig, "sqlstate", None) == "25P03":
+        return "database_timeout"
+    assert error.connection_invalidated
+    return CONNECTION_LOST[0]
+
+
+def test_an_idle_transaction_closed_by_the_server_is_a_temporary_503_through_the_api(
+    client: TestClient, route: Callable[..., None], caplog: pytest.LogCaptureFixture
+) -> None:
+    secret = "w2b-value-never-logged"
+
+    def idle(db: Annotated[Session, Depends(get_db)]) -> dict[str, str]:
+        db.execute(text("SET LOCAL idle_in_transaction_session_timeout = '100ms'"))
+        time.sleep(0.5)
+        db.execute(text("SELECT :value"), {"value": secret})
+        return {}
+
+    route("/api/v1/_test/idle", idle)
+    with caplog.at_level(logging.WARNING, logger="app.core.errors"):
+        response = client.get("/api/v1/_test/idle", headers={"X-Request-ID": "idle-test-01"})
+    assert response.status_code == 503
+    body = response.json()
+    expected = {
+        "database_timeout": "La operación tardó demasiado y se canceló. Probá de nuevo en unos minutos.",
+        CONNECTION_LOST[0]: CONNECTION_LOST[1],
+    }
+    assert body["code"] in expected if sys.platform == "win32" else body["code"] == "database_timeout"
+    assert body == {
+        "code": body["code"],
+        "message": expected[body["code"]],
+        "details": None,
+        "request_id": "idle-test-01",
+    }
+    assert response.headers["Cache-Control"] == "no-store"
+    logged = [record for record in caplog.records if record.name == "app.core.errors"]
+    assert [record.getMessage() for record in logged] == [body["code"]]
+    assert all(secret not in str(record.__dict__) for record in logged)
+    _the_pool_is_healthy(client)
 
 
 def _the_pool_is_healthy(client: TestClient) -> None:

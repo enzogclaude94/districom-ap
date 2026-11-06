@@ -9,6 +9,7 @@ import hashlib
 import io
 import json
 import logging
+import sys
 import threading
 import time
 from datetime import date, timedelta
@@ -222,7 +223,12 @@ def test_originals_are_stored_read_only_and_never_change(db: Session, operator: 
     assert path.parent == settings.upload_dir
     assert path.read_bytes() == data
     assert file.sha256 == hashlib.sha256(data).hexdigest()
-    assert path.stat().st_mode & 0o777 == 0o440
+    if sys.platform == "win32":
+        # Windows has only the read-only attribute: nobody may write it. Who may read it is the upload folder's NTFS
+        # permission, set by the Windows install (W2-B finding for W2-C, ADR 016).
+        assert path.stat().st_mode & 0o222 == 0
+    else:
+        assert path.stat().st_mode & 0o777 == 0o440
 
 
 # --- confirmation, idempotency, rollback --------------------------------------------------------------------------
