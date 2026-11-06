@@ -4,6 +4,10 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Fixed — Servidor: A‑11 de W2‑A dependía de una ventana fija de 8 s
+- `deploy/windows/backup/tests/integration/test_crash.py`: el corte abrupto ocurre recién cuando el repositorio **muestra** transacciones confirmadas ya archivadas y hay otras confirmadas en un segmento todavía abierto, sin depender de segundos fijos. Las aserciones de A‑11 no cambian; se agrega que exista al menos una confirmada sin archivar en el momento del corte. Nuevo test de regresión con un archivador 3 s más lento por segmento, que reproduce la falla del CI de `main` del 2026-11-06 (371 confirmadas y 0 archivadas).
+- `tests/integration/support.py`: cuando una espera de archivado vence, el error incluye `pg_stat_archiver` y las líneas del log del servidor sobre archivado y errores, para distinguir un archivador lento de uno que falla.
+
 ### Changed — F1.3a: ventas cerradas contra el export real de varios días
 - **`commercial.store_sys.sales_lines` cerrado** contra el export de octubre 2026 con `codigo` y `cod_cliente` (7414 líneas, 27 días; solo faltan los domingos). Contrato nuevo: `codigo, descripcion, cantidad, rubro, cod_cliente, cliente, vendedor, zona, fecha, lista_de_precios`.
 - **Cliente por código exacto** (`cod_cliente` → mapping `customer/STORE_SYS/customer` del maestro). Se quitó la propuesta por nombre: ya no existen el mapping `customer_name` ni el issue `commercial.sale_line.customer_pending`. Un código sin mapping deja la línea pendiente con `commercial.customer.unresolved_code`. El nombre se guarda solo como fuente.
