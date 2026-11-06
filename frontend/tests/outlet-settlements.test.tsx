@@ -1,5 +1,7 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import type { Account } from "@/modules/settlements/cash/api";
@@ -28,6 +30,7 @@ import { OutletBoard } from "@/modules/settlements/outlet-settlements/outlet-boa
 import { OutletOperation } from "@/modules/settlements/outlet-settlements/outlet-operation";
 import { OutletSettlementList } from "@/modules/settlements/outlet-settlements/outlet-list";
 import { OutletsHome } from "@/modules/settlements/outlet-settlements/outlets-home";
+import { RemittanceDialog } from "@/modules/settlements/outlet-settlements/remittances";
 
 import { jsonResponse, renderWithQuery } from "./render";
 
@@ -59,6 +62,8 @@ const ACCOUNTS: Account[] = [
     overdrawn_label: null,
   },
 ];
+
+const PETTY_CASH: Account = { ...ACCOUNTS[0]!, id: 2, code: null, name: "Caja chica" };
 
 const OUTLETS = [
   { id: 3, code: "CENTRO", name: "Boca Centro", description: null, active: true },
@@ -664,6 +669,58 @@ describe("partial remittances of a boca (R7-3)", () => {
         { client_request_id: expect.any(String), reason: "Era de $300.000" },
       ]),
     );
+  });
+
+  it("fills the main box when the boxes arrive after the dialog opened (W2-B)", async () => {
+    let deliver: (response: Response) => void = () => undefined;
+    const late = new Promise<Response>((resolve) => {
+      deliver = resolve;
+    });
+    mockApi(detailRoutes("operator", WITH_REMITTANCES, { "GET /settlements/accounts": () => late }));
+    renderWithQuery(<SettlementDetail settlementId={7} type="OUTLET" />);
+    await userEvent.click(await screen.findByRole("button", { name: "Entregar efectivo" }));
+    const dialog = await screen.findByRole("dialog");
+    const box = within(dialog).getByLabelText("Caja que recibe");
+    expect(box).toHaveValue("");
+    deliver(jsonResponse(200, [...ACCOUNTS, PETTY_CASH]));
+    await waitFor(() => expect(box).toHaveValue("1"));
+    expect(within(box).getByRole("option", { name: "Caja principal" })).toBeInTheDocument();
+  });
+
+  it("never overwrites the box the operator chose when the boxes change", async () => {
+    mockApi({ "GET /auth/me": () => jsonResponse(200, me("operator")) });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+    const dialog = (boxes: Account[]) => (
+      <RemittanceDialog settlement={WITH_REMITTANCES} boxes={boxes} employees={[]} onClose={() => undefined} />
+    );
+    const { rerender, unmount } = render(dialog([PETTY_CASH]), { wrapper });
+    const box = screen.getByLabelText("Caja que recibe");
+    await userEvent.selectOptions(box, "2");
+    rerender(dialog([...ACCOUNTS, PETTY_CASH]));
+    expect(box).toHaveValue("2");
+    unmount();
+
+    // An explicit «Elegí una caja…» before the boxes arrive is a choice too: it stays empty.
+    const second = render(dialog([PETTY_CASH]), { wrapper });
+    const empty = screen.getByLabelText("Caja que recibe");
+    await userEvent.selectOptions(empty, "2");
+    await userEvent.selectOptions(empty, "");
+    second.rerender(dialog([...ACCOUNTS, PETTY_CASH]));
+    expect(empty).toHaveValue("");
+  });
+
+  it("preselects no box when there is no active main box, and still asks for one", async () => {
+    mockApi({ "GET /auth/me": () => jsonResponse(200, me("operator")) });
+    renderWithQuery(
+      <RemittanceDialog settlement={WITH_REMITTANCES} boxes={[PETTY_CASH]} employees={[]} onClose={() => undefined} />,
+    );
+    expect(screen.getByLabelText("Caja que recibe")).toHaveValue("");
+    await userEvent.type(screen.getByLabelText("Importe"), "1000");
+    await userEvent.click(screen.getByRole("button", { name: "Revisar entrega" }));
+    expect(await screen.findByText("Elegí la caja que recibe el efectivo.")).toBeInTheDocument();
   });
 
   it("a closed settlement takes no remittance and reverses none", async () => {

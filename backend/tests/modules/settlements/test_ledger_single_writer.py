@@ -21,7 +21,7 @@ WRITE_FUNCTIONS = {"insert", "update", "delete"}
 
 
 def _sources() -> list[tuple[Path, ast.Module]]:
-    return [(path, ast.parse(path.read_text(), str(path))) for path in sorted(APP.rglob("*.py"))]
+    return [(path, ast.parse(path.read_text(encoding="utf-8"), str(path))) for path in sorted(APP.rglob("*.py"))]
 
 
 def _imports_models(tree: ast.Module) -> bool:

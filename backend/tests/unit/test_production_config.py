@@ -127,9 +127,14 @@ def test_a_rejected_setting_never_echoes_its_value(env: pytest.MonkeyPatch) -> N
 # --- at start, the real process ---------------------------------------------------------------------------------
 
 
+def _windows_minimum() -> dict[str, str]:
+    """On Windows a fresh interpreter cannot start its socket layer without SYSTEMROOT (W2-B, ADR 016)."""
+    return {"SYSTEMROOT": os.environ["SYSTEMROOT"]} if sys.platform == "win32" else {}
+
+
 def _start(**overrides: str) -> subprocess.CompletedProcess[str]:
     """Imports the app as uvicorn does (`app.main:app`), in a fresh interpreter with only these variables."""
-    environment = {"PATH": os.environ["PATH"], **ENV, **overrides}
+    environment = {"PATH": os.environ["PATH"], **_windows_minimum(), **ENV, **overrides}
     return subprocess.run(
         [sys.executable, "-c", "import app.main"],
         cwd=BACKEND_DIR,
