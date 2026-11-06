@@ -451,12 +451,23 @@ jobs:
           $code = $LASTEXITCODE
           "B9_SECONDS=$([int]$sw.Elapsed.TotalSeconds)" >> $env:GITHUB_ENV
           exit $code
+      - name: B-9 repeat the boca partial delivery (late cash boxes, PR #75)
+        id: b9repeat
+        if: success() || failure()
+        working-directory: frontend
+        run: |
+          $sw = [Diagnostics.Stopwatch]::StartNew()
+          pnpm exec playwright test e2e/outlet-settlements.spec.ts -g "partial remittances" --project=desktop --repeat-each=10
+          $code = $LASTEXITCODE
+          "B9_REPEAT_SECONDS=$([int]$sw.Elapsed.TotalSeconds)" >> $env:GITHUB_ENV
+          exit $code
       - name: B-8 production frontend (standalone) through node server.js
         id: b8
         if: success() || failure()
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
           Push-Location frontend
+          $env:PYTHONIOENCODING = "utf-8"
           $env:NEXT_OUTPUT = "standalone"
           $env:API_INTERNAL_URL = "http://127.0.0.1:8200"
           pnpm build
@@ -467,6 +478,7 @@ jobs:
         env:
           B8: ${{ steps.b8.outcome }}
           B9: ${{ steps.b9.outcome }}
+          B9R: ${{ steps.b9repeat.outcome }}
         run: |
           function Result($outcome) { switch ($outcome) { "success" { "PASS" } "failure" { "FAIL" } default { "NO CORRIÓ ($outcome)" } } }
           $md = @(
@@ -476,6 +488,7 @@ jobs:
             "|---|---|---|",
             "| B-8 | Frontend standalone con node server.js: páginas, headers y rewrite de /api | **$(Result $env:B8)** |",
             "| B-9 | Playwright, todos los flujos críticos, $env:B9_SECONDS s | **$(Result $env:B9)** |",
+            "| B-9 | Entrega parcial de boca repetida 10 veces (carga tardía de cajas), $env:B9_REPEAT_SECONDS s | **$(Result $env:B9R)** |",
             ""
           )
           $md | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
