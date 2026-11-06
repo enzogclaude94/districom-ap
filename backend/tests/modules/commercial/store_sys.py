@@ -32,6 +32,7 @@ SALES_HEADER = [
     "descripcion",
     "cantidad",
     "rubro",
+    "cod_cliente",
     "cliente",
     "vendedor",
     "zona",
@@ -87,7 +88,8 @@ def documents_file(rows: Sequence[Sequence[Any]]) -> bytes:
 
 def sale(
     code: int,
-    customer_name: str,
+    customer_code: int | None,
+    customer_name: str | None = "CLIENTE SINTETICO",
     *,
     quantity: Decimal | int = 1,
     day: date = date(2026, 10, 23),
@@ -97,7 +99,7 @@ def sale(
     description: str = "ARTICULO SINTETICO",
     category: str | None = "GASEOSAS",
 ) -> list[Any]:
-    return [code, description, quantity, category, customer_name, seller, zone, day, price_list]
+    return [code, description, quantity, category, customer_code, customer_name, seller, zone, day, price_list]
 
 
 def sales_file(rows: Sequence[Sequence[Any]]) -> bytes:

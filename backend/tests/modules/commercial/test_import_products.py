@@ -266,7 +266,7 @@ def test_sales_lines_find_the_products_of_the_master(db: Session, operator: User
     run(
         db,
         operator,
-        sales_file([sale(100, "ALMACEN UNO", day=D2), sale(999, "ALMACEN UNO", day=D2)]),
+        sales_file([sale(100, 1, "ALMACEN UNO", day=D2), sale(999, 1, "ALMACEN UNO", day=D2)]),
         SALES,
         scope="FULL",
     )

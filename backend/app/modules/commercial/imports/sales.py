@@ -1,17 +1,17 @@
 """STORE SYS · Ventas artículos/clientes (`commercial.store_sys.sales_lines`, docs/IMPORTS.md §3.3, §5.3).
-Contract: the original export `ventas` (BIFF7, header in row 1): codigo, descripcion, cantidad, rubro, cliente,
-vendedor, zona, fecha, lista_de_precios. Units only: no amounts and no document number.
+Contract: the original export `ventas` (BIFF7, header in row 1): codigo, descripcion, cantidad, rubro, cod_cliente,
+cliente, vendedor, zona, fecha, lista_de_precios. Units only: no amounts and no document number.
 
 - Product by `source_code`; this import never creates products: an unknown code keeps the line with
   `product_id NULL` and an issue.
-- The customer comes as a **name**: a confirmed `customer/STORE_SYS/customer_name` mapping links it; otherwise the
-  only active customer with exactly that name is *proposed* (pending), two or more make it ambiguous, none leaves it
-  pending without candidate. Never confirmed automatically, never by similarity.
+- Customer by `cod_cliente`, exactly: the confirmed `customer/STORE_SYS/customer` mapping the customers master
+  created. A code without one keeps the line with `customer_id NULL`, pending, and an issue; this import never
+  creates customers. The name is kept as it comes (`source_customer_name`), never used to resolve.
 - Seller by its `employee/STORE_SYS/seller` mapping; zone by its canonical name; the source values are kept.
 - Identical rows are distinct sales: all are kept, numbered by `occurrence`.
 - Idempotency by period and declared scope (`sales.service.plan`): never by content.
 
-Not closed: the replacement strategy waits for a real export of several days (ADR 014 S7).
+Closed against the real export of October 2026 (27 days, 7414 lines, docs/IMPORTS.md §3.3).
 """
 
 import re
@@ -32,7 +32,6 @@ from app.modules.commercial.imports.customers import flag_unmapped_seller, selle
 from app.modules.commercial.sales import service as sales
 from app.modules.commercial.sales.models import SaleLine
 from app.platform.audit.service import record_event
-from app.platform.customers.service import exact_name_candidates
 from app.platform.imports.headers import Column, find_header
 from app.platform.imports.models import ImportJob
 from app.platform.imports.registry import (
@@ -58,7 +57,8 @@ COLUMNS = (
     Column("description", ("descripcion", "descripción")),
     Column("quantity", ("cantidad",)),
     Column("category", ("rubro",)),
-    Column("customer", ("cliente",)),
+    Column("customer_code", ("cod_cliente", "codcli")),
+    Column("customer", ("cliente",), required=False),
     Column("seller", ("vendedor",)),
     Column("zone", ("zona",)),
     Column("business_date", ("fecha",)),
@@ -69,8 +69,8 @@ PRICE_LIST = re.compile(r"^LISTA\s*(\d{1,3})$")
 LINKED = ("confirmed", "excluded")
 
 
-def customer_name_key(name: str) -> mappings.MappingKey:
-    return mappings.MappingKey("customer", SOURCE, "customer_name", mappings.label_key(name))
+def customer_key(code: str) -> mappings.MappingKey:
+    return mappings.MappingKey("customer", SOURCE, "customer", mappings.code_key(code))
 
 
 def price_list_number(label: str) -> int | None:
@@ -106,15 +106,20 @@ def _parse(cell: cells.CellGetter) -> tuple[dict[str, Any] | None, list[RowMessa
     else:
         if day is None:
             messages.append(cells.error("missing_business_date", "Falta la fecha.", "business_date"))
-    customer = cells.text(cell("customer"))
-    if customer is None:
-        messages.append(cells.error("missing_customer", "Falta el cliente.", "customer"))
+    try:
+        customer_code = cells.code(cell("customer_code"))
+    except cells.InvalidCellError:
+        customer_code = None
+        messages.append(cells.error("invalid_customer_code", "El código de cliente no es un número.", "customer_code"))
+    else:
+        if customer_code is None:
+            messages.append(cells.error("missing_customer_code", "Falta el código de cliente.", "customer_code"))
     if messages:
         return None, messages
     assert code is not None
     assert quantity is not None
     assert day is not None
-    assert customer is not None
+    assert customer_code is not None
     seller = cells.text(cell("seller"))
     zone = cells.text(cell("zone"))
     price_list = cells.text(cell("price_list"))
@@ -123,7 +128,8 @@ def _parse(cell: cells.CellGetter) -> tuple[dict[str, Any] | None, list[RowMessa
         "description": cells.text(cell("description")),
         "category": cells.text(cell("category")),
         "quantity": str(quantity),
-        "customer": customer,
+        "customer_code": customer_code,
+        "customer": cells.text(cell("customer")),
         "seller": seller,
         "zone": zone,
         "zone_key": source_key(zone) if zone else None,
@@ -138,7 +144,7 @@ def _content(record: dict[str, Any]) -> tuple[Any, ...]:
 
 
 class SalesAdapter:
-    version = "store-sys-sales-1"
+    version = "store-sys-sales-2"
 
     def score(self, workbook: Workbook) -> float:
         matches = [find_header(sheet, COLUMNS) for sheet in workbook.sheets]
@@ -171,9 +177,7 @@ class SalesAdapter:
         products = dict(db.execute(select(Product.source_code, Product.id).where(Product.source_code.in_(codes))).all())
         lists = dict(db.execute(select(PriceList.list_number, PriceList.id)).all())
         zones = dict(db.execute(select(Zone.name_key, Zone.id)).all())
-        names = {r["customer"] for r in records}
-        customers = mappings.resolve_many(db, [customer_name_key(n) for n in names])
-        candidates = {n: exact_name_candidates(db, n) for n in names if customers[customer_name_key(n)].status == "new"}
+        customers = mappings.resolve_many(db, [customer_key(r["customer_code"]) for r in records])
         sellers = mappings.resolve_many(db, [seller_key(r["seller"]) for r in records if r["seller"]])
 
         rows: list[AnalyzedRow] = []
@@ -202,20 +206,17 @@ class SalesAdapter:
                         "product_unknown", "warning", "El artículo no está en el maestro de artículos.", "product_code"
                     )
                 )
-            customer = customers[customer_name_key(record["customer"])]
-            if customer.status not in LINKED:
+            if not customers[customer_key(record["customer_code"])].resolved:
                 pending = True
-                options = len(candidates.get(record["customer"], customer.candidates))
-                status = "ambiguous" if customer.status == "ambiguous" or options >= 2 else "pending"
-                tally[f"customer_{status}"] += 1
-                text = (
-                    "Hay varios clientes con ese nombre: queda ambiguo hasta que alguien elija."
-                    if status == "ambiguous"
-                    else "Cliente sin vincular: se propone el único cliente con ese nombre, pendiente de confirmar."
-                    if options == 1
-                    else "Cliente sin vincular y sin candidato en el maestro."
+                tally["customer_unresolved"] += 1
+                messages.append(
+                    RowMessage(
+                        "customer_unresolved",
+                        "warning",
+                        "El código de cliente no está en el maestro de clientes.",
+                        "customer_code",
+                    )
                 )
-                messages.append(RowMessage(f"customer_{status}", "warning", text, "customer"))
             if record["seller"]:
                 seen["sellers"].add(record["seller"])
                 if sellers[seller_key(record["seller"])].status not in LINKED:
@@ -282,7 +283,7 @@ class SalesAdapter:
             preview={
                 "replacement": replacement.as_json(),
                 "unknown_products": len(unknown_products),
-                "customers": {"pending": tally["customer_pending"], "ambiguous": tally["customer_ambiguous"]},
+                "customers": {"unresolved_lines": tally["customer_unresolved"]},
             },
         )
 
@@ -299,38 +300,25 @@ class SalesAdapter:
         )
         lists = dict(db.execute(select(PriceList.list_number, PriceList.id)).all())
         zones = dict(db.execute(select(Zone.name_key, Zone.id)).all())
-        customer_mappings: dict[str, Any] = {}
+        customers: dict[str, mappings.Resolution] = {}
         seller_mappings: dict[str, Any] = {}
         pending_products = 0
         outcomes: list[RowOutcome] = []
         for row in rows:
             record = row.normalized
             assert record is not None
-            name = record["customer"]
-            if name not in customer_mappings:
-                key = customer_name_key(name)
-                proposal = exact_name_candidates(db, name) if mappings.resolve(db, key).status == "new" else []
-                customer_mappings[name] = mappings.observe(
-                    db, key, label=name, job_id=context.job_id, candidates=proposal
-                )
-                if customer_mappings[name].status not in LINKED:
+            code = record["customer_code"]
+            if code not in customers:
+                customers[code] = mappings.resolve(db, customer_key(code))
+                if not customers[code].resolved:
                     record_issue(
                         db,
-                        "commercial.sale_line.customer_pending",
-                        f"mapping:{customer_mappings[name].id}",
+                        "commercial.customer.unresolved_code",
+                        f"customer_code:{mappings.code_key(code)}",
                         job_id=context.job_id,
-                        external_ref={
-                            "source_system": SOURCE,
-                            "namespace": "customer_name",
-                            "mapping_id": customer_mappings[name].id,
-                        },
-                        details={
-                            "mapping_id": customer_mappings[name].id,
-                            "mapping_status": customer_mappings[name].status,
-                            "candidates": len(customer_mappings[name].candidates),
-                        },
+                        external_ref={"source_system": SOURCE, "namespace": "customer", "external_id": code},
+                        details={"origin": TYPE_KEY, "mapping_status": customers[code].status},
                     )
-            customer = customer_mappings[name]
             seller = None
             if record["seller"]:
                 if record["seller"] not in seller_mappings:
@@ -357,9 +345,10 @@ class SalesAdapter:
                 )
             line = SaleLine(
                 business_date=date.fromisoformat(record["business_date"]),
-                customer_id=customer.entity_id if customer.status == "confirmed" else None,
-                source_customer_name=name[:200],
-                customer_mapping_id=customer.id,
+                customer_id=customers[code].entity_id if customers[code].resolved else None,
+                source_customer_code=code,
+                source_customer_name=(record["customer"] or "")[:200] or None,
+                customer_mapping_id=customers[code].mapping_id,
                 product_id=product_id,
                 source_product_code=record["product_code"],
                 source_product_description=(record["description"] or "")[:200] or None,

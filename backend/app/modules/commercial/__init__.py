@@ -49,7 +49,6 @@ MODULE = ModuleSpec(
         QualityCodeSpec("commercial.customer.missing_from_master", "info", "Cliente ausente de la última foto"),
         QualityCodeSpec("commercial.customer.unresolved_code", "warning", "Código de cliente STORE SYS sin resolver"),
         QualityCodeSpec("commercial.seller.unmapped", "warning", "Vendedor STORE SYS sin vincular"),
-        QualityCodeSpec("commercial.sale_line.customer_pending", "warning", "Ventas con cliente pendiente"),
         QualityCodeSpec("commercial.sale_line.product_pending", "warning", "Ventas con artículo pendiente"),
     ),
 )

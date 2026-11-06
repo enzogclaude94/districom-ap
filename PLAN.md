@@ -269,7 +269,7 @@ Estado: **IN_PROGRESS.** Diseño F1.0 aprobado por Enzo el 2026-10-30 con las de
 | F1.1a documentación | Aprobada y mergeada (PR #56, 2026-11-02) |
 | F1.1b infraestructura de importación | Aprobada y mergeada (PR #69, 2026-11-03) |
 | F1.2 maestros, configuración y mappings | Aprobada y mergeada (PR #71, 2026-11-05) |
-| F1.3a importadores STORE SYS (backend) | En revisión: clientes, artículos y comprobantes cerrados contra el export real; ventas sin cerrar (el export de varios días tiene otra estructura, pendiente de decisión); identidad semántica de imports |
+| F1.3a importadores STORE SYS (backend) | En revisión: clientes, artículos, comprobantes y ventas (por `codigo` y `cod_cliente` exactos) cerrados contra exports reales; identidad semántica de imports |
 | F1.3b pantalla mínima de Importaciones | Pendiente (PR aparte) |
 | F1.4 – F1.8 | Pendientes de aprobación sucesiva |
 

@@ -20,7 +20,6 @@ from app.modules.commercial.sales.models import SaleLine
 from app.platform.customers.models import Customer
 from app.platform.imports.models import ImportJob
 from app.platform.mappings import service as mappings
-from app.platform.mappings.models import ExternalEntityMapping
 from tests.conftest import PASSWORD
 from tests.modules.commercial.store_sys import (
     CUSTOMERS,
@@ -114,8 +113,8 @@ def test_customers_products_documents_and_sales_end_to_end(
     assert confirm(operator, job["id"])["counts"]["inserted"] == 2
 
     # 4. Sales of the 23rd, FULL, every price list.
-    lines = [sale(100, "ALMACEN UNO", day=D23, price_list=f"LISTA {n}", quantity=n) for n in range(1, 6)] + [
-        sale(200, "KIOSCO DOS", day=D23, seller="VENDEDOR DOS", zone="RUTA 02 - MAJU")
+    lines = [sale(100, 1, "ALMACEN UNO", day=D23, price_list=f"LISTA {n}", quantity=n) for n in range(1, 6)] + [
+        sale(200, 2, "KIOSCO DOS", day=D23, seller="VENDEDOR DOS", zone="RUTA 02 - MAJU")
     ]
     job = post(operator, sales_file(lines), scope="FULL")
     assert (job["import_type"], job["scope"]["declared"], job["period_from"]) == (SALES, "FULL", "2026-10-23")
@@ -145,15 +144,9 @@ def test_customers_products_documents_and_sales_end_to_end(
     sold = db.scalars(select(SaleLine).where(SaleLine.import_job_id == job["id"] - 1).order_by(SaleLine.id)).all()
     assert [line.price_list_id for line in sold[:5]] == [lists[n] for n in range(1, 6)]
     assert [line.quantity for line in sold[:5]] == [Decimal(n) for n in range(1, 6)]
-    assert {line.customer_id for line in sold} == {None}  # by name: proposed, never auto-confirmed
+    assert {line.customer_id for line in sold[:5]} == {uno}  # by `cod_cliente`, exactly
     products = dict(db.execute(select(Product.source_code, Product.id)).all())
     assert {line.source_product_code: line.product_id for line in sold} == products
-    proposal = db.scalars(
-        select(ExternalEntityMapping).where(
-            ExternalEntityMapping.namespace == "customer_name", ExternalEntityMapping.external_id == "ALMACEN UNO"
-        )
-    ).one()
-    assert (proposal.status, proposal.candidates) == ("pending", [uno])
     # Attribution on the day of the sale comes from the assignment history, not the line.
     assert uno is not None
     luvi = db.scalars(select(Zone).where(Zone.source_name == "RUTA 01 - LUVI")).one()
@@ -173,9 +166,9 @@ def test_cli_declares_snapshot_date_and_scope_and_an_admin_decides(  # type: ign
     clients = tmp_path / "clientes.xls"
     clients.write_bytes(customers_file([customer(1, "ALMACEN UNO")]))
     ventas = tmp_path / "ventas.xls"
-    ventas.write_bytes(sales_file([sale(100, "ALMACEN UNO", day=D23)]))
+    ventas.write_bytes(sales_file([sale(100, 1, "ALMACEN UNO", day=D23)]))
     otra = tmp_path / "ventas-filtradas.xls"
-    otra.write_bytes(sales_file([sale(100, "ALMACEN UNO", day=D23, quantity=2)]))
+    otra.write_bytes(sales_file([sale(100, 1, "ALMACEN UNO", day=D23, quantity=2)]))
     operator, admin = "operator@districom.test", "admin@districom.test"
 
     def last() -> dict:  # type: ignore[type-arg]

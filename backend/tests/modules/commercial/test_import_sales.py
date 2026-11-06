@@ -85,26 +85,18 @@ def open_issues(db: Session, code: str) -> list[DataQualityIssue]:
     )
 
 
-def link_customer_name(db: Session, admin: User, name: str, code: int) -> None:
-    mapping = db.scalars(
-        select(ExternalEntityMapping).where(
-            ExternalEntityMapping.namespace == "customer_name", ExternalEntityMapping.external_id == name
-        )
-    ).one()
-    target = mappings.resolve(db, mappings.MappingKey("customer", "STORE_SYS", "customer", str(code))).entity_id
-    assert target is not None
-    mappings.confirm(db, admin, mapping.id, target, reason=None, is_admin=True)
-    db.commit()
+def customer_id(db: Session, code: int) -> int | None:
+    return mappings.resolve(db, mappings.MappingKey("customer", "STORE_SYS", "customer", str(code))).entity_id
 
 
 def test_the_original_export_is_detected_and_every_line_is_kept(db: Session, operator: User) -> None:
     data = sales_file(
         [
-            sale(100, "ALMACEN UNO", quantity=6, price_list="LISTA 1"),
-            sale(100, "ALMACEN UNO", quantity=6, price_list="LISTA 1"),  # identical: another sale
-            sale(200, "ALMACEN UNO", quantity=-2),  # a return
-            sale(200, "KIOSCO REPETIDO", quantity=Decimal("0.5"), price_list="LISTA 5"),
-            sale(999, "CLIENTE NUEVO", quantity=1, price_list="LISTA 9", seller="VENDEDOR NUEVO", zone=None),
+            sale(100, 1, "ALMACEN UNO", quantity=6, price_list="LISTA 1"),
+            sale(100, 1, "ALMACEN UNO", quantity=6, price_list="LISTA 1"),  # identical: another sale
+            sale(200, 1, "ALMACEN UNO", quantity=-2),  # a return
+            sale(200, 2, "KIOSCO REPETIDO", quantity=Decimal("0.5"), price_list="LISTA 5"),
+            sale(999, 999, "CLIENTE NUEVO", quantity=1, price_list="LISTA 9", seller="VENDEDOR NUEVO", zone=None),
         ]
     )
     job = analyze(db, operator, data, None, scope="FULL")
@@ -117,9 +109,11 @@ def test_the_original_export_is_detected_and_every_line_is_kept(db: Session, ope
     assert job.job_metadata["preview"]["replacement"]["action"] == "insert"
     statuses = rows(db, job.id)
     assert statuses[3][1] >= {"identical_row"}
-    assert "customer_ambiguous" in statuses[5][1]
+    # Two customers share the name KIOSCO REPETIDO: the code decides, the name is never looked at.
+    assert "customer_unresolved" not in statuses[5][1]
     assert statuses[6][0] == "pending_resolution"
-    assert statuses[6][1] >= {"product_unknown", "customer_pending", "seller_unmapped", "unknown_price_list"}
+    assert statuses[6][1] >= {"product_unknown", "customer_unresolved", "seller_unmapped", "unknown_price_list"}
+    assert job.job_metadata["preview"]["customers"] == {"unresolved_lines": 1}
     assert db.scalar(select(func.count()).select_from(SaleLine)) == 0  # analysis writes nothing
 
     job = confirm(db, operator, job)
@@ -139,36 +133,41 @@ def test_the_original_export_is_detected_and_every_line_is_kept(db: Session, ope
     assert found[0].product_id is not None
     assert found[4].zone_id is None
     assert found[0].zone_id is not None
-    # Customers come by name: never confirmed automatically.
-    assert {line.customer_id for line in found} == {None}
-    by_name = {
-        m.external_id: m
-        for m in db.scalars(select(ExternalEntityMapping).where(ExternalEntityMapping.namespace == "customer_name"))
-    }
-    assert (by_name["ALMACEN UNO"].status, len(by_name["ALMACEN UNO"].candidates)) == ("pending", 1)
-    assert (by_name["KIOSCO REPETIDO"].status, len(by_name["KIOSCO REPETIDO"].candidates)) == ("ambiguous", 2)
-    assert (by_name["CLIENTE NUEVO"].status, by_name["CLIENTE NUEVO"].candidates) == ("pending", [])
+    # Customers by `cod_cliente`, exactly; an unknown code is kept pending and never creates a customer.
+    assert [line.customer_id for line in found] == [customer_id(db, 1)] * 3 + [customer_id(db, 2), None]
+    assert [(line.source_customer_code, line.source_customer_name) for line in found[3:]] == [
+        ("2", "KIOSCO REPETIDO"),
+        ("999", "CLIENTE NUEVO"),
+    ]
+    assert found[4].customer_mapping_id is None
+    assert (
+        db.scalar(
+            select(func.count())
+            .select_from(ExternalEntityMapping)
+            .where(ExternalEntityMapping.namespace == "customer_name")
+        )
+        == 0
+    )
+    assert [i.external_ref["external_id"] for i in open_issues(db, "commercial.customer.unresolved_code")] == ["999"]
     assert [i.details["product_code"] for i in open_issues(db, "commercial.product.unknown")] == ["999"]
-    assert len(open_issues(db, "commercial.sale_line.customer_pending")) == 3
     assert [i.details["lines"] for i in open_issues(db, "commercial.sale_line.product_pending")] == [1]
     assert db.scalar(select(func.count()).select_from(Employee)) == 0
 
 
 def test_confirmed_mappings_resolve_customer_and_seller(db: Session, operator: User, admin: User) -> None:
-    run(db, operator, sales_file([sale(100, "ALMACEN UNO")]), SALES, scope="FULL")
-    link_customer_name(db, admin, "ALMACEN UNO", 1)
+    run(db, operator, sales_file([sale(100, 1, "ALMACEN UNO")]), SALES, scope="FULL")
     employee = Employee(full_name="Vendedor Uno")
     db.add(employee)
     db.flush()
     seller = db.scalars(select(ExternalEntityMapping).where(ExternalEntityMapping.external_id == "VENDEDOR UNO")).one()
     mappings.confirm(db, admin, seller.id, employee.id, reason=None, is_admin=True)
     db.commit()
-    job = analyze(db, operator, sales_file([sale(100, "ALMACEN UNO", day=D22)]), SALES, scope="FULL")
+    job = analyze(db, operator, sales_file([sale(100, 1, "ALMACEN UNO", day=D22)]), SALES, scope="FULL")
     assert rows(db, job.id)[2] == ("valid", set())
     confirm(db, operator, job)
     line = lines(db)[-1]
     assert (line.customer_id, line.salesperson_id, line.source_seller) == (
-        mappings.resolve(db, mappings.MappingKey("customer", "STORE_SYS", "customer", "1")).entity_id,
+        customer_id(db, 1),
         employee.id,
         "VENDEDOR UNO",
     )
@@ -180,10 +179,11 @@ def test_invalid_rows_are_rejected(db: Session, operator: User) -> None:
         operator,
         sales_file(
             [
-                [None, "SIN CODIGO", 1, None, "ALMACEN UNO", "V", "Z", D23, None],
-                [100, "X", "seis", None, "ALMACEN UNO", "V", "Z", D23, None],
-                [100, "X", 1, None, None, "V", "Z", D23, None],
-                [100, "X", 1, None, "ALMACEN UNO", "V", "Z", None, None],
+                [None, "SIN CODIGO", 1, None, 1, "ALMACEN UNO", "V", "Z", D23, None],
+                [100, "X", "seis", None, 1, "ALMACEN UNO", "V", "Z", D23, None],
+                [100, "X", 1, None, None, "ALMACEN UNO", "V", "Z", D23, None],
+                [100, "X", 1, None, 1, "ALMACEN UNO", "V", "Z", None, None],
+                [100, "X", 1, None, "UNO", "ALMACEN UNO", "V", "Z", D23, None],
             ]
         ),
         SALES,
@@ -191,8 +191,9 @@ def test_invalid_rows_are_rejected(db: Session, operator: User) -> None:
     statuses = rows(db, job.id)
     assert statuses[2] == ("rejected", {"missing_product_code"})
     assert statuses[3] == ("rejected", {"invalid_quantity"})
-    assert statuses[4] == ("rejected", {"missing_customer"})
+    assert statuses[4] == ("rejected", {"missing_customer_code"})
     assert statuses[5] == ("rejected", {"missing_business_date"})
+    assert statuses[6] == ("rejected", {"invalid_customer_code"})
 
 
 # --- idempotency by period and scope ----------------------------------------------------------------------------
@@ -200,8 +201,8 @@ def test_invalid_rows_are_rejected(db: Session, operator: User) -> None:
 
 def three_days(extra: int = 0) -> bytes:
     return sales_file(
-        [sale(100, "ALMACEN UNO", day=day) for day in (D20, D21, D22)]
-        + [sale(200, "ALMACEN UNO", day=D22) for _ in range(extra)]
+        [sale(100, 1, "ALMACEN UNO", day=day) for day in (D20, D21, D22)]
+        + [sale(200, 1, "ALMACEN UNO", day=D22) for _ in range(extra)]
     )
 
 
@@ -234,7 +235,7 @@ def test_a_full_reimport_of_the_same_period_replaces_it(db: Session, operator: U
 
 def test_a_partially_overlapping_full_period_replaces_only_the_shared_days(db: Session, operator: User) -> None:
     run(db, operator, three_days(), SALES, scope="FULL")  # 20, 21, 22
-    later = sales_file([sale(100, "ALMACEN UNO", day=day, quantity=2) for day in (D21, D22, D23)])
+    later = sales_file([sale(100, 1, "ALMACEN UNO", day=day, quantity=2) for day in (D21, D22, D23)])
     job = run(db, operator, later, SALES, scope="FULL")
     assert job.status in ("completed", "completed_with_warnings")
     active = lines(db)
@@ -249,7 +250,7 @@ def test_a_partially_overlapping_full_period_replaces_only_the_shared_days(db: S
 
 def test_a_day_the_new_file_does_not_cover_blocks_the_confirmation(db: Session, operator: User) -> None:
     run(db, operator, three_days(), SALES, scope="FULL")
-    gap = sales_file([sale(100, "ALMACEN UNO", day=day) for day in (D20, D22)])  # nothing on the 21st
+    gap = sales_file([sale(100, 1, "ALMACEN UNO", day=day) for day in (D20, D22)])  # nothing on the 21st
     job = analyze(db, operator, gap, SALES, scope="FULL")
     replacement = job.job_metadata["preview"]["replacement"]
     assert replacement["action"] == "blocked"
@@ -283,7 +284,7 @@ def test_a_filtered_or_undeclared_scope_never_replaces_by_itself(
 
 def test_a_filtered_export_of_new_days_loads_without_a_decision(db: Session, operator: User) -> None:
     run(db, operator, three_days(), SALES, scope="FULL")
-    job = run(db, operator, sales_file([sale(100, "ALMACEN UNO", day=D23)]), SALES, scope="FILTERED")
+    job = run(db, operator, sales_file([sale(100, 1, "ALMACEN UNO", day=D23)]), SALES, scope="FILTERED")
     assert job.rows_inserted == 1
     assert len(lines(db)) == 4
 
@@ -312,7 +313,7 @@ def test_an_admin_decides_a_blocked_confirmation(db: Session, operator: User, ad
 
 def test_an_admin_loads_a_blocked_file_as_additional(db: Session, operator: User, admin: User) -> None:
     run(db, operator, three_days(), SALES, scope="FULL")
-    extra = sales_file([sale(200, "ALMACEN UNO", day=D21)])
+    extra = sales_file([sale(200, 1, "ALMACEN UNO", day=D21)])
     job = analyze(db, operator, extra, SALES, scope="FILTERED", scope_note="Ventas cargadas tarde")
     confirm(db, admin, job, Decision("additional", "No se superpone: ventas cargadas tarde"))
     assert len(lines(db)) == 4

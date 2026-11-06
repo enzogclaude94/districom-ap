@@ -101,7 +101,7 @@ def test_the_articles_master_is_a_snapshot_too(db: Session, operator: User) -> N
 
 def test_the_same_sales_file_is_a_duplicate_only_with_the_same_scope(db: Session, operator: User, admin: User) -> None:
     run(db, operator, customers_file([customer(1, "ALMACEN UNO")]), CUSTOMERS, snapshot_date=D1)
-    data = sales_file([sale(100, "ALMACEN UNO", day=D2), sale(200, "ALMACEN UNO", day=D2)])
+    data = sales_file([sale(100, 1, "ALMACEN UNO", day=D2), sale(200, 1, "ALMACEN UNO", day=D2)])
     first = run(db, operator, data, SALES, scope="FILTERED", scope_note="Por error")
     assert analyze(db, operator, data, SALES, scope="FILTERED", scope_note="Otra nota").status == "duplicate"
 

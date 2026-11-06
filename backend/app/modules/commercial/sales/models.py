@@ -32,7 +32,8 @@ class SaleLine(IdMixin, TimestampMixin, Base):
 
     business_date: Mapped[date] = mapped_column(Date)
     customer_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("customers.id", ondelete="RESTRICT"))
-    source_customer_name: Mapped[str] = mapped_column(String(200))
+    source_customer_code: Mapped[str] = mapped_column(String(40))
+    source_customer_name: Mapped[str | None] = mapped_column(String(200))
     customer_mapping_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("external_entity_mappings.id", ondelete="RESTRICT")
     )
