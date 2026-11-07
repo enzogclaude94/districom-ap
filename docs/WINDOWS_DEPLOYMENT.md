@@ -174,7 +174,7 @@ Si un paso falla antes del 4, la app vuelve a quedar disponible. Si falla despu�
 | **W1** | ADR 016 (Propuesto) y este plan | CI (documentación) | DONE (PR #70, 2026-11-04) |
 | **W2‑A** | Prueba de concepto aislada de backups físicos, WAL, PITR y restauración (`deploy/windows/backup/`) | GitHub Actions (Windows); lo no reproducible queda PENDIENTE | DONE como prueba de concepto y CI (PR #72, 2026-11-05); lo de laboratorio sigue PENDIENTE: ver §8.2 |
 | **W2‑B** | Pruebas automatizadas de los componentes compatibles con Windows (backend en Windows, orden de textos, frontend) | GitHub Actions (Windows) | DONE a nivel de compatibilidad y pruebas automatizadas (PR #75, 2026-11-06); lo de laboratorio sigue PENDIENTE: ver §8.4 |
-| **W2‑C** | El resto (operación, `install.ps1`, servicios, firewall, cierre de jornada, suite de aceptación) | CI y laboratorio Windows 11 Pro | Propuesta en subetapas en preparación; sin autorizar |
+| **W2‑C** | El resto (operación, `install.ps1`, servicios, firewall, cierre de jornada, suite de aceptación) | CI y laboratorio Windows 11 Pro | En curso por subetapas (C1 a C13, ver §8.5): C1 en revisión; C2 a C13 sin autorizar |
 | W3 | Laboratorio Windows 11 Pro: suite completa y pruebas pendientes | PC de laboratorio (no el servidor) | Sin laboratorio confirmado |
 | W4 | Preparación del equipo: RAM, RAID, SMART, Windows 11 Pro, BitLocker, UPS | Servidor | No autorizado |
 | W5–W8 | Staging, pruebas en el servidor, transición y go‑live (O10) | Servidor | Equivalen a S3 |
@@ -270,6 +270,27 @@ Enzo los fijó el 2026-11-05 al cerrar W2‑A. Se suman a los dos requisitos del
   - **Rendiciones:** el diálogo «Entregar efectivo» tomaba la caja receptora solo al abrirse; si las cajas llegaban después, el campo quedaba vacío. Ahora completa la caja principal cuando llega, sin pisar una elección del operador; sin caja principal activa no preselecciona ninguna.
   - Ajustes solo de tests para Windows: variable `SYSTEMROOT`, lectura en UTF‑8 y permisos de solo lectura.
 - **PENDIENTE (no se puede dar PASS en CI):** Windows 11 Pro (los runners son Windows Server), servicios de Windows (PostgreSQL como servicio; backend, frontend y Caddy con WinSW: W2‑C), Defender, rendimiento en el hardware real y convivencia con Store Sys. Caddy con el módulo de Cloudflare se valida en W2‑C o en el laboratorio.
+
+### 8.5 W2‑C: infraestructura por subetapas
+- **Plan:** propuesta W2‑C revisión 1, aprobada por Enzo el 2026-11-06 con las decisiones:
+  - **D1:** Python con biblioteca estándar, más PowerShell para instalación, ACL y firewall;
+  - **D2:** WinSW;
+  - **D3:** `ALLOW_CONNECTIONS false` con diario de estado;
+  - **D4:** Caddy compilado con `xcaddy`;
+  - **D5:** subetapas secuenciales, cada una con su PR, su CI y aprobación expresa antes del merge.
+- **Orden:** C1 → C2 → C3 → C4 → C9 → C6 → C10 → C7 → C8 → C5 → C11 → C12 → C13. C11, C12 y C13 exigen C7 validada.
+- **C1, base operativa** (`deploy/windows/ops/`, README; job de CI «Windows ops (W2-C)»). En revisión.
+  - Carpetas de la instalación.
+  - Configuración que rechaza variables faltantes o inseguras sin mostrar valores.
+  - Logs JSON sin secretos ni datos personales.
+  - Registro de operaciones de solo agregado.
+  - Ventana de mantenimiento con su operación dueña. El vencimiento genera una alerta, pero nunca cierra la ventana ni habilita escrituras.
+  - Lectura estricta del registro: una línea estructuralmente inválida deja incierta su operación, o todo el registro; solo se tolera la última línea cortada por un corte. El archivo nunca se reescribe.
+  - Verificación conjunta `writes_resume_check` (ventana + registro): una ventana ausente con una operación incompleta o incierta **no** permite reactivar escrituras. **C9 debe consultarla** antes de reactivar la aplicación; C1 no desbloquea nada.
+  - Criterios C1‑1 a C1‑4.
+  - PENDIENTE: los permisos NTFS (C3), Windows 11 Pro y un corte de energía real.
+- **Regla de logs para C2 a C13** (Enzo, 2026-11-07): los logs operativos no deben incorporar información personal de clientes, teléfonos, direcciones ni valores completos de consultas SQL.
+- Simular algo en GitHub Actions no prueba un acceso remoto, un apagado real ni una recuperación física.
 
 ## 9. Pendientes que no dependen del desarrollo
 - Requisitos de Store Sys (RAM, disco, puertos, su base de datos, cómo se detiene).
