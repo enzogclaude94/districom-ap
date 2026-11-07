@@ -17,6 +17,7 @@ from districom_ops.layout import Layout, LayoutError
 from districom_ops.logs import REDACTOR, setup_logging
 from districom_ops.maintenance import MaintenanceError, MaintenanceWindow
 from districom_ops.oplog import Event, Kind, OperationError, OperationsLog
+from districom_ops.safety import writes_resume_check
 
 CONFIG_ENV = "DISTRICOM_CONFIG"
 DEFAULT_CONFIG = Path(r"C:\DistriCom\config\districom.env")
@@ -43,7 +44,12 @@ def _parser() -> argparse.ArgumentParser:
     m.add_parser("status")
 
     p = sub.add_parser("operations", help="operations record")
-    p.add_argument("--incomplete", action="store_true")
+    p.add_argument("--incomplete", action="store_true", help="only incomplete or uncertain operations")
+
+    sub.add_parser(
+        "resume-check",
+        help="read only: would it be safe to re-enable writes? (window, operations record; C9 acts on it)",
+    )
     return parser
 
 
@@ -81,16 +87,24 @@ def _run(args: argparse.Namespace) -> int:
     oplog = OperationsLog(layout.state / "operations.jsonl")
     if args.command == "operations":
         record = oplog.read()
-        ops = record.incomplete() if args.incomplete else list(record.operations.values())
+        ops = [op for op in record.operations.values() if op.incomplete or op.uncertain or not args.incomplete]
         for op in ops:
-            sys.stdout.write(
-                json.dumps({"id": op.id, "kind": op.kind, "reason": REDACTOR.text(op.reason), "end": op.end}) + "\n"
-            )
+            item = {"id": op.id, "kind": op.kind, "reason": REDACTOR.text(op.reason), "end": op.end}
+            sys.stdout.write(json.dumps({**item, "uncertain": op.uncertain}) + "\n")
         if record.torn_lines:
             log.warning("operations_record_torn_lines", extra={"lines": record.torn_lines})
+        if not record.certain:
+            log.error("operations_record_invalid", extra={"problems": [str(p) for p in record.problems]})
+            return 1
         return 0
 
     window = MaintenanceWindow(layout.state, oplog)
+    if args.command == "resume-check":
+        check = writes_resume_check(window, config.maintenance_max_minutes)
+        (log.info if check.allowed else log.error)(
+            "writes_resume_check", extra={"allowed": check.allowed, "detail": check.describe()}
+        )
+        return 0 if check.allowed else 1
     if args.action == "open":
         op_id = window.open(Kind(args.kind), args.reason)
         log.info("maintenance_opened", extra={"operation": op_id, "kind": args.kind})

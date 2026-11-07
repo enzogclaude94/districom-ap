@@ -12,6 +12,9 @@ Invariants (Enzo, 2026-11-06, W2-C revision 1):
   stays as it is until the owner operation completes or is reverted explicitly.
 * A window file that cannot be read is treated as an open window with an unknown owner (fail-safe), never as
   "no window".
+* A closed (absent) window is necessary but **not sufficient** to re-enable writes: that decision belongs to
+  ``districom_ops.safety.writes_resume_check``, which also requires a consistent operations record without
+  incomplete or uncertain operations.
 """
 
 import json
@@ -54,11 +57,6 @@ class WindowStatus:
     def alert(self) -> bool:
         """For the monitor: an overdue or unreadable window is a failure that someone must look at."""
         return self.state in {WindowState.OVERDUE, WindowState.UNREADABLE}
-
-    @property
-    def writes_may_resume(self) -> bool:
-        """Only a closed window lets a later stage re-enable writes. Never decided by the clock."""
-        return self.state is WindowState.CLOSED
 
     def describe(self) -> str:
         if self.state is WindowState.CLOSED:

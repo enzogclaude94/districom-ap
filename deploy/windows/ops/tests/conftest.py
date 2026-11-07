@@ -17,7 +17,7 @@ import pytest
 
 CRITERIA: dict[str, str] = {
     "C1-1": "Estructura de carpetas idempotente y configuración que rechaza variables faltantes o inseguras sin mostrar valores",
-    "C1-2": "Ventana de mantenimiento con operación dueña y registro de operaciones: el vencimiento alerta sin cerrar la ventana ni habilitar escrituras",
+    "C1-2": "Ventana de mantenimiento con operación dueña y registro de operaciones: el vencimiento alerta sin cerrar la ventana ni habilitar escrituras; registros inválidos o inciertos y ventana ausente con operación incompleta bloquean la reactivación",
     "C1-3": "Logs sin secretos ni datos personales",
 }
 OUTSIDE_PYTEST = {"C1-4": "Calidad: ruff, ruff format y mypy estricto (pasos del job de CI)"}

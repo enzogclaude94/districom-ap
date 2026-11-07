@@ -8,6 +8,7 @@ import pytest
 
 from districom_ops.maintenance import MaintenanceError, MaintenanceWindow, WindowState
 from districom_ops.oplog import Event, Kind, OperationError, OperationsLog
+from districom_ops.safety import writes_resume_check
 
 
 @pytest.fixture
@@ -30,14 +31,14 @@ def test_a_window_belongs_to_one_operation_and_only_it_closes_it(
     assert status.state is WindowState.OPEN
     assert status.window is not None
     assert (status.window.operation_id, status.window.kind) == (op_id, Kind.DAY_CLOSE)
-    assert not status.writes_may_resume
+    assert not writes_resume_check(window, 60).allowed
     with pytest.raises(MaintenanceError, match=op_id):
         window.open(Kind.UPDATE, "otra")
     with pytest.raises(MaintenanceError, match="belongs to"):
         window.close("update-20260101T000000Z-abcdef")
     assert window.status(60).state is WindowState.OPEN
     window.close(op_id)
-    assert window.status(60).writes_may_resume
+    assert writes_resume_check(window, 60).allowed
     op = oplog.read().operations[op_id]
     assert [e["event"] for e in op.events] == ["started", "step", "step", "completed"]
     assert [e.get("step") for e in op.events if e["event"] == "step"] == [
@@ -54,7 +55,7 @@ def test_expiry_alerts_but_never_closes_the_window_or_allows_writes(window: Main
     status = window.status(60, now=later)
     assert status.state is WindowState.OVERDUE
     assert status.alert
-    assert not status.writes_may_resume
+    assert not writes_resume_check(window, 60, now=later).allowed
     assert status.describe().startswith("FAIL")
     assert op_id in status.describe()
     assert window.path.read_bytes() == before  # reading the status never changes the window
@@ -68,7 +69,7 @@ def test_an_unreadable_window_is_open_with_unknown_owner(window: MaintenanceWind
     status = window.status(60)
     assert status.state is WindowState.UNREADABLE
     assert status.alert
-    assert not status.writes_may_resume
+    assert not writes_resume_check(window, 60).allowed
     with pytest.raises(MaintenanceError):
         window.open(Kind.MANUAL, "intento")
     with pytest.raises(MaintenanceError, match="unreadable"):

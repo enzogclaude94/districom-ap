@@ -11,9 +11,14 @@ Python con solo la biblioteca estándar (decisión D1). Reutiliza `districom_bac
 | `layout` | Carpetas `releases\`, `config\`, `logs\` y `state\` bajo la raíz. Las crea si faltan; correrlo de nuevo no cambia nada. El enlace `current` es de C12 |
 | `config` | Lee `config\districom.env` en forma literal. Rechaza variables faltantes o inseguras (bases fuera de `127.0.0.1`, contraseñas débiles o de ejemplo, el mismo rol para la app y la operación, una LAN pública) y nombra cada problema **sin mostrar el valor**. Los secretos nunca aparecen en un `repr` ni en un log |
 | `logs` | Un JSON por línea en `logs\ops.log`. Enmascara los secretos registrados, las credenciales en URL, los pares `password=…`, los campos con nombre de secreto y los CUIT. De una excepción guarda el tipo y el mensaje enmascarado, nunca el traceback |
-| `oplog` | Registro de operaciones `state\operations.jsonl`, solo agregado, con `fsync` en cada evento. Cada operación (cierre, actualización, rollback, manual) tiene un id, sus pasos y un único final: `completed`, `failed` o `reverted`. Sin final queda **incompleta**. Una línea cortada por un corte se informa y se ignora, sin reescribir el archivo |
+| `oplog` | Registro de operaciones `state\operations.jsonl`, solo agregado, con `fsync` en cada evento. Cada operación (cierre, actualización, rollback, manual) tiene un id, sus pasos y un único final: `completed`, `failed` o `reverted`. Sin final queda **incompleta**. La lectura es estricta y nunca modifica el archivo: una línea JSON válida con campos faltantes, tipos incorrectos, un evento o tipo desconocido, eventos de una operación que no empezó o posteriores a su final es **inválida** y deja la operación **incierta** (o todo el registro, si no nombra ninguna). La única línea tolerada es la última cortada por un corte, que el evento siguiente cierra con un `torn_line_sealed` que la nombra |
 | `maintenance` | Ventana de mantenimiento `state\maintenance.json` con la **operación dueña**. Solo su dueña la cierra y no se abre una segunda. Al pasar `MAINTENANCE_MAX_MINUTES` da **FAIL** (alerta), pero **nunca se cierra sola ni habilita escrituras**. Un archivo ilegible cuenta como ventana abierta con dueña desconocida |
-| `cli` | `districom-ops init`, `check-config`, `maintenance open\|close\|status` y `operations` |
+| `safety` | `writes_resume_check`: verificación conjunta y de solo lectura. Dice que sería seguro reactivar escrituras **solo si** la ventana está cerrada, el registro se lee y no tiene líneas inválidas, y no hay operaciones incompletas ni inciertas. Que falte `maintenance.json` no alcanza. C1 no desbloquea nada: **C9 debe consultar esta verificación antes de reactivar la aplicación** |
+| `cli` | `districom-ops init`, `check-config`, `maintenance open\|close\|status`, `operations` y `resume-check` |
+
+## Regla de logs para C2 a C13
+
+Los logs operativos **no deben incorporar** información personal de clientes, teléfonos, direcciones ni valores completos de consultas SQL (texto o parámetros). El enmascarado de `logs` cubre secretos, credenciales y CUIT, y no es una red de seguridad para lo demás: cada etapa registra solo identificadores técnicos, conteos, estados y clases de error. Regla obligatoria (Enzo, 2026-11-07).
 
 ## Cómo correrlo
 
