@@ -285,8 +285,11 @@ Enzo los fijó el 2026-11-05 al cerrar W2‑A. Se suman a los dos requisitos del
   - Logs JSON sin secretos ni datos personales.
   - Registro de operaciones de solo agregado.
   - Ventana de mantenimiento con su operación dueña. El vencimiento genera una alerta, pero nunca cierra la ventana ni habilita escrituras.
+  - Lectura estricta del registro: una línea estructuralmente inválida deja incierta su operación, o todo el registro; solo se tolera la última línea cortada por un corte. El archivo nunca se reescribe.
+  - Verificación conjunta `writes_resume_check` (ventana + registro): una ventana ausente con una operación incompleta o incierta **no** permite reactivar escrituras. **C9 debe consultarla** antes de reactivar la aplicación; C1 no desbloquea nada.
   - Criterios C1‑1 a C1‑4.
   - PENDIENTE: los permisos NTFS (C3), Windows 11 Pro y un corte de energía real.
+- **Regla de logs para C2 a C13** (Enzo, 2026-11-07): los logs operativos no deben incorporar información personal de clientes, teléfonos, direcciones ni valores completos de consultas SQL.
 - Simular algo en GitHub Actions no prueba un acceso remoto, un apagado real ni una recuperación física.
 
 ## 9. Pendientes que no dependen del desarrollo
