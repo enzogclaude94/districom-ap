@@ -21,6 +21,7 @@ READ = 0x120089  # FILE_GENERIC_READ
 READ_EXECUTE = 0x1200A9  # FILE_GENERIC_READ | FILE_GENERIC_EXECUTE
 MODIFY = 0x1301BF  # read, write, execute and delete; never change permissions, take ownership or delete children
 FULL = 0x1F01FF
+TRAVERSE = 0x1000A0  # traverse a folder and read its attributes: never list it, nor open what is inside
 WRITE_BITS = 0x000D0156  # write data, append, write EA/attributes, delete, delete child, WRITE_DAC, WRITE_OWNER
 GENERIC_ALL, GENERIC_EXECUTE, GENERIC_WRITE, GENERIC_READ = 0x10000000, 0x20000000, 0x40000000, 0x80000000
 

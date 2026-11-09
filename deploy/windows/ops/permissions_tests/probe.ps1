@@ -12,6 +12,7 @@ foreach ($check in (Get-Content -Raw -LiteralPath $Checks | ConvertFrom-Json)) {
                 if ([IO.Directory]::Exists($check.path)) { [void][IO.Directory]::GetFileSystemEntries($check.path) }
                 else { [IO.File]::Open($check.path, 'Open', 'Read', 'ReadWrite').Close() }
             }
+            'attributes' { [void][IO.File]::GetAttributes($check.path) }  # what Node.js and the volume checks need
             'write' { [IO.File]::Open($check.path, 'Open', 'Write', 'ReadWrite').Close() }
             'create' {
                 $file = Join-Path $check.path ("c3-probe-" + [guid]::NewGuid().ToString('N') + '.tmp')

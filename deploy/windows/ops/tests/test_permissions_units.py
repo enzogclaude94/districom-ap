@@ -155,6 +155,26 @@ def test_each_account_gets_only_what_it_needs(tmp_path: Path) -> None:
         assert granted & ntfs.WRITE_BITS == 0
 
 
+def test_services_may_traverse_the_folders_above_their_grants_and_nothing_more(tmp_path: Path) -> None:
+    """Node.js reads the attributes of every folder of a path and the stack checks the volume of the PostgreSQL
+    data: without traverse they stop (EPERM on ``releases``). Traverse is the folder's own, never inherited."""
+    pol, fake, root = build(tmp_path)
+    permissions.apply(pol, fake)
+    base = {ADMINISTRATORS: FULL, SYSTEM: FULL}
+    releases = who(fake, root / "releases")
+    assert releases == {**base, **{SID[r]: ntfs.TRAVERSE for r in ("backend", "frontend", "stack")}}
+    assert who(fake, root)[SID["frontend"]] == ntfs.TRAVERSE
+    assert who(fake, root / "pgdata") == {**base, SID["postgresql"]: FULL, SID["stack"]: ntfs.TRAVERSE}
+    assert who(fake, root / "pgdata" / "PG_VERSION") == {**base, SID["postgresql"]: FULL}
+    assert who(fake, root / "config")[SID["caddy"]] == ntfs.TRAVERSE
+    assert SID["caddy"] not in who(fake, root / "config" / "districom.env")
+    assert who(fake, root / "downloads") == base
+    assert ntfs.TRAVERSE & 0x1 == 0, "traverse never lists a folder"
+    assert ntfs.TRAVERSE & ntfs.WRITE_BITS == 0
+    fake.explicit[root / "downloads"] = (False, (Ace(SID["frontend"], ntfs.TRAVERSE),))
+    assert [p.code for p in permissions.verify(pol, fake)] == ["excess_read"], "traverse only where the policy says"
+
+
 def test_modify_never_lets_an_account_change_permissions_or_delete_children() -> None:
     assert MODIFY & 0x40000 == 0  # WRITE_DAC
     assert MODIFY & 0x80000 == 0  # WRITE_OWNER

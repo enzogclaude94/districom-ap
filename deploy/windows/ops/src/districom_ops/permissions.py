@@ -13,9 +13,12 @@ protected, with Administrators and SYSTEM only. Each service account then gets e
 | ``data\\uploads`` | backend (modify) |
 | ``logs\\`` and ``state\\`` | stack (modify); each service's own folder below them, protected, only for it |
 | backup disk marker | stack (read) |
+| each folder above a grant (and the PostgreSQL data, for the stack) | traverse: that folder only, never inherited |
 
 No service can write a release, a runtime or a service definition, nor change permissions (modify never includes
-``WRITE_DAC``, ``WRITE_OWNER`` or delete-child). Links are never followed: a link below a managed folder that
+``WRITE_DAC``, ``WRITE_OWNER`` or delete-child). Traverse lets a service resolve a path the way Node.js and
+the volume checks do (they read the attributes of every folder on the way); it does not let it list a folder.
+Links are never followed: a link below a managed folder that
 points elsewhere stops ``apply`` before anything changes. Problems name the path and a code, never a value.
 """
 
@@ -25,7 +28,7 @@ from pathlib import Path
 from typing import Protocol
 
 from districom_ops import ntfs
-from districom_ops.ntfs import FULL, MODIFY, READ, READ_EXECUTE, WRITE_BITS, Ace, Dacl
+from districom_ops.ntfs import FULL, MODIFY, READ, READ_EXECUTE, TRAVERSE, WRITE_BITS, Ace, Dacl
 from districom_ops.winservice import service_sid
 
 ADMINISTRATORS = "S-1-5-32-544"
@@ -71,12 +74,14 @@ class Rule:
     grants: tuple[tuple[str, int], ...] = ()
     protected: bool = False
     required: bool = True  # a missing optional path (a runtime not installed yet) is skipped, not a problem
+    traverse: tuple[str, ...] = ()  # SIDs that may pass through this folder: the folder only, never inherited
 
     def aces(self, container: bool) -> tuple[Ace, ...]:
         flags = CONTAINER if container else 0
         explicit = [Ace(sid, mask, flags) for sid, mask in self.grants]
         if self.protected:
             explicit = [Ace(a.sid, a.mask, flags) for a in BASE] + explicit
+        explicit += [Ace(sid, TRAVERSE) for sid in self.traverse]
         return tuple(sorted(explicit))
 
 
@@ -154,11 +159,43 @@ def policy(
     ]
     if backup_marker is not None:
         rules.append(Rule(backup_marker, ((sid["stack"], READ),), protected=True))
+    rules = _with_traverse(root, rules, {pg_data: [sid["stack"]]})
     trees = [root] if pg_data.is_relative_to(root) else [root, pg_data]
     # uv names each Python by a link to its exact version (cpython-3.12-… → cpython-3.12.16-…): a link that stays
     # inside its own runtime is as harmless as one that stays inside its release.
     contained = release_dirs + [home for home, _ in runtimes.values()]
     return Policy(root, rules, trees, links, contained)
+
+
+def _with_traverse(root: Path, rules: list[Rule], extra: dict[Path, list[str]]) -> list[Rule]:
+    """Every grantee may traverse the folders above its grant up to the root (never above it: the folders of
+    ``C:\\`` and of other programs are not ours). ``extra``: folders that a service only needs to resolve (the
+    stack checks the volume of the PostgreSQL data, whose content it cannot read)."""
+    wanted: dict[Path, set[str]] = {}
+
+    def above(path: Path, sid: str) -> None:
+        for parent in path.parents:
+            if not parent.is_relative_to(root):
+                break
+            wanted.setdefault(parent, set()).add(sid)
+
+    for path, sids in extra.items():
+        for sid in sids:
+            wanted.setdefault(path, set()).add(sid)
+            above(path, sid)
+    for rule in rules:
+        for sid, _ in rule.grants:
+            above(rule.path, sid)
+    by_path = {r.path: r for r in rules}
+    result = []
+    for rule in rules:
+        granted = {s for s, _ in rule.grants}
+        passing = tuple(sorted(wanted.pop(rule.path, set()) - granted))
+        result.append(Rule(rule.path, rule.grants, rule.protected, rule.required, passing) if passing else rule)
+    for path in sorted(wanted, key=lambda p: len(p.parts)):
+        if path not in by_path:
+            result.append(Rule(path, required=False, traverse=tuple(sorted(wanted[path]))))
+    return result
 
 
 # --- walking ----------------------------------------------------------------------------------------------------
@@ -259,9 +296,11 @@ def apply(pol: Policy, backend: Backend = NTFS) -> list[str]:
 # --- verify -----------------------------------------------------------------------------------------------------
 
 
-def _allowed_mask(rule_chain: list[Rule], sid: str) -> int:
-    """What the closest rules give ``sid`` (protected rules cut what is above them)."""
+def _allowed_mask(path: Path, rule_chain: list[Rule], sid: str) -> int:
+    """What the closest rules give ``sid`` (protected rules cut what is above them; traverse is the folder's own)."""
     mask = 0
+    if rule_chain and rule_chain[0].path == path and sid in rule_chain[0].traverse:
+        mask |= TRAVERSE
     for rule in rule_chain:  # closest first
         for granted_sid, granted in rule.grants:
             if granted_sid == sid:
@@ -312,7 +351,7 @@ def verify(pol: Policy, backend: Backend = NTFS) -> list[Problem]:
             if ace.sid in BROAD:
                 problems.append(Problem(shown, "broad_access", BROAD[ace.sid]))
                 continue
-            allowed = _allowed_mask(rules, ace.sid)
+            allowed = _allowed_mask(path, rules, ace.sid)
             if ace.mask & ~allowed:
                 excess = ace.mask & ~allowed
                 kind = "write" if excess & WRITE_BITS else "read"
