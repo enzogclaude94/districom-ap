@@ -196,6 +196,9 @@ def _services(args: argparse.Namespace, config: OpsConfig) -> int:
         changed = database.init(install)
         log.info("database_init", extra={"changed": changed})
         return 0
+    if args.command in ("permissions", "integrity") and install.release is None:
+        log.error("refused", extra={"reason": "no release recorded in state\\services.json: run services install"})
+        return 2
     if args.command == "permissions":
         policy = services.permission_policy(install)
         if args.action == "apply":

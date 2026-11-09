@@ -192,6 +192,18 @@ def test_a_link_outside_its_release_stops_apply_before_anything_changes(tmp_path
     assert "foreign_link" in {p.code for p in permissions.verify(pol, fake)}
 
 
+def test_a_link_inside_its_runtime_is_allowed(tmp_path: Path) -> None:
+    pol, fake, root = build(tmp_path)
+    exact = root / "runtime" / "python" / "cpython-3.12.16"
+    exact.mkdir()
+    os.symlink(exact, root / "runtime" / "python" / "cpython-3.12", target_is_directory=True)  # what uv does
+    permissions.apply(pol, fake)
+    assert permissions.verify(pol, fake) == []
+    os.symlink(root / "config", root / "runtime" / "python" / "escape", target_is_directory=True)
+    with pytest.raises(PermissionsError):
+        permissions.apply(pol, fake)
+
+
 def test_the_cache_link_must_point_to_its_own_folder(tmp_path: Path) -> None:
     pol, fake, root = build(tmp_path)
     cache = root / "releases" / "r1" / "frontend" / ".next" / "cache"

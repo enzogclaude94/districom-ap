@@ -126,13 +126,13 @@ else:
 
 
 def _grant(path: Path, sid: str, rights: str) -> None:
-    result = subprocess.run(
-        ["icacls.exe", str(path), "/grant", f"*{sid}:(OI)(CI){rights}", "/Q"],  # noqa: S607
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
+    """Adds an inheritable allow entry by SID with advapi32 (icacls cannot name a service SID before the service
+    exists). Only for the probe's own folders, outside the installation."""
+    mask = {"RX": ntfs.READ_EXECUTE, "M": ntfs.MODIFY}[rights]
+    current = ntfs.read(path)
+    wanted = ntfs.Ace(sid, mask, ntfs.OBJECT_INHERIT | ntfs.CONTAINER_INHERIT)
+    if wanted not in current.explicit:
+        ntfs.write(path, current.protected, (*current.explicit, wanted))
 
 
 def _probe_service_files(name: str, checks: Path, out: Path) -> str:

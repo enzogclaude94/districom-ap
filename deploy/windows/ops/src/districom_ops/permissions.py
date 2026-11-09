@@ -96,7 +96,7 @@ class Policy:
     rules: list[Rule]
     trees: list[Path]  # what is walked: the root and the PostgreSQL data when it lives elsewhere
     links: dict[Path, Path] = field(default_factory=dict)  # allowed links outside their release: link → target
-    release_dirs: list[Path] = field(default_factory=list)
+    release_dirs: list[Path] = field(default_factory=list)  # links may stay inside one of these
 
     def rule_for(self, path: Path) -> Rule | None:
         for rule in self.rules:
@@ -155,7 +155,10 @@ def policy(
     if backup_marker is not None:
         rules.append(Rule(backup_marker, ((sid["stack"], READ),), protected=True))
     trees = [root] if pg_data.is_relative_to(root) else [root, pg_data]
-    return Policy(root, rules, trees, links, release_dirs)
+    # uv names each Python by a link to its exact version (cpython-3.12-… → cpython-3.12.16-…): a link that stays
+    # inside its own runtime is as harmless as one that stays inside its release.
+    contained = release_dirs + [home for home, _ in runtimes.values()]
+    return Policy(root, rules, trees, links, contained)
 
 
 # --- walking ----------------------------------------------------------------------------------------------------
@@ -194,7 +197,7 @@ def foreign_links(pol: Policy, backend: Backend) -> list[Problem]:
             else:
                 ok = any(path.is_relative_to(r) and target.is_relative_to(r) for r in pol.release_dirs)
             if not ok:
-                problems.append(Problem(_show(pol, path), "foreign_link", "points outside its release"))
+                problems.append(Problem(_show(pol, path), "foreign_link", "points outside its release or runtime"))
     return problems
 
 
