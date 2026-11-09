@@ -30,6 +30,8 @@ RELEASE = os.environ.get("DISTRICOM_C2_RELEASE", "ci")
 DISKS = Path(os.environ.get("DISTRICOM_C2_DISKS", r"C:\c2-disks"))
 LETTER = "R"
 HOST = "districom.test"
+# Long enough for a disk image to mount on a CI runner (Mount-DiskImage took > 12 s in run 6).
+DISK_WAIT_SECONDS = 90
 CONFIG = ROOT / "config" / "districom.env"
 
 pytestmark = pytest.mark.timeout(900)
@@ -223,7 +225,7 @@ def test_runtimes_are_verified_and_a_tampered_download_is_refused() -> None:
                 "LAN_SUBNET=192.168.10.0/24",
                 f"SECRET_KEY={secret_key}",
                 f"BACKUP_DISK_ROOT={disk_root()}",
-                "BACKUP_DISK_WAIT_SECONDS=20",
+                f"BACKUP_DISK_WAIT_SECONDS={DISK_WAIT_SECONDS}",
                 *(f"{key}={port}" for key, port in zip(("HTTP_PORT", "HTTPS_PORT"), caddy_ports(), strict=True)),
             ]
         )
@@ -495,7 +497,7 @@ def test_the_stack_gives_up_after_the_wait_and_records_why() -> None:
     detach(DISKS / "backup1.vhdx")
     since = now()
     winservice.start(services.STACK)
-    deadline = time.monotonic() + 20 + 60
+    deadline = time.monotonic() + DISK_WAIT_SECONDS + 60
     while winservice.status(services.STACK).state is not State.STOPPED:
         assert winservice.status(services.PG).state is State.STOPPED
         assert time.monotonic() < deadline, "the stack did not give up"
