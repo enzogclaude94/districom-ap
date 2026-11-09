@@ -174,7 +174,7 @@ Si un paso falla antes del 4, la app vuelve a quedar disponible. Si falla despu�
 | **W1** | ADR 016 (Propuesto) y este plan | CI (documentación) | DONE (PR #70, 2026-11-04) |
 | **W2‑A** | Prueba de concepto aislada de backups físicos, WAL, PITR y restauración (`deploy/windows/backup/`) | GitHub Actions (Windows); lo no reproducible queda PENDIENTE | DONE como prueba de concepto y CI (PR #72, 2026-11-05); lo de laboratorio sigue PENDIENTE: ver §8.2 |
 | **W2‑B** | Pruebas automatizadas de los componentes compatibles con Windows (backend en Windows, orden de textos, frontend) | GitHub Actions (Windows) | DONE a nivel de compatibilidad y pruebas automatizadas (PR #75, 2026-11-06); lo de laboratorio sigue PENDIENTE: ver §8.4 |
-| **W2‑C** | El resto (operación, `install.ps1`, servicios, firewall, cierre de jornada, suite de aceptación) | CI y laboratorio Windows 11 Pro | En curso por subetapas (C1 a C13, ver §8.5): C1 DONE; C2 en curso; C3 a C13 sin autorizar |
+| **W2‑C** | El resto (operación, `install.ps1`, servicios, firewall, cierre de jornada, suite de aceptación) | CI y laboratorio Windows 11 Pro | En curso por subetapas (C1 a C13, ver §8.5): C1 DONE; C2 DONE en implementación y CI (Windows 11 Pro real PENDIENTE); C3 en curso; C4 a C13 sin autorizar |
 | W3 | Laboratorio Windows 11 Pro: suite completa y pruebas pendientes | PC de laboratorio (no el servidor) | Sin laboratorio confirmado |
 | W4 | Preparación del equipo: RAM, RAID, SMART, Windows 11 Pro, BitLocker, UPS | Servidor | No autorizado |
 | W5–W8 | Staging, pruebas en el servidor, transición y go‑live (O10) | Servidor | Equivalen a S3 |
@@ -289,7 +289,7 @@ Enzo los fijó el 2026-11-05 al cerrar W2‑A. Se suman a los dos requisitos del
   - Verificación conjunta `writes_resume_check` (ventana + registro): una ventana ausente con una operación incompleta o incierta **no** permite reactivar escrituras. **C9 debe consultarla** antes de reactivar la aplicación; C1 no desbloquea nada.
   - Criterios C1‑1 a C1‑4.
   - PENDIENTE: los permisos NTFS (C3), Windows 11 Pro y un corte de energía real.
-- **C2, servicios nativos** (`deploy/windows/ops/`, README §C2; job de CI «Windows services (W2-C2)»). En curso, PR #80.
+- **C2, servicios nativos** (`deploy/windows/ops/`, README §C2; job de CI «Windows services (W2-C2)»). **DONE a nivel de implementación y CI** (PR #80, merge `91b3092`, Enzo 2026-11-09). No declara validada la operación en Windows 11 Pro real.
   - Cinco servicios, cada uno con su cuenta virtual `NT SERVICE\<nombre>` (sin contraseña ni permisos de administrador):
     - `DistriComPostgreSQL`: `pg_ctl register`, inicio manual;
     - `DistriComBackend`, `DistriComFrontend` y `DistriComCaddy`: WinSW 2.12, inicio manual;
@@ -307,12 +307,43 @@ Enzo los fijó el 2026-11-05 al cerrar W2‑A. Se suman a los dos requisitos del
     Además, el volumen tiene que ser distinto del de sistema y del de los datos. El número de serie físico queda PENDIENTE para el laboratorio, porque leerlo requiere privilegios. Si el disco se monta tarde, el Stack lo espera `BACKUP_DISK_WAIT_SECONDS`.
   - Los runtimes (WinSW, PostgreSQL, Caddy y Node) están fijados por versión y checksum en `templates/versions.json`. Una descarga con otro hash se borra sin extraer.
   - **Puertos de Caddy:** 80 y 443 por defecto; `HTTP_PORT` y `HTTPS_PORT` los cambian. En el runner de GitHub el puerto 80 lo ocupa el proceso System (PID 4, `http.sys`), así que el CI usa 8080 y 8443. En el servidor real hay que comprobar antes qué programa usa 80 y 443 (IIS, `http.sys` o Store Sys): PENDIENTE de laboratorio.
-  - Permisos mínimos para arrancar: cada cuenta recibe solo lo que escribe, y los secretos se leen solo por su servicio. **Las ACL definitivas son de C3.**
+  - Permisos: desde C3, `services install` aplica las ACL definitivas (abajo).
   - PENDIENTE, nunca PASS:
     - el arranque después de un reinicio real y sin iniciar sesión;
     - Windows 11 Pro;
     - el disco desconectado físicamente (en CI se desconecta un disco virtual);
     - la parada durante el apagado de Windows (C10 y C11).
+- **C3, cuentas de servicio y permisos NTFS** (`deploy/windows/ops/`, README §C3; job de CI «Windows permissions (W2-C3)»). En curso, sin merge.
+  - La raíz de la instalación **no hereda de `C:\`** (que por defecto deja escribir a cualquier usuario que inició sesión): queda protegida, con Administradores y SYSTEM. Cada cuenta virtual recibe solo lo suyo:
+    - `runtime\<runtime>`: lectura y ejecución, solo los servicios que lo usan;
+    - `services\<servicio>.exe/.xml`: lectura y ejecución, ese servicio;
+    - la release en uso: lectura y ejecución (`backend` → backend, `frontend` → frontend, `windows` → Stack). **Ningún servicio escribe una release, un runtime ni una definición de servicio**;
+    - `config\`: solo administradores. `districom.env` lo lee el Stack, `config\backend\` el backend, `Caddyfile` Caddy. `postgres.secret` e `integrity.json`, nadie más;
+    - los datos de PostgreSQL: solo PostgreSQL (control total);
+    - `data\uploads`: el backend (modificar);
+    - `logs\` y `state\`: el Stack (modificar). Cada servicio escribe sus logs en su propia carpeta protegida (`logs\services\<servicio>`, `logs\postgresql`); `state\caddy` (con las claves de Caddy) es solo de Caddy;
+    - la marca del disco de backup: lectura para el Stack.
+  - «Modificar» nunca incluye cambiar permisos, tomar posesión ni borrar lo de otros.
+  - **`.next\cache`:** Next.js escribe ahí al servir. Es una junction a `state\frontend-cache`, del frontend, así la release sigue de solo lectura.
+  - **Junctions:** nunca se siguen al recorrer. Si una apunta fuera de su release, `permissions apply` se niega sin cambiar nada.
+  - Las ACL se escriben y se verifican por SID con `advapi32`, leyendo las listas efectivas de cada objeto. Aplicarlas dos veces no cambia nada, y los permisos sueltos debajo de una regla (por ejemplo, los de C2) se quitan.
+  - **Integridad de ejecutables:** `config\integrity.json` guarda el SHA‑256 de runtimes, envoltorios y release. `integrity verify` detecta un cambio aunque lo haga un administrador.
+  - No cambia las ACL generales del sistema ni las de otros programas: solo la raíz de DistriCom, los datos de PostgreSQL y la marca del disco de backup.
+  - PENDIENTE, nunca PASS:
+    - las cuentas y el grupo de IT reales del cliente (hoy: Administradores);
+    - que Store Sys y su proveedor no tengan acceso, comprobado con sus cuentas reales;
+    - la cuenta de backups y la carpeta de backups en el disco (C6);
+    - Windows 11 Pro y Defender.
+- **Riesgos que siguen abiertos para las etapas siguientes** (Enzo, 2026-11-09):
+  - la verificación física del disco y su número de serie;
+  - el reinicio real de Windows sin sesión iniciada;
+  - la ocupación de los puertos 80 y 443 por otros servicios;
+  - la compatibilidad con Defender;
+  - la validación independiente de la procedencia del paquete de PostgreSQL de EDB, antes de producción;
+  - el control de integridad y de permisos de los ejecutables instalados (C3 lo implementa; su ejecución periódica y la alerta son de etapas posteriores);
+  - la coordinación del supervisor con las operaciones de mantenimiento y el bloqueo de escrituras;
+  - el cierre de PostgreSQL solo después de completar las garantías de C9, C10 y C11.
+  Las simulaciones de GitHub Actions no dan PASS a las pruebas físicas.
 - **Requisito obligatorio para C9** (Enzo, 2026-11-09): la comprobación de reanudación (`writes_resume_check`) y el desbloqueo efectivo de escrituras tienen que estar coordinados, sin condición de carrera. Entre la comprobación y el desbloqueo no puede abrirse una ventana ni empezar una operación que la comprobación no haya visto. Por ejemplo, ambos se hacen bajo un mismo bloqueo exclusivo, que también toman `maintenance open` y el inicio de operaciones, y la comprobación se repite dentro de ese bloqueo justo antes de desbloquear.
 - **A‑14** (PR #73, segmento cerrado que no llegó en 180 s) sigue PENDIENTE, registrada aparte.
 - **Regla de logs para C2 a C13** (Enzo, 2026-11-07): los logs operativos no deben incorporar información personal de clientes, teléfonos, direcciones ni valores completos de consultas SQL.

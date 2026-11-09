@@ -4,7 +4,23 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
-### Added — Servidor: W2‑C2, servicios nativos de Windows (en revisión)
+### Added — Servidor: W2‑C3, cuentas de servicio y permisos NTFS (en revisión)
+- `deploy/windows/ops/` aplica las ACL definitivas al instalar los servicios:
+  - la raíz no hereda de `C:\`;
+  - cada cuenta virtual recibe solo lo que lee o escribe;
+  - las releases, los runtimes y las definiciones de servicio son de solo lectura para todos los servicios;
+  - los secretos los lee solo su servicio.
+- `permissions apply|verify` e `install\acl.ps1`: las ACL se escriben y se verifican por SID, leyendo las listas efectivas. Aplicarlas es idempotente, quita los permisos sueltos y se niega si una junction sale de su release.
+- `.next\cache` del frontend pasa a `state\frontend-cache` (junction).
+- Cada servicio WinSW escribe sus logs en `logs\services\<servicio>\`.
+- `integrity record|verify`: SHA‑256 de runtimes, envoltorios y release en `config\integrity.json`.
+- Job de CI «Windows permissions (W2-C3)», con C3‑1 a C3‑5 medidos bajo siete identidades; los diez jobs existentes no cambian.
+- `docs/WINDOWS_DEPLOYMENT.md §8.5`:
+  - C2 queda DONE a nivel de implementación y CI;
+  - se describe C3;
+  - se listan los riesgos que siguen abiertos.
+
+### Added — Servidor: W2‑C2, servicios nativos de Windows (DONE en implementación y CI, PR #80)
 - `deploy/windows/ops/` incorpora cinco servicios, cada uno con su cuenta virtual:
   - PostgreSQL 17, con `pg_ctl register`;
   - backend, frontend y Caddy, con WinSW 2.12;
