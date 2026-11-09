@@ -322,7 +322,8 @@ Enzo los fijó el 2026-11-05 al cerrar W2‑A. Se suman a los dos requisitos del
     - los datos de PostgreSQL: solo PostgreSQL (control total);
     - `data\uploads`: el backend (modificar);
     - `logs\` y `state\`: el Stack (modificar). Cada servicio escribe sus logs en su propia carpeta protegida (`logs\services\<servicio>`, `logs\postgresql`); `state\caddy` (con las claves de Caddy) es solo de Caddy;
-    - la marca del disco de backup: lectura para el Stack.
+    - la marca del disco de backup: lectura para el Stack;
+    - cada carpeta por encima de un permiso, hasta la raíz, y la carpeta de datos de PostgreSQL para el Stack: solo «atravesar» (leer atributos, sin listar ni heredar). Node.js lee los atributos de cada carpeta de una ruta y el Stack comprueba el volumen de los datos de PostgreSQL sin poder leerlos.
   - «Modificar» nunca incluye cambiar permisos, tomar posesión ni borrar lo de otros.
   - **`.next\cache`:** Next.js escribe ahí al servir. Es una junction a `state\frontend-cache`, del frontend, así la release sigue de solo lectura.
   - **Junctions:** nunca se siguen al recorrer. Si una apunta fuera de su release, `permissions apply` se niega sin cambiar nada.

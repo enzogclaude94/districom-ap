@@ -14,6 +14,7 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 - `.next\cache` del frontend pasa a `state\frontend-cache` (junction).
 - Cada servicio WinSW escribe sus logs en `logs\services\<servicio>\`.
 - `integrity record|verify`: SHA‑256 de runtimes, envoltorios y release en `config\integrity.json`.
+- Las cuentas de servicio pueden «atravesar» (leer atributos, sin listar ni heredar) las carpetas por encima de sus permisos y el Stack la carpeta de datos de PostgreSQL: sin eso Node.js no resolvía la ruta del frontend (EPERM en `releases\`) y el Stack no podía comprobar el volumen de la base.
 - Job de CI «Windows permissions (W2-C3)», con C3‑1 a C3‑5 medidos bajo siete identidades; los diez jobs existentes no cambian.
 - `docs/WINDOWS_DEPLOYMENT.md §8.5`:
   - C2 queda DONE a nivel de implementación y CI;

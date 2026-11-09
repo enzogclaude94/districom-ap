@@ -80,6 +80,7 @@ Las pruebas C2‑1 a C2‑7 (`services_tests/`) instalan servicios reales y corr
 | `logs\services\<servicio>`, `logs\postgresql` (protegidas) | ese servicio (modificar) |
 | `state\caddy` (protegida, claves de Caddy) · `state\frontend-cache` (protegida) | Caddy · frontend (modificar) |
 | Marca del disco de backup (protegida) | Stack (lectura) |
+| Cada carpeta por encima de un permiso (hasta la raíz); datos de PostgreSQL para el Stack | atravesar: leer atributos, sin listar, sin herencia |
 
 | Módulo | Qué hace |
 |---|---|
