@@ -8,6 +8,7 @@ it is a **simulation** of a disconnected disk, and the real one stays PENDIENTE.
 import json
 import os
 import secrets
+import socket
 import subprocess
 import sys
 import time
@@ -174,6 +175,34 @@ def disks() -> None:
     DISKS.mkdir(parents=True, exist_ok=True)
 
 
+def _port_free(port: int) -> bool:
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        probe.bind(("0.0.0.0", port))  # noqa: S104 - the same bind Caddy does
+    except OSError:
+        return False
+    finally:
+        probe.close()
+    return True
+
+
+def _holders(port: int) -> str:
+    """Who listens on ``port`` (netstat), so the results say why the standard ports were not used."""
+    command = ["netstat.exe", "-ano", "-p", "TCP"]
+    out = subprocess.run(command, capture_output=True, text=True, check=False).stdout
+    pids = {line.split()[-1] for line in out.splitlines() if f":{port} " in line and "LISTENING" in line}
+    return ", ".join(sorted(pids)) or "ninguno visible (puerto reservado o excluido)"
+
+
+def caddy_ports() -> tuple[int, int]:
+    """80/443 as in production when the runner leaves them free; otherwise 8080/8443, recorded in the results."""
+    if _port_free(80) and _port_free(443):
+        metrics["puertos de Caddy"] = "80 y 443 (los de producción)"
+        return 80, 443
+    metrics["puertos de Caddy"] = f"8080 y 8443: el runner ocupa 80 (PID {_holders(80)}) o 443 (PID {_holders(443)})"
+    return 8080, 8443
+
+
 # --- C2-1 -------------------------------------------------------------------------------------------------------
 
 
@@ -195,6 +224,7 @@ def test_runtimes_are_verified_and_a_tampered_download_is_refused() -> None:
                 f"SECRET_KEY={secret_key}",
                 f"BACKUP_DISK_ROOT={disk_root()}",
                 "BACKUP_DISK_WAIT_SECONDS=20",
+                *(f"{key}={port}" for key, port in zip(("HTTP_PORT", "HTTPS_PORT"), caddy_ports(), strict=True)),
             ]
         )
         + "\n",

@@ -31,6 +31,7 @@ Python con solo la biblioteca estándar (decisión D1). Reutiliza `districom_bac
 - Vigila PostgreSQL: después de una caída vuelve a verificar el disco y lo reinicia, como máximo 3 veces por hora.
 - Al detenerse, para todo en orden inverso. PostgreSQL se detiene cuando no quedan sesiones de la app.
 - WinSW reinicia el backend, el frontend y Caddy 3 veces; después deja de intentar.
+- Caddy escucha en 80 y 443. Si otro programa del servidor ya los usa, `HTTP_PORT` y `HTTPS_PORT` los cambian; hay que revisarlo en el equipo real (por ejemplo IIS o un servicio de Store Sys).
 - El Stack tiene permiso solo para consultar, arrancar y detener esos cuatro servicios.
 
 | Módulo | Qué hace |

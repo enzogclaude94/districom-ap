@@ -201,9 +201,18 @@ def read_config(path: Path) -> OpsConfig:
 
 # --- W2-C2: settings the services need, validated only by the service commands (C1 commands do not need them) ---
 
-SERVICE_KEYS = ("SECRET_KEY", "BACKUP_DISK_ROOT", "BACKUP_DISK_ID", "BACKUP_DISK_WAIT_SECONDS", "PG_DATA_DIR")
+SERVICE_KEYS = (
+    "SECRET_KEY",
+    "BACKUP_DISK_ROOT",
+    "BACKUP_DISK_ID",
+    "BACKUP_DISK_WAIT_SECONDS",
+    "PG_DATA_DIR",
+    "HTTP_PORT",
+    "HTTPS_PORT",
+)
 MIN_SECRET_KEY_LENGTH = 32
 DEFAULT_BACKUP_DISK_WAIT_SECONDS = 300
+DEFAULT_HTTP_PORT, DEFAULT_HTTPS_PORT = 80, 443
 _DISK_ID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
 _ENV_UNSAFE = re.compile(r"['\r\n\x00]")
 
@@ -215,6 +224,8 @@ class ServicesConfig:
     backup_disk_id: str
     backup_disk_wait_seconds: int
     pg_data_dir: Path
+    http_port: int = DEFAULT_HTTP_PORT
+    https_port: int = DEFAULT_HTTPS_PORT
 
     def secrets(self) -> list[str]:
         return [self.secret_key.reveal()]
@@ -264,9 +275,23 @@ def load_services_config(values: Mapping[str, str], ops: OpsConfig) -> ServicesC
     elif disk_raw and disk_root.is_absolute() and (data_dir == disk_root or data_dir.is_relative_to(disk_root)):
         problems.append(Problem("PG_DATA_DIR", "must not be on the backup disk"))
 
+    ports: dict[str, int] = {}
+    for key, default in (("HTTP_PORT", DEFAULT_HTTP_PORT), ("HTTPS_PORT", DEFAULT_HTTPS_PORT)):
+        raw = values.get(key, "")
+        if not raw:
+            ports[key] = default
+        elif not raw.isdigit() or not 1 <= int(raw) <= 65535:
+            problems.append(Problem(key, "must be a port number from 1 to 65535"))
+        else:
+            ports[key] = int(raw)
+    if len(ports) == 2 and ports["HTTP_PORT"] == ports["HTTPS_PORT"]:
+        problems.append(Problem("HTTPS_PORT", "must differ from HTTP_PORT"))
+
     if problems:
         raise ConfigError(problems)
-    return ServicesConfig(Secret(secret_key), disk_root, disk_id, wait, data_dir)
+    return ServicesConfig(
+        Secret(secret_key), disk_root, disk_id, wait, data_dir, ports["HTTP_PORT"], ports["HTTPS_PORT"]
+    )
 
 
 def read_services_config(path: Path, ops: OpsConfig) -> ServicesConfig:

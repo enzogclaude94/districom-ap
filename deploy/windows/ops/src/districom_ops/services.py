@@ -123,7 +123,10 @@ def specs(install: Install) -> dict[str, WinswSpec]:
         CADDY: WinswSpec(
             id=CADDY,
             name="DistriCom Caddy",
-            description="DistriCom entry point (HTTPS :443, :80). Started by DistriComStack.",
+            description=(
+                f"DistriCom entry point (HTTPS :{install.services.https_port}, HTTP :{install.services.http_port}). "
+                "Started by DistriComStack."
+            ),
             executable=caddy,
             arguments=["run", "--config", str(install.caddyfile), "--adapter", "caddyfile"],
             workdir=install.caddy_state,
@@ -131,6 +134,8 @@ def specs(install: Install) -> dict[str, WinswSpec]:
             env={
                 "DISTRICOM_HOST": install.ops.host,
                 "CADDY_TLS_MODE": "internal",  # C5 switches to the Cloudflare build
+                "CADDY_HTTP_PORT": str(install.services.http_port),
+                "CADDY_HTTPS_PORT": str(install.services.https_port),
                 "XDG_DATA_HOME": str(install.caddy_state / "data"),
                 "XDG_CONFIG_HOME": str(install.caddy_state / "config"),
             },
@@ -385,13 +390,15 @@ def caddy_ca(install: Install) -> Path:
 
 
 def https_get(install: Install, path: str, timeout: float = 10) -> tuple[int, bytes]:
-    """Through Caddy on 127.0.0.1:443 with the configured name, verifying the certificate against Caddy's own CA."""
+    """Through Caddy on 127.0.0.1 (HTTPS port) with the configured name, checking the certificate with Caddy's CA."""
+    port = install.services.https_port
     context = ssl.create_default_context(cafile=str(caddy_ca(install)))
-    raw = socket.create_connection(("127.0.0.1", 443), timeout=timeout)
-    connection = http.client.HTTPConnection(install.ops.host, 443, timeout=timeout)
+    raw = socket.create_connection(("127.0.0.1", port), timeout=timeout)
+    connection = http.client.HTTPConnection(install.ops.host, port, timeout=timeout)
     try:
         connection.sock = context.wrap_socket(raw, server_hostname=install.ops.host)
-        connection.request("GET", path, headers={"Host": install.ops.host})
+        host = install.ops.host if port == 443 else f"{install.ops.host}:{port}"
+        connection.request("GET", path, headers={"Host": host})
         response = connection.getresponse()
         return response.status, response.read()
     finally:

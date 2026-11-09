@@ -261,3 +261,28 @@ def test_services_settings_are_validated_without_values(tmp_path: Path) -> None:
     assert settings.pg_data_dir == root / "pgdata"
     assert settings.backup_disk_wait_seconds == 300
     assert SECRET_KEY not in repr(settings)
+    assert (settings.http_port, settings.https_port) == (80, 443)
+
+
+@pytest.mark.parametrize(
+    ("values", "variable"),
+    [
+        ({"HTTP_PORT": "0"}, "HTTP_PORT"),
+        ({"HTTPS_PORT": "70000"}, "HTTPS_PORT"),
+        ({"HTTP_PORT": "eighty"}, "HTTP_PORT"),
+        ({"HTTP_PORT": "8443", "HTTPS_PORT": "8443"}, "HTTPS_PORT"),
+    ],
+)
+def test_caddy_ports_are_validated(tmp_path: Path, values: dict[str, str], variable: str) -> None:
+    base = services_values(tmp_path / "DistriCom")
+    with pytest.raises(ConfigError) as caught:
+        load_services_config({**base, **values}, load_config(base))
+    assert {p.variable for p in caught.value.problems} == {variable}
+
+
+def test_other_caddy_ports_reach_the_service_environment(tmp_path: Path) -> None:
+    values = {**services_values(tmp_path / "DistriCom"), "HTTP_PORT": "8080", "HTTPS_PORT": "8443"}
+    ops = load_config(values)
+    install = Install(ops, load_services_config(values, ops), "r1")
+    env = services.specs(install)[services.CADDY].env
+    assert (env["CADDY_HTTP_PORT"], env["CADDY_HTTPS_PORT"]) == ("8080", "8443")

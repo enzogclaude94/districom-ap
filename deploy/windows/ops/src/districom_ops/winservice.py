@@ -146,6 +146,7 @@ if sys.platform == "win32":
     ERROR_SERVICE_DOES_NOT_EXIST = 1060
     ERROR_SERVICE_ALREADY_RUNNING = 1056
     ERROR_SERVICE_NOT_ACTIVE = 1062
+    ERROR_SERVICE_CANNOT_ACCEPT_CTRL = 1061  # starting or stopping: retried until it settles
     ERROR_INSUFFICIENT_BUFFER = 122
 
     class _Handle:
@@ -224,11 +225,17 @@ if sys.platform == "win32":
                 return
             if not h.handle:
                 raise ServiceError(f"cannot open service {name} to stop it ({h.error})")
-            info = _ServiceStatus()
-            if not _ControlService(h.handle, 1, ctypes.byref(info)):
+            deadline = time.monotonic() + 30
+            while True:
+                info = _ServiceStatus()
+                if _ControlService(h.handle, 1, ctypes.byref(info)):
+                    return
                 error = ctypes.get_last_error()
-                if error != ERROR_SERVICE_NOT_ACTIVE:
+                if error == ERROR_SERVICE_NOT_ACTIVE:
+                    return
+                if error != ERROR_SERVICE_CANNOT_ACCEPT_CTRL or time.monotonic() >= deadline:
                     raise ServiceError(f"service {name} did not accept the stop (error {error})")
+                time.sleep(0.5)
 
 else:
 
