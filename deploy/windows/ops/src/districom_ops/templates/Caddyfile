@@ -1,0 +1,54 @@
+# DistriCom on Windows (W2-C2): the same entry point as deploy/caddy/Caddyfile, with the services on 127.0.0.1.
+# Every value comes from the service environment. CADDY_TLS_MODE=cloudflare needs the Cloudflare build of C5;
+# until then the services run with Caddy's own CA (internal), whose root is not installed in the system store.
+{
+	admin off
+	skip_install_trust
+	servers {
+		protocols h1 h2
+	}
+}
+
+(tls-cloudflare) {
+	tls {
+		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+		resolvers 1.1.1.1 9.9.9.9
+	}
+}
+(tls-internal) {
+	tls internal
+}
+
+{$DISTRICOM_HOST} {
+	import tls-{$CADDY_TLS_MODE:internal}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+
+	request_body {
+		max_size {$CADDY_MAX_BODY:30MB}
+	}
+
+	handle /api/* {
+		@apidocs path /api/docs /api/docs/* /api/v1/openapi.json
+		respond @apidocs 404
+		reverse_proxy 127.0.0.1:8000
+	}
+	handle {
+		reverse_proxy 127.0.0.1:3000
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}
+
+http:// {
+	abort
+}

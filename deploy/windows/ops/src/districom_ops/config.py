@@ -197,3 +197,77 @@ def read_config(path: Path) -> OpsConfig:
     if not path.is_file():
         raise ConfigError([Problem(str(path), "configuration file not found")])
     return load_config(parse_env(path.read_text(encoding="utf-8-sig")))
+
+
+# --- W2-C2: settings the services need, validated only by the service commands (C1 commands do not need them) ---
+
+SERVICE_KEYS = ("SECRET_KEY", "BACKUP_DISK_ROOT", "BACKUP_DISK_ID", "BACKUP_DISK_WAIT_SECONDS", "PG_DATA_DIR")
+MIN_SECRET_KEY_LENGTH = 32
+DEFAULT_BACKUP_DISK_WAIT_SECONDS = 300
+_DISK_ID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
+_ENV_UNSAFE = re.compile(r"['\r\n\x00]")
+
+
+@dataclass(frozen=True)
+class ServicesConfig:
+    secret_key: Secret
+    backup_disk_root: Path
+    backup_disk_id: str
+    backup_disk_wait_seconds: int
+    pg_data_dir: Path
+
+    def secrets(self) -> list[str]:
+        return [self.secret_key.reveal()]
+
+
+def load_services_config(values: Mapping[str, str], ops: OpsConfig) -> ServicesConfig:
+    """Same rules as ``load_config``: every problem at once, named, never with its value."""
+    problems: list[Problem] = []
+    secret_key = values.get("SECRET_KEY", "")
+    if not secret_key:
+        problems.append(Problem("SECRET_KEY", "missing"))
+    elif (
+        len(secret_key) < MIN_SECRET_KEY_LENGTH
+        or PLACEHOLDER.match(secret_key)
+        or len(set(secret_key)) < 12
+        or _ENV_UNSAFE.search(secret_key)
+    ):
+        problems.append(Problem("SECRET_KEY", f"weak or unusable ({MIN_SECRET_KEY_LENGTH}+ random characters)"))
+    for key in ("DATABASE_URL",):
+        if _ENV_UNSAFE.search(values.get(key, "")):
+            problems.append(Problem(key, "contains a quote or a line break"))
+
+    disk_raw = values.get("BACKUP_DISK_ROOT", "")
+    disk_root = Path(disk_raw)
+    if not disk_raw:
+        problems.append(Problem("BACKUP_DISK_ROOT", "missing"))
+    elif not disk_root.is_absolute():
+        problems.append(Problem("BACKUP_DISK_ROOT", "must be an absolute path"))
+    disk_id = values.get("BACKUP_DISK_ID", "")
+    if not disk_id:
+        problems.append(Problem("BACKUP_DISK_ID", "missing (run backup-disk prepare once)"))
+    elif not _DISK_ID.match(disk_id):
+        problems.append(Problem("BACKUP_DISK_ID", "not an id written by backup-disk prepare"))
+
+    wait = DEFAULT_BACKUP_DISK_WAIT_SECONDS
+    wait_raw = values.get("BACKUP_DISK_WAIT_SECONDS", "")
+    if wait_raw:
+        if not wait_raw.isdigit() or not 0 <= int(wait_raw) <= 3600:
+            problems.append(Problem("BACKUP_DISK_WAIT_SECONDS", "must be a whole number from 0 to 3600"))
+        else:
+            wait = int(wait_raw)
+
+    data_raw = values.get("PG_DATA_DIR", "")
+    data_dir = Path(data_raw) if data_raw else ops.root / "pgdata"
+    if not data_dir.is_absolute():
+        problems.append(Problem("PG_DATA_DIR", "must be an absolute path"))
+    elif disk_raw and disk_root.is_absolute() and (data_dir == disk_root or data_dir.is_relative_to(disk_root)):
+        problems.append(Problem("PG_DATA_DIR", "must not be on the backup disk"))
+
+    if problems:
+        raise ConfigError(problems)
+    return ServicesConfig(Secret(secret_key), disk_root, disk_id, wait, data_dir)
+
+
+def read_services_config(path: Path, ops: OpsConfig) -> ServicesConfig:
+    return load_services_config(parse_env(path.read_text(encoding="utf-8-sig")), ops)
