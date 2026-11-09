@@ -31,41 +31,57 @@ def uv(args: list[str], cwd: Path, env: dict[str, str]) -> str:
     return result.stdout.strip()
 
 
-def _link_target(link: Path) -> Path:
-    raw = os.readlink(link)
-    for prefix in ("\\\\?\\", "\\??\\"):
-        if raw.startswith(prefix):
-            raw = raw[len(prefix) :]
-    target = Path(raw)
-    return target if target.is_absolute() else (link.parent / target)
+def _pnpm_unit(path: Path) -> Path:
+    """The ``.pnpm/<package>`` folder that holds ``path`` (its dependencies are siblings inside it), or itself."""
+    for parent in (path, *path.parents):
+        if parent.parent.name == ".pnpm":
+            return parent
+    return path
 
 
-def copy_with_links(source: Path, target: Path) -> int:
-    """Copy a pnpm tree keeping its directory links (junctions on Windows), re-pointed inside ``target``.
+def copy_with_links(source: Path, target: Path, project: Path) -> int:
+    """Copy the Next.js standalone output of a pnpm install keeping its directory links (junctions on Windows).
 
-    The Next.js standalone output of a pnpm workspace resolves dependencies through those links; copying their
-    contents instead breaks module resolution (``Cannot find module '@swc/helpers/...'``)."""
+    pnpm resolves dependencies through those links, and on Windows the standalone output links back into the
+    project's own ``node_modules``. Copying their contents breaks module resolution (``Cannot find module
+    '@swc/helpers/...'``). So every link is re-created inside ``target`` and every ``.pnpm/<package>`` folder it
+    reaches outside the standalone tree is copied once, at the same place relative to ``project``."""
+    source, project = source.resolve(), project.resolve()
     links: list[tuple[Path, Path]] = []
-    source = source.resolve()
-    for folder, dirs, files in os.walk(source):
-        here = Path(folder)
-        out = target / here.relative_to(source)
-        out.mkdir(parents=True, exist_ok=True)
-        for name in list(dirs):
-            path = here / name
-            if os.path.islink(path) or os.path.isjunction(path):
-                dirs.remove(name)
-                pointed = _link_target(path).resolve()
-                if not pointed.is_relative_to(source):
-                    raise SystemExit(f"a link points outside the tree: {path}")
-                links.append((out / name, target / pointed.relative_to(source)))
-        for name in files:
-            path = here / name
-            if os.path.islink(path):
-                shutil.copy2(path.resolve(), out / name)
-            else:
-                shutil.copy2(path, out / name)
+    queue: list[tuple[Path, Path]] = [(source, target)]
+    copied: set[Path] = set()
+
+    def place(pointed: Path) -> Path:
+        if pointed.is_relative_to(source):
+            return target / pointed.relative_to(source)
+        if not pointed.is_relative_to(project):
+            raise SystemExit(f"a link points outside the project: {pointed}")
+        unit = _pnpm_unit(pointed)
+        unit_target = target / unit.relative_to(project)
+        if unit not in copied:
+            copied.add(unit)
+            queue.append((unit, unit_target))
+        return unit_target / pointed.relative_to(unit)
+
+    while queue:
+        tree, out_root = queue.pop()
+        if out_root.exists() and tree != source:
+            continue  # already part of the standalone copy
+        for folder, dirs, files in os.walk(tree):
+            here = Path(folder)
+            out = out_root / here.relative_to(tree)
+            out.mkdir(parents=True, exist_ok=True)
+            for name in list(dirs):
+                path = here / name
+                if os.path.islink(path) or os.path.isjunction(path):
+                    dirs.remove(name)
+                    links.append((out / name, place(Path(os.path.realpath(path)))))
+            for name in files:
+                path = here / name
+                shutil.copy2(os.path.realpath(path), out / name)
     for link, pointed in links:
+        if link.exists() or os.path.isjunction(link) or os.path.islink(link):
+            continue
         if sys.platform == "win32":
             import _winapi
 
@@ -92,7 +108,7 @@ def main(repo: Path, root: Path, release: str, python_version: str) -> None:
     standalone = repo / "frontend" / ".next" / "standalone"
     if not (standalone / "server.js").is_file():
         raise SystemExit("no standalone build: build the frontend with NEXT_OUTPUT=standalone first")
-    links = copy_with_links(standalone, target / "frontend")
+    links = copy_with_links(standalone, target / "frontend", repo / "frontend")
     sys.stdout.write(f"frontend copied with {links} directory links\n")
     shutil.copytree(repo / "frontend" / ".next" / "static", target / "frontend" / ".next" / "static")
     if (repo / "frontend" / "public").is_dir():
