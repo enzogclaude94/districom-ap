@@ -14,6 +14,7 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 - Los runtimes están fijados por versión y checksum.
 - WinSW reinicia los servicios de la app tres veces como máximo.
 - La parada es en orden inverso. PostgreSQL se detiene cuando no quedan sesiones de la app.
+- Puertos de Caddy configurables (`HTTP_PORT`, `HTTPS_PORT`; 80 y 443 por defecto), porque en el runner de GitHub el 80 está ocupado por `http.sys`.
 - Job de CI «Windows services (W2-C2)» con C2‑1 a C2‑7; los nueve jobs existentes no cambian.
 - `docs/WINDOWS_DEPLOYMENT.md §8.5`:
   - C1 queda DONE;

@@ -306,6 +306,7 @@ Enzo los fijó el 2026-11-05 al cerrar W2‑A. Se suman a los dos requisitos del
     - el GUID del volumen con el registrado al preparar el disco.
     Además, el volumen tiene que ser distinto del de sistema y del de los datos. El número de serie físico queda PENDIENTE para el laboratorio, porque leerlo requiere privilegios. Si el disco se monta tarde, el Stack lo espera `BACKUP_DISK_WAIT_SECONDS`.
   - Los runtimes (WinSW, PostgreSQL, Caddy y Node) están fijados por versión y checksum en `templates/versions.json`. Una descarga con otro hash se borra sin extraer.
+  - **Puertos de Caddy:** 80 y 443 por defecto; `HTTP_PORT` y `HTTPS_PORT` los cambian. En el runner de GitHub el puerto 80 lo ocupa el proceso System (PID 4, `http.sys`), así que el CI usa 8080 y 8443. En el servidor real hay que comprobar antes qué programa usa 80 y 443 (IIS, `http.sys` o Store Sys): PENDIENTE de laboratorio.
   - Permisos mínimos para arrancar: cada cuenta recibe solo lo que escribe, y los secretos se leen solo por su servicio. **Las ACL definitivas son de C3.**
   - PENDIENTE, nunca PASS:
     - el arranque después de un reinicio real y sin iniciar sesión;
