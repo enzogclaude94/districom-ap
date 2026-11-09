@@ -4,7 +4,23 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
-### Added — Servidor: W2‑C1, base operativa en Windows
+### Added — Servidor: W2‑C2, servicios nativos de Windows (en revisión)
+- `deploy/windows/ops/` incorpora cinco servicios, cada uno con su cuenta virtual:
+  - PostgreSQL 17, con `pg_ctl register`;
+  - backend, frontend y Caddy, con WinSW 2.12;
+  - `DistriComStack`, que verifica el disco de backup y arranca la cadena en orden por disponibilidad.
+- PostgreSQL nunca es dependencia en el SCM ni lo reinicia el SCM. Así Windows no puede arrancarlo sin el disco.
+- **Identidad del disco:** se verifican el id de la marca, el GUID del volumen y que sea un volumen distinto del de sistema y del de datos.
+- Los runtimes están fijados por versión y checksum.
+- WinSW reinicia los servicios de la app tres veces como máximo.
+- La parada es en orden inverso. PostgreSQL se detiene cuando no quedan sesiones de la app.
+- Job de CI «Windows services (W2-C2)» con C2‑1 a C2‑7; los nueve jobs existentes no cambian.
+- `docs/WINDOWS_DEPLOYMENT.md §8.5`:
+  - C1 queda DONE;
+  - se describe C2;
+  - se agrega el requisito de C9 de coordinar la comprobación y el desbloqueo sin condición de carrera.
+
+### Added — Servidor: W2‑C1, base operativa en Windows (DONE, PR #79)
 - **`deploy/windows/ops/`** (`districom_ops`): solo biblioteca estándar, más `districom_backup` para las escrituras durables. Incluye:
   - las carpetas de la instalación;
   - la configuración de operación (`config.example.env`, solo nombres), que rechaza bases fuera de `127.0.0.1`, contraseñas débiles o de ejemplo, el mismo rol para la app y la operación y una LAN pública, y nombra cada problema sin mostrar su valor;
