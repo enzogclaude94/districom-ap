@@ -3,6 +3,7 @@
 Accounts are always given as SIDs (``*S-1-…``), so nothing depends on the language of Windows.
 """
 
+import re
 import sys
 from pathlib import Path
 
@@ -30,3 +31,12 @@ def restrict(path: Path, readers: list[str]) -> None:
     """A secret file: no inherited access; administrators and SYSTEM in full, ``readers`` read only."""
     grants = [f"*{ADMINISTRATORS}:F", f"*{SYSTEM}:F", *(f"*{sid}:R" for sid in readers)]
     _icacls(str(path), "/inheritance:r", "/grant:r", *grants, "/Q")
+
+
+def current_user_sid() -> str:
+    """The SID of the user running this (``whoami /user``: the CSV form is the same in every language)."""
+    result = run(["whoami.exe", "/user", "/fo", "csv", "/nh"])
+    found = re.search(r"S-1-\d+(?:-\d+)+", result.stdout)
+    if result.returncode != 0 or not found:
+        raise ServiceError("cannot read the SID of the current user")
+    return found.group(0)
