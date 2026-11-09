@@ -11,6 +11,7 @@ import os
 import re
 import secrets
 import subprocess
+import tempfile
 from pathlib import Path
 
 from districom_ops import acl
@@ -96,10 +97,11 @@ def init(install: Install) -> bool:
     install.superuser_secret.write_text(superuser, encoding="utf-8")
     acl.restrict(install.superuser_secret, readers=[])
     output = install.postgres_logs / "init.log"
-    pwfile = install.root / "config" / "initdb.pw"
-    pwfile.write_text(superuser, encoding="utf-8")
-    acl.restrict(pwfile, readers=[])
-    try:
+    # initdb runs with a restricted token (no Administrators group), so the password file goes to this user's
+    # own temporary folder, readable by the user and nobody else, and is deleted right after.
+    with tempfile.TemporaryDirectory(prefix="districom-initdb-") as scratch:
+        pwfile = Path(scratch) / "pw"
+        pwfile.write_text(superuser, encoding="utf-8")
         code = _run(
             [
                 str(install.pg_bin("initdb")), "-D", str(data), "-U", "postgres", f"--pwfile={pwfile}",
@@ -108,8 +110,6 @@ def init(install: Install) -> bool:
             ],
             out=output,
         )  # fmt: skip
-    finally:
-        pwfile.unlink(missing_ok=True)
     if code != 0:
         raise DatabaseError(f"initdb failed ({code}); see logs\\postgresql\\init.log")
     (data / CONF).write_text(settings(install), encoding="utf-8")
