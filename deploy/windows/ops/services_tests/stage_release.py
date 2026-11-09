@@ -31,6 +31,50 @@ def uv(args: list[str], cwd: Path, env: dict[str, str]) -> str:
     return result.stdout.strip()
 
 
+def _link_target(link: Path) -> Path:
+    raw = os.readlink(link)
+    for prefix in ("\\\\?\\", "\\??\\"):
+        if raw.startswith(prefix):
+            raw = raw[len(prefix) :]
+    target = Path(raw)
+    return target if target.is_absolute() else (link.parent / target)
+
+
+def copy_with_links(source: Path, target: Path) -> int:
+    """Copy a pnpm tree keeping its directory links (junctions on Windows), re-pointed inside ``target``.
+
+    The Next.js standalone output of a pnpm workspace resolves dependencies through those links; copying their
+    contents instead breaks module resolution (``Cannot find module '@swc/helpers/...'``)."""
+    links: list[tuple[Path, Path]] = []
+    source = source.resolve()
+    for folder, dirs, files in os.walk(source):
+        here = Path(folder)
+        out = target / here.relative_to(source)
+        out.mkdir(parents=True, exist_ok=True)
+        for name in list(dirs):
+            path = here / name
+            if os.path.islink(path) or os.path.isjunction(path):
+                dirs.remove(name)
+                pointed = _link_target(path).resolve()
+                if not pointed.is_relative_to(source):
+                    raise SystemExit(f"a link points outside the tree: {path}")
+                links.append((out / name, target / pointed.relative_to(source)))
+        for name in files:
+            path = here / name
+            if os.path.islink(path):
+                shutil.copy2(path.resolve(), out / name)
+            else:
+                shutil.copy2(path, out / name)
+    for link, pointed in links:
+        if sys.platform == "win32":
+            import _winapi
+
+            _winapi.CreateJunction(str(pointed), str(link))
+        else:
+            os.symlink(pointed, link, target_is_directory=True)
+    return len(links)
+
+
 def main(repo: Path, root: Path, release: str, python_version: str) -> None:
     target = root / "releases" / release
     if target.exists():
@@ -48,7 +92,8 @@ def main(repo: Path, root: Path, release: str, python_version: str) -> None:
     standalone = repo / "frontend" / ".next" / "standalone"
     if not (standalone / "server.js").is_file():
         raise SystemExit("no standalone build: build the frontend with NEXT_OUTPUT=standalone first")
-    shutil.copytree(standalone, target / "frontend")
+    links = copy_with_links(standalone, target / "frontend")
+    sys.stdout.write(f"frontend copied with {links} directory links\n")
     shutil.copytree(repo / "frontend" / ".next" / "static", target / "frontend" / ".next" / "static")
     if (repo / "frontend" / "public").is_dir():
         shutil.copytree(repo / "frontend" / "public", target / "frontend" / "public")

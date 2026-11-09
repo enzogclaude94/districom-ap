@@ -256,7 +256,8 @@ def test_disk_database_and_services_install_idempotently() -> None:
     for name in services.CHAIN:
         assert present[name].start_type == 3, name  # manual: only the stack starts them
     deps = {name: cfg.dependencies for name, cfg in present.items()}
-    assert deps[services.PG] == ()
+    # pg_ctl register adds the Windows RPC service; PostgreSQL depends on nothing of DistriCom.
+    assert not set(deps[services.PG]) & set(services.ALL)
     assert deps[services.BACKEND] == ()
     assert deps[services.FRONTEND] == (services.BACKEND,)
     assert deps[services.CADDY] == (services.FRONTEND,)
@@ -272,12 +273,14 @@ def test_migrations_with_postgresql_alone() -> None:
     cli("services", "start", "--direct", "--until", services.PG)
     install = CTX.install()
     backend = install.release_dir() / "backend"
+    # The same settings the service reads from config\backend\.env (single-quoted literal values).
+    settings = {k: v.strip("'") for k, v in parse_env(install.backend_env.read_text("utf-8")).items()}
     result = subprocess.run(
         [str(install.backend_python), "-m", "alembic", "-c", str(backend / "alembic.ini"), "upgrade", "head"],
-        cwd=install.backend_env.parent,  # reads config\backend\.env like the service
+        cwd=backend,
         capture_output=True,
         text=True,
-        env={**os.environ, "PYTHONUTF8": "1"},
+        env={**os.environ, **settings, "PYTHONUTF8": "1"},
         timeout=900,
         check=False,
     )
@@ -415,6 +418,7 @@ def test_the_stop_is_ordered_and_postgresql_shuts_down_cleanly() -> None:
 
 @pytest.mark.criterion("C2-6")
 def test_without_the_disk_postgresql_is_not_started_and_the_reason_is_logged() -> None:
+    cli("services", "stop")  # each case starts from everything stopped
     detach(DISKS / "backup1.vhdx")
     since = now()
     result = cli("services", "start", "--direct", check=False)
@@ -443,6 +447,7 @@ def test_a_copied_marker_on_another_disk_with_the_same_letter_is_refused() -> No
 
 @pytest.mark.criterion("C2-6")
 def test_a_disk_that_mounts_late_is_waited_for() -> None:
+    cli("services", "stop")  # each case starts from everything stopped
     since = now()
     winservice.start(services.STACK)
     watch_pg_never_starts(8)
@@ -456,6 +461,7 @@ def test_a_disk_that_mounts_late_is_waited_for() -> None:
 
 @pytest.mark.criterion("C2-6")
 def test_the_stack_gives_up_after_the_wait_and_records_why() -> None:
+    cli("services", "stop")  # each case starts from everything stopped
     detach(DISKS / "backup1.vhdx")
     since = now()
     winservice.start(services.STACK)
