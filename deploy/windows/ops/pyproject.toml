@@ -1,0 +1,52 @@
+[project]
+name = "districom-ops"
+version = "0.1.0"
+description = "W2-C1: operational base of DistriCom on Windows (ADR 016, proposed): layout, configuration, logging, operations record and maintenance window"
+requires-python = ">=3.12"
+# Standard library only (decision D1), plus districom_backup for its durable writes.
+dependencies = ["districom-backup"]
+
+[project.scripts]
+districom-ops = "districom_ops.cli:main"
+
+[tool.uv.sources]
+districom-backup = { path = "../backup", editable = true }
+
+[dependency-groups]
+dev = [
+    "mypy>=1.13",
+    "pytest>=8.3",
+    "pytest-timeout>=2.3",
+    "ruff>=0.8",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/districom_ops"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "SIM", "RUF", "N", "C4", "PT"]
+ignore = ["S101"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S105", "S106", "S108"]
+"tests/conftest.py" = ["E501"]
+
+[tool.mypy]
+strict = true
+files = ["src", "tests"]
+# districom_backup has no py.typed marker: mypy reads its source, which is strictly typed too (W2-A).
+mypy_path = "../backup/src"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+timeout = 300
+markers = ["criterion(id): W2-C1 acceptance criterion (C1-1 ... C1-4) that the test provides evidence for"]

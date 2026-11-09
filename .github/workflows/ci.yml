@@ -230,6 +230,38 @@ jobs:
           path: deploy/windows/backup/test-results
           retention-days: 30
 
+  windows-ops:
+    # W2-C1 (ADR 016, proposed): operational base on Windows (layout, configuration, logs, operations record,
+    # maintenance window). Standard library only; no PostgreSQL needed yet. Isolated from every other job.
+    name: Windows ops (W2-C)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: deploy/windows/ops
+    env:
+      DISTRICOM_OPS_RESULTS: ${{ github.workspace }}/deploy/windows/ops/test-results
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: deploy/windows/ops/uv.lock
+      - run: uv python install ${{ env.PYTHON_VERSION }}
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy
+      - run: uv run pytest -v
+      - name: W2-C1 results
+        if: always()
+        run: |
+          if (Test-Path test-results\w2c1-results.md) {
+            Get-Content test-results\w2c1-results.md >> $env:GITHUB_STEP_SUMMARY
+            Get-Content test-results\w2c1-results.md
+          }
+
   # --- W2-B (ADR 016, proposed): the application as it is, on Windows ----------------------------------------------
   # Informative for main's branch protection (Enzo, 2026-11-06), but W2-B is only approved with all three in green.
   # Windows Server runners, PostgreSQL 17 from the official binaries and fictitious data in disposable databases.
