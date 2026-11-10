@@ -39,7 +39,7 @@ export const COMMERCIAL_NAV: NavSection[] = [
     label: "Datos",
     icon: Database,
     items: [
-      { label: "Importaciones", href: "/comercial/datos/importaciones", phase: 1 },
+      { label: "Importaciones", href: "/comercial/datos/importaciones" },
       { label: "Calidad", href: "/comercial/datos/calidad", phase: 1 },
     ],
   },

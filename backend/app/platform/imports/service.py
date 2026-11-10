@@ -18,14 +18,15 @@ Nothing here logs or audits row values: only ids, counters, codes and the import
 import hashlib
 import json
 import logging
-from collections import Counter
+from collections import Counter, defaultdict
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, BinaryIO
 
-from sqlalchemy import func, insert, select, text, update
+from sqlalchemy import column, func, insert, select, text, true, update
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
@@ -595,17 +596,23 @@ def _write(db: Session, user: User, job: ImportJob, entry: RegisteredType, decis
     ids = {row.id for row in staged}
     counts: Counter[str] = Counter()
     seen: set[int] = set()
+    # One bulk UPDATE by primary key per set of columns. A statement per row made the session re-check every loaded
+    # object on each one (autoflush and synchronize_session): quadratic, 7414 sales lines took more than 3 minutes.
+    by_columns: dict[tuple[str, ...], list[dict[str, Any]]] = defaultdict(list)
     for outcome in outcomes:
         if outcome.row_id not in ids or outcome.row_id in seen or outcome.outcome not in ROW_OUTCOMES:
             raise AdapterContractError(f"Adapter {entry.spec.key} returned an invalid outcome")
         seen.add(outcome.row_id)
         counts[outcome.outcome] += 1
-        values: dict[str, Any] = {"outcome": outcome.outcome}
+        values: dict[str, Any] = {"id": outcome.row_id, "outcome": outcome.outcome}
         if outcome.entity_type is not None:
             values["entity_type"] = outcome.entity_type
         if outcome.entity_id is not None:
             values["entity_id"] = outcome.entity_id
-        db.execute(update(ImportRow).where(ImportRow.id == outcome.row_id).values(**values))
+        by_columns[tuple(sorted(values))].append(values)
+    db.flush()
+    for batch in by_columns.values():
+        db.execute(update(ImportRow).execution_options(synchronize_session=False), batch)
     if seen != ids:  # a writable row without an outcome: never close the job over a silently skipped row
         raise AdapterContractError(
             f"Adapter {entry.spec.key} returned {len(seen)} outcomes for {len(ids)} writable rows"
@@ -720,11 +727,44 @@ def stored_file_path(settings: Settings, file: ImportFile) -> Path:
 
 
 def staged_rows(
-    db: Session, job_id: int, status: str | None, offset: int, limit: int
+    db: Session, job_id: int, status: str | None, offset: int, limit: int, code: str | None = None
 ) -> tuple[Sequence[ImportRow], int]:
     query = select(ImportRow).where(ImportRow.job_id == job_id)
     if status is not None:
         query = query.where(ImportRow.status == status)
+    if code is not None:
+        query = query.where(ImportRow.messages.contains([{"code": code}]))
     total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
     rows = db.scalars(query.order_by(ImportRow.sheet, ImportRow.row_number).offset(offset).limit(limit)).all()
     return rows, total
+
+
+@dataclass(frozen=True)
+class MessageSummary:
+    code: str
+    severity: str
+    field: str | None
+    message: str
+    rows: int
+
+
+def message_summary(db: Session, job_id: int) -> list[MessageSummary]:
+    """What the analysis said about the rows, grouped by message: how many rows carry each one. Only the adapter's
+    own texts and codes, never a row's values."""
+    element = func.jsonb_array_elements(ImportRow.messages).table_valued(column("value", JSONB)).alias("m")
+    code = element.c.value["code"].astext
+    severity = element.c.value["severity"].astext
+    field = element.c.value["column"].astext
+    text_ = func.min(element.c.value["text"].astext)
+    found = db.execute(
+        select(code, severity, field, text_, func.count(func.distinct(ImportRow.id)))
+        .select_from(ImportRow)
+        .join(element, true())
+        .where(ImportRow.job_id == job_id)
+        .group_by(code, severity, field)
+    ).all()
+    order = {"error": 0, "warning": 1, "info": 2}
+    return sorted(
+        (MessageSummary(c, sev, f, m, n) for c, sev, f, m, n in found),
+        key=lambda s: (order.get(s.severity, 3), -s.rows, s.code),
+    )
