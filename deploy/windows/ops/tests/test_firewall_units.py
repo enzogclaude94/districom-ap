@@ -183,4 +183,17 @@ def test_the_backend_rule_names_the_interpreter_the_venv_launcher_starts(tmp_pat
     launcher = tmp_path / "release" / ".venv" / "Scripts" / "python.exe"
     launcher.parent.mkdir(parents=True)
     (launcher.parent.parent / "pyvenv.cfg").write_text(f"home = {home}\nimplementation = CPython\n", "utf-8")
-    assert base_python(launcher) == (home / "python.exe").resolve()
+    assert base_python(launcher) == home / "python.exe"  # as written: the image path Windows reports
+
+
+def test_verify_logs_problems_and_warnings_without_reserved_log_keys(monkeypatch: Any) -> None:
+    """``name`` is a LogRecord attribute: using it as an extra key broke ``firewall verify`` on Windows."""
+    import logging
+
+    from districom_ops import cli, services
+
+    problem = firewall.Problem("DistriCom-HTTPS-In", "not_as_plan", "remote_addresses")
+    monkeypatch.setattr(services, "firewall_plan", lambda install: plan())
+    monkeypatch.setattr(firewall, "verify", lambda pol: ([problem], [problem]))
+    logging.getLogger("districom_ops").setLevel(logging.INFO)
+    assert cli._firewall("verify", None) == 1  # type: ignore[arg-type]

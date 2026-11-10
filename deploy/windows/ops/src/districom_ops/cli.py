@@ -266,9 +266,9 @@ def _firewall(action: str, install: Install) -> int:
         return 0
     problems, warnings = firewall.verify(plan)
     for item in problems:
-        log.error("firewall_problem", extra={"name": item.name, "code": item.code, "detail": item.detail})
+        log.error("firewall_problem", extra={"rule": item.name, "code": item.code, "detail": item.detail})
     for item in warnings:
-        log.warning("firewall_warning", extra={"name": item.name, "code": item.code, "detail": item.detail})
+        log.warning("firewall_warning", extra={"rule": item.name, "code": item.code, "detail": item.detail})
     _print({"problems": [p.describe() for p in problems], "warnings": [w.describe() for w in warnings]})
     return 1 if problems else 0
 

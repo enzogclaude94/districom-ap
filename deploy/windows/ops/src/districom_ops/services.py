@@ -23,7 +23,6 @@ import hashlib
 import http.client
 import json
 import logging
-import os
 import shutil
 import signal
 import socket
@@ -329,28 +328,29 @@ def permission_policy(install: Install) -> permissions.Policy:
 
 def base_python(venv_python: Path) -> Path:
     """The interpreter that really runs (and listens) for a uv virtual environment: ``python.exe`` of a venv is
-    a launcher that starts the one named by ``home`` in ``pyvenv.cfg``. Links are resolved: a firewall rule names
-    the final image path."""
+    a launcher that starts the one named by ``home`` in ``pyvenv.cfg``. The path is kept as written, links included
+    (uv's ``cpython-3.12-…`` link): Windows reports the image of the process by the path it was started with, and
+    that is the path a firewall rule must name."""
     config = venv_python.parent.parent / "pyvenv.cfg"
     for line in config.read_text("utf-8").splitlines():
         key, _, value = line.partition("=")
         if key.strip() == "home":
-            return Path(os.path.realpath(Path(value.strip()) / "python.exe"))
+            return Path(value.strip()) / "python.exe"
     raise ServiceError("pyvenv.cfg has no home: is the backend environment installed?")
 
 
 def firewall_plan(install: Install) -> firewall.Plan:
     """The C4 rules of this installation (``firewall.py``): what Caddy, Remote Desktop and the internal ports get."""
     internal = [
-        firewall.Internal(install.database[3], Path(os.path.realpath(install.pg_bin("postgres"))), "PostgreSQL"),
+        firewall.Internal(install.database[3], install.pg_bin("postgres"), "PostgreSQL"),
         firewall.Internal(BACKEND_PORT, base_python(install.backend_python), "Backend"),
-        firewall.Internal(FRONTEND_PORT, Path(os.path.realpath(specs(install)[FRONTEND].executable)), "Frontend"),
+        firewall.Internal(FRONTEND_PORT, specs(install)[FRONTEND].executable, "Frontend"),
     ]
     return firewall.plan(
         str(install.ops.lan_subnet),
         install.services.http_port,
         install.services.https_port,
-        Path(os.path.realpath(install.artifact("caddy").path(install.runtime))),
+        install.artifact("caddy").path(install.runtime),
         internal,
     )
 
