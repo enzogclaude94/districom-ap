@@ -174,7 +174,7 @@ Si un paso falla antes del 4, la app vuelve a quedar disponible. Si falla despu�
 | **W1** | ADR 016 (Propuesto) y este plan | CI (documentación) | DONE (PR #70, 2026-11-04) |
 | **W2‑A** | Prueba de concepto aislada de backups físicos, WAL, PITR y restauración (`deploy/windows/backup/`) | GitHub Actions (Windows); lo no reproducible queda PENDIENTE | DONE como prueba de concepto y CI (PR #72, 2026-11-05); lo de laboratorio sigue PENDIENTE: ver §8.2 |
 | **W2‑B** | Pruebas automatizadas de los componentes compatibles con Windows (backend en Windows, orden de textos, frontend) | GitHub Actions (Windows) | DONE a nivel de compatibilidad y pruebas automatizadas (PR #75, 2026-11-06); lo de laboratorio sigue PENDIENTE: ver §8.4 |
-| **W2‑C** | El resto (operación, `install.ps1`, servicios, firewall, cierre de jornada, suite de aceptación) | CI y laboratorio Windows 11 Pro | En curso por subetapas (C1 a C13, ver §8.5): C1 en revisión; C2 a C13 sin autorizar |
+| **W2‑C** | El resto (operación, `install.ps1`, servicios, firewall, cierre de jornada, suite de aceptación) | CI y laboratorio Windows 11 Pro | En curso por subetapas (C1 a C13, ver §8.5): C1 DONE; C2 en curso; C3 a C13 sin autorizar |
 | W3 | Laboratorio Windows 11 Pro: suite completa y pruebas pendientes | PC de laboratorio (no el servidor) | Sin laboratorio confirmado |
 | W4 | Preparación del equipo: RAM, RAID, SMART, Windows 11 Pro, BitLocker, UPS | Servidor | No autorizado |
 | W5–W8 | Staging, pruebas en el servidor, transición y go‑live (O10) | Servidor | Equivalen a S3 |
@@ -279,7 +279,7 @@ Enzo los fijó el 2026-11-05 al cerrar W2‑A. Se suman a los dos requisitos del
   - **D4:** Caddy compilado con `xcaddy`;
   - **D5:** subetapas secuenciales, cada una con su PR, su CI y aprobación expresa antes del merge.
 - **Orden:** C1 → C2 → C3 → C4 → C9 → C6 → C10 → C7 → C8 → C5 → C11 → C12 → C13. C11, C12 y C13 exigen C7 validada.
-- **C1, base operativa** (`deploy/windows/ops/`, README; job de CI «Windows ops (W2-C)»). En revisión.
+- **C1, base operativa** (`deploy/windows/ops/`, README; job de CI «Windows ops (W2-C)»). **DONE**: PR #79, merge `98a201b`, aprobada por Enzo el 2026-11-09.
   - Carpetas de la instalación.
   - Configuración que rechaza variables faltantes o inseguras sin mostrar valores.
   - Logs JSON sin secretos ni datos personales.
@@ -289,6 +289,32 @@ Enzo los fijó el 2026-11-05 al cerrar W2‑A. Se suman a los dos requisitos del
   - Verificación conjunta `writes_resume_check` (ventana + registro): una ventana ausente con una operación incompleta o incierta **no** permite reactivar escrituras. **C9 debe consultarla** antes de reactivar la aplicación; C1 no desbloquea nada.
   - Criterios C1‑1 a C1‑4.
   - PENDIENTE: los permisos NTFS (C3), Windows 11 Pro y un corte de energía real.
+- **C2, servicios nativos** (`deploy/windows/ops/`, README §C2; job de CI «Windows services (W2-C2)»). En curso, PR #80.
+  - Cinco servicios, cada uno con su cuenta virtual `NT SERVICE\<nombre>` (sin contraseña ni permisos de administrador):
+    - `DistriComPostgreSQL`: `pg_ctl register`, inicio manual;
+    - `DistriComBackend`, `DistriComFrontend` y `DistriComCaddy`: WinSW 2.12, inicio manual;
+    - `DistriComStack`: WinSW, inicio automático diferido. Verifica el disco de backup y arranca la cadena en orden.
+  - **PostgreSQL no es dependencia de ningún servicio en el SCM, no tiene inicio automático y el SCM no lo reinicia.** Si lo fuera, Windows lo arrancaría sin verificar el disco: al iniciar, como dependencia o después de una caída. Solo lo arranca el Stack, o un administrador a mano. El Stack lo reinicia después de una caída, siempre después de volver a verificar el disco y como máximo tres veces por hora.
+  - Orden por disponibilidad:
+    - el backend arranca cuando PostgreSQL acepta conexiones;
+    - el frontend, cuando el backend responde `/health/live`;
+    - Caddy, cuando responde el frontend.
+    La parada es en orden inverso. PostgreSQL se detiene cuando no queda ninguna sesión de la app.
+  - WinSW reinicia el backend, el frontend y Caddy después de una caída: tres veces, y después deja de intentar y alerta. El contador se reinicia al cabo de una hora.
+  - **Identidad del disco de backup.** Una marca o una letra no prueban identidad. Antes de arrancar PostgreSQL se verifica que coincidan:
+    - el id de la marca con `BACKUP_DISK_ID`;
+    - el GUID del volumen con el registrado al preparar el disco.
+    Además, el volumen tiene que ser distinto del de sistema y del de los datos. El número de serie físico queda PENDIENTE para el laboratorio, porque leerlo requiere privilegios. Si el disco se monta tarde, el Stack lo espera `BACKUP_DISK_WAIT_SECONDS`.
+  - Los runtimes (WinSW, PostgreSQL, Caddy y Node) están fijados por versión y checksum en `templates/versions.json`. Una descarga con otro hash se borra sin extraer.
+  - **Puertos de Caddy:** 80 y 443 por defecto; `HTTP_PORT` y `HTTPS_PORT` los cambian. En el runner de GitHub el puerto 80 lo ocupa el proceso System (PID 4, `http.sys`), así que el CI usa 8080 y 8443. En el servidor real hay que comprobar antes qué programa usa 80 y 443 (IIS, `http.sys` o Store Sys): PENDIENTE de laboratorio.
+  - Permisos mínimos para arrancar: cada cuenta recibe solo lo que escribe, y los secretos se leen solo por su servicio. **Las ACL definitivas son de C3.**
+  - PENDIENTE, nunca PASS:
+    - el arranque después de un reinicio real y sin iniciar sesión;
+    - Windows 11 Pro;
+    - el disco desconectado físicamente (en CI se desconecta un disco virtual);
+    - la parada durante el apagado de Windows (C10 y C11).
+- **Requisito obligatorio para C9** (Enzo, 2026-11-09): la comprobación de reanudación (`writes_resume_check`) y el desbloqueo efectivo de escrituras tienen que estar coordinados, sin condición de carrera. Entre la comprobación y el desbloqueo no puede abrirse una ventana ni empezar una operación que la comprobación no haya visto. Por ejemplo, ambos se hacen bajo un mismo bloqueo exclusivo, que también toman `maintenance open` y el inicio de operaciones, y la comprobación se repite dentro de ese bloqueo justo antes de desbloquear.
+- **A‑14** (PR #73, segmento cerrado que no llegó en 180 s) sigue PENDIENTE, registrada aparte.
 - **Regla de logs para C2 a C13** (Enzo, 2026-11-07): los logs operativos no deben incorporar información personal de clientes, teléfonos, direcciones ni valores completos de consultas SQL.
 - Simular algo en GitHub Actions no prueba un acceso remoto, un apagado real ni una recuperación física.
 

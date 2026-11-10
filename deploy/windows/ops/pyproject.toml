@@ -38,10 +38,12 @@ ignore = ["S101"]
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S105", "S106", "S108"]
 "tests/conftest.py" = ["E501"]
+"services_tests/**" = ["S105", "S106", "S108", "S603"]
+"services_tests/conftest.py" = ["E501"]
 
 [tool.mypy]
 strict = true
-files = ["src", "tests"]
+files = ["src", "tests", "services_tests"]
 # districom_backup has no py.typed marker: mypy reads its source, which is strictly typed too (W2-A).
 mypy_path = "../backup/src"
 
@@ -49,4 +51,4 @@ mypy_path = "../backup/src"
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
 timeout = 300
-markers = ["criterion(id): W2-C1 acceptance criterion (C1-1 ... C1-4) that the test provides evidence for"]
+markers = ["criterion(id): W2-C acceptance criterion (C1-1 ... C2-7) that the test provides evidence for"]

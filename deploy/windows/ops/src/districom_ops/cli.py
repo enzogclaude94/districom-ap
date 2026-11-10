@@ -12,12 +12,15 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from districom_ops.config import ConfigError, OpsConfig, read_config
+from districom_ops import artifacts, backup_disk, database, services
+from districom_ops.config import ConfigError, OpsConfig, parse_env, read_config, read_services_config
+from districom_ops.install import Install
 from districom_ops.layout import Layout, LayoutError
 from districom_ops.logs import REDACTOR, setup_logging
 from districom_ops.maintenance import MaintenanceError, MaintenanceWindow
 from districom_ops.oplog import Event, Kind, OperationError, OperationsLog
 from districom_ops.safety import writes_resume_check
+from districom_ops.winservice import ServiceError
 
 CONFIG_ENV = "DISTRICOM_CONFIG"
 DEFAULT_CONFIG = Path(r"C:\DistriCom\config\districom.env")
@@ -50,6 +53,30 @@ def _parser() -> argparse.ArgumentParser:
         "resume-check",
         help="read only: would it be safe to re-enable writes? (window, operations record; C9 acts on it)",
     )
+
+    # W2-C2: native services
+    r = sub.add_parser("runtime", help="pinned runtimes").add_subparsers(dest="action", required=True)
+    p = r.add_parser("fetch", help="download, verify the checksum and extract (idempotent)")
+    p.add_argument("--only", nargs="*", default=None)
+
+    d = sub.add_parser("backup-disk", help="backup disk identity").add_subparsers(dest="action", required=True)
+    p = d.add_parser("prepare", help="mark a separate, empty volume once; prints the BACKUP_DISK_ID")
+    p.add_argument("--root", type=Path, required=True)
+    d.add_parser("verify", help="marker, disk id and volume (read only)")
+
+    db = sub.add_parser("database", help="PostgreSQL cluster").add_subparsers(dest="action", required=True)
+    db.add_parser("init", help="create the cluster once (ICU es-AR, checksums, O7 logs)")
+
+    s = sub.add_parser("services", help="Windows services").add_subparsers(dest="action", required=True)
+    p = s.add_parser("install", help="install or update the five services (idempotent)")
+    p.add_argument("--release", required=True)
+    s.add_parser("uninstall", help="stop in order and remove the services; data stays")
+    p = s.add_parser("start", help="start through DistriComStack (or --direct, administrator)")
+    p.add_argument("--direct", action="store_true")
+    p.add_argument("--until", choices=list(services.CHAIN), default=services.CADDY)
+    s.add_parser("stop", help="stop in reverse order")
+    s.add_parser("status")
+    s.add_parser("supervise", help="run by the DistriComStack service")
     return parser
 
 
@@ -83,6 +110,9 @@ def _run(args: argparse.Namespace) -> int:
             return 1
         log.info("config_ok", extra={"root": str(layout.root), "host": config.host})
         return 0
+
+    if args.command in ("runtime", "backup-disk", "database", "services"):
+        return _services(args, config)
 
     oplog = OperationsLog(layout.state / "operations.jsonl")
     if args.command == "operations":
@@ -121,10 +151,77 @@ def _run(args: argparse.Namespace) -> int:
     return 1 if status.alert else 0
 
 
+def _print(data: object) -> None:
+    sys.stdout.write(json.dumps(data, ensure_ascii=False, default=str) + "\n")
+
+
+def _services(args: argparse.Namespace, config: OpsConfig) -> int:
+    if args.command == "runtime":
+        manifest = artifacts.manifest()
+        names = args.only or list(manifest)
+        runtime, downloads = config.root / "runtime", config.root / "downloads"
+        for name in names:
+            changed = artifacts.fetch(manifest[name], downloads, runtime)
+            log.info("runtime_ready", extra={"artifact": name, "version": manifest[name].version, "changed": changed})
+        return 0
+    if args.command == "backup-disk" and args.action == "prepare":
+        raw = parse_env(args.config.read_text(encoding="utf-8-sig")).get("PG_DATA_DIR")
+        disk_id = backup_disk.prepare(args.root, Path(raw) if raw else config.root / "pgdata")
+        log.info("backup_disk_prepared", extra={"root": str(args.root)})
+        sys.stdout.write(disk_id + "\n")
+        return 0
+    try:
+        services_config = read_services_config(args.config, config)
+    except ConfigError as exc:
+        log.error("config_invalid", extra={"problems": [str(p) for p in exc.problems]})
+        return 1
+    REDACTOR.register(*services_config.secrets())
+    release = getattr(args, "release", None)
+    if release is None and (config.root / "state" / "services.json").is_file():
+        release = json.loads((config.root / "state" / "services.json").read_text("utf-8")).get("release")
+    install = Install(config, services_config, release)
+    if args.command == "backup-disk":
+        check = services.check_disk(install)
+        (log.info if check.ok else log.error)("backup_disk_check", extra={"code": check.code, "detail": check.detail})
+        return 0 if check.ok else 1
+    if args.command == "database":
+        changed = database.init(install)
+        log.info("database_init", extra={"changed": changed})
+        return 0
+    if args.action == "install":
+        _print({"changes": services.install_services(install)})
+        return 0
+    if args.action == "uninstall":
+        _print({"removed": services.uninstall_services(install)})
+        return 0
+    if args.action == "start":
+        if args.direct:
+            services.start_chain(install, args.until)
+        else:
+            services.start_stack(install)
+        return 0
+    if args.action == "stop":
+        services.stop_all(install)
+        return 0
+    if args.action == "status":
+        _print(services.status_report(install))
+        return 0
+    return services.supervise(install)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
         return _run(args)
-    except (MaintenanceError, OperationError, LayoutError) as exc:
+    except (
+        MaintenanceError,
+        OperationError,
+        LayoutError,
+        services.ServicesError,
+        ServiceError,
+        artifacts.ArtifactError,
+        backup_disk.BackupDiskError,
+        database.DatabaseError,
+    ) as exc:
         log.error("refused", extra={"reason": str(exc)})
         return 2
