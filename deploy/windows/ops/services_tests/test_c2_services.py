@@ -428,7 +428,9 @@ def test_the_stop_is_ordered_and_postgresql_shuts_down_cleanly() -> None:
     sessions = events(since, "postgresql_sessions_before_stop")
     assert [e["application_sessions"] for e in sessions] == [0]
 
-    backend_logs = sorted((install.service_logs).glob(f"{services.BACKEND}*.log"), key=lambda p: p.stat().st_mtime)
+    backend_logs = sorted(
+        install.service_log_dir(services.BACKEND).glob(f"{services.BACKEND}*.log"), key=lambda p: p.stat().st_mtime
+    )
     assert any("Finished server process" in p.read_text("utf-8", errors="replace") for p in backend_logs[-3:])
     pg_logs = sorted(install.postgres_logs.glob("postgresql-*.log"), key=lambda p: p.stat().st_mtime)
     assert pg_logs
