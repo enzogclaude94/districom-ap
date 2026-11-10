@@ -4,6 +4,15 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Fixed — Servidor: carrera de arranque de C2 (en revisión)
+- `services start` volvía en cuanto Caddy respondía a la comprobación del administrador, a veces antes de que el supervisor registrara su `service_ready` de Caddy.
+- Ahora espera la señal del supervisor de ese arranque:
+  - `state\start-request.json` lleva un valor nuevo por arranque;
+  - el Stack lo repite en `state\supervisor.json` con su fase (`starting`, `running`, `failed`, `stopping`, `stopped`);
+  - un registro anterior no cuenta, y si el Stack ya estaba en marcha cuenta solo el del servicio vivo.
+- Sin esperas fijas: falla si el Stack se detiene, informa `failed` o se cumple el tiempo máximo. La comprobación final de Caddy sigue verificando el certificado.
+- Regresión que reproduce la carrera paso a paso (`tests/test_start_signal_units.py`).
+
 ### Added — F1.3b: pantalla Importaciones de Comercial
 - **`/comercial/datos/importaciones`** (Datos › Importaciones, ya habilitado en el menú):
   - **Subir:** archivo de STORE SYS, tipo (o detección automática), día de la foto para los maestros y alcance para ventas (completo, o filtrado con sus filtros). Sin alcance declarado, se trata como filtrado.

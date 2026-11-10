@@ -335,6 +335,7 @@ Enzo los fijó el 2026-11-05 al cerrar W2‑A. Se suman a los dos requisitos del
     - que Store Sys y su proveedor no tengan acceso, comprobado con sus cuentas reales;
     - la cuenta de backups y la carpeta de backups en el disco (C6);
     - Windows 11 Pro y Defender.
+- **Carrera de arranque de C2 corregida** (Enzo, 2026-11-10; PR independiente). `services start` ahora espera la señal verificable del supervisor de ese arranque: un valor nuevo por arranque, que el Stack repite en `state\supervisor.json` con su fase. Un registro de un arranque anterior no cuenta. No hay esperas fijas, el tiempo máximo devuelve FAIL y la comprobación final de Caddy mantiene el certificado verificado.
 - **Riesgos que siguen abiertos para las etapas siguientes** (Enzo, 2026-11-09):
   - la verificación física del disco y su número de serie;
   - el reinicio real de Windows sin sesión iniciada;
