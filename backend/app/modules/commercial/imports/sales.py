@@ -185,6 +185,9 @@ class SalesAdapter:
         days: set[date] = set()
         seen: dict[str, set[str]] = {"sellers": set(), "zones": set(), "price_lists": set()}
         unknown_products: set[str] = set()
+        unresolved_customers: set[str] = set()
+        unmapped_sellers: set[str] = set()
+        unknown_lists: set[str] = set()
         for row, record, parse_messages in parsed:
             if record is None and parse_messages is None:
                 rows.append(AnalyzedRow(sheet, row, "skipped"))
@@ -201,6 +204,7 @@ class SalesAdapter:
             if record["product_code"] not in products:
                 pending = True
                 unknown_products.add(record["product_code"])
+                tally["product_unknown"] += 1
                 messages.append(
                     RowMessage(
                         "product_unknown", "warning", "El artículo no está en el maestro de artículos.", "product_code"
@@ -209,6 +213,7 @@ class SalesAdapter:
             if not customers[customer_key(record["customer_code"])].resolved:
                 pending = True
                 tally["customer_unresolved"] += 1
+                unresolved_customers.add(record["customer_code"])
                 messages.append(
                     RowMessage(
                         "customer_unresolved",
@@ -221,6 +226,8 @@ class SalesAdapter:
                 seen["sellers"].add(record["seller"])
                 if sellers[seller_key(record["seller"])].status not in LINKED:
                     pending = True
+                    unmapped_sellers.add(record["seller"])
+                    tally["seller_unmapped"] += 1
                     messages.append(
                         RowMessage(
                             "seller_unmapped", "warning", "El vendedor no está vinculado a un empleado.", "seller"
@@ -237,6 +244,8 @@ class SalesAdapter:
             if record["price_list"]:
                 seen["price_lists"].add(record["price_list"])
                 if record["price_list_number"] not in lists:
+                    unknown_lists.add(record["price_list"])
+                    tally["unknown_price_list"] += 1
                     messages.append(
                         cells.warning(
                             "unknown_price_list", "Lista de precios desconocida: se guarda sin lista.", "price_list"
@@ -283,7 +292,18 @@ class SalesAdapter:
             preview={
                 "replacement": replacement.as_json(),
                 "unknown_products": len(unknown_products),
-                "customers": {"unresolved_lines": tally["customer_unresolved"]},
+                # Counts for the operator's summary (F1.3b): what needs attention, never the rows' values.
+                "products": {"unknown": len(unknown_products), "unknown_lines": tally["product_unknown"]},
+                "customers": {
+                    "unresolved": len(unresolved_customers),
+                    "unresolved_lines": tally["customer_unresolved"],
+                },
+                "sellers": {
+                    "unmapped": sorted(unmapped_sellers),
+                    "unmapped_lines": tally["seller_unmapped"],
+                    "without_seller_lines": sum(1 for _, r, _m in parsed if r is not None and not r["seller"]),
+                },
+                "price_lists": {"unknown": sorted(unknown_lists), "unknown_lines": tally["unknown_price_list"]},
             },
         )
 
@@ -303,7 +323,7 @@ class SalesAdapter:
         customers: dict[str, mappings.Resolution] = {}
         seller_mappings: dict[str, Any] = {}
         pending_products = 0
-        outcomes: list[RowOutcome] = []
+        lines: list[tuple[int, SaleLine]] = []
         for row in rows:
             record = row.normalized
             assert record is not None
@@ -366,8 +386,9 @@ class SalesAdapter:
                 occurrence=record["occurrence"],
             )
             db.add(line)
-            db.flush()
-            outcomes.append(RowOutcome(row.id, "inserted", "commercial.sale_line", line.id))
+            lines.append((row.id, line))
+        db.flush()  # one flush for all the lines: their ids are known only after it
+        outcomes = [RowOutcome(row_id, "inserted", "commercial.sale_line", line.id) for row_id, line in lines]
         if pending_products:
             record_issue(
                 db,

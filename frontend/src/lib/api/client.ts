@@ -38,7 +38,8 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
   headers.set("Accept", "application/json");
   // Required by the backend CSRF guard on mutating requests.
   headers.set("X-Requested-With", "districom-web");
-  if (init.body !== undefined && !headers.has("Content-Type")) {
+  // A FormData body (file upload) gets its multipart boundary from the browser: never set its Content-Type.
+  if (init.body !== undefined && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
 
