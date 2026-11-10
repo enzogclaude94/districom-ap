@@ -9,7 +9,7 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
   - HTTP y HTTPS hacia Caddy, y Escritorio remoto, solo desde `LAN_SUBNET` y Tailscale;
   - bloqueo de 5432, 8000 y 3000 hacia el programa exacto que escucha en cada uno.
 - `apply` es idempotente y corrige reglas alteradas o sobrantes; `remove` quita todas las de DistriCom y nada más. Nunca bloquea 3389 ni toca reglas de Store Sys, del Escritorio remoto, de otros programas ni los perfiles.
-- `verify` compara también los sockets: los puertos internos solo en `127.0.0.1`.
+- `verify` es estática (reglas y perfiles). `verify --services-running` revisa además los sockets: cada puerto interno con su listener, solo en `127.0.0.1` y abierto por el programa de su regla. Un listener ausente o de otro programa es FAIL.
 - Job de CI «Windows firewall (W2-C4)», con C4‑1 a C4‑4; los once jobs existentes no cambian.
 - `docs/WINDOWS_DEPLOYMENT.md`: C3 DONE a nivel de implementación y CI; se describe C4; la verificación segura del certificado de Caddy desde el supervisor queda como requisito de C5.
 

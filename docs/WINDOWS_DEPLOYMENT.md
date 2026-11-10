@@ -342,7 +342,10 @@ Enzo los fijó el 2026-11-05 al cerrar W2‑A. Se suman a los dos requisitos del
     - `DistriCom-HTTP-In` y `DistriCom-HTTPS-In`: permiten `HTTP_PORT` y `HTTPS_PORT` (TCP) hacia el `caddy.exe` instalado, solo desde `LAN_SUBNET` y `100.64.0.0/10`;
     - `DistriCom-RDP-In`: permite 3389 (TCP) solo desde `LAN_SUBNET` y `100.64.0.0/10`;
     - `DistriCom-Block-PostgreSQL`, `-Backend` y `-Frontend`: bloquean 5432, 8000 y 3000 (TCP) hacia el programa exacto que escucha en cada uno (`postgres.exe`, el intérprete de Python del backend y `node.exe`). Nombrar programa y puerto evita afectar a otro programa en el mismo puerto. Windows no filtra el tráfico de `127.0.0.1`, así que los servicios siguen hablando entre sí.
-  - Además de las reglas, `firewall verify` comprueba que 5432, 8000 y 3000 escuchen solo en `127.0.0.1` y que cada puerto lo abra el programa que nombra su regla.
+  - **Dos verificaciones:**
+    - `firewall verify` es estática: compara las reglas y los perfiles, con los servicios en marcha o detenidos.
+    - `firewall verify --services-running` revisa además la instalación en marcha. Exige que 5432, 8000 y 3000 tengan un listener, solo en `127.0.0.1`, abierto por el programa que nombra su regla. Un listener ausente, fuera de `127.0.0.1` o de otro programa es FAIL.
+    - Solo son advertencias las condiciones ajenas a DistriCom que deciden IT, como las reglas propias de Windows para el Escritorio remoto.
   - **Escritorio remoto:** DistriCom nunca bloquea 3389 ni cambia las reglas propias de Windows para el Escritorio remoto; solo agrega un permiso. Si esas reglas siguen abiertas a cualquier origen, `verify` lo avisa como decisión de IT, sin tocarlas. En el equipo real, `firewall.ps1` se corre desde una sesión de Escritorio remoto ya abierta.
   - **Idempotente y reversible:** `apply` no reescribe una regla que ya está bien y corrige una alterada o sobrante del grupo; `remove` quita todas las reglas de DistriCom y nada más.
   - `verify` informa un perfil del firewall apagado o con entrada permitida por defecto, pero no cambia perfiles.

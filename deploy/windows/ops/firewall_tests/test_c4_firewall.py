@@ -174,7 +174,7 @@ def test_internal_ports_listen_only_on_loopback_with_the_rules_applied() -> None
         assert socket_["address"] == "127.0.0.1", socket_
         rule_program = os.path.normcase(str(internal[socket_["port"]].program))
         assert os.path.normcase(socket_["program"]) == rule_program, (socket_, rule_program)
-    verify = cli("firewall", "verify", check=False)
+    verify = cli("firewall", "verify", "--services-running", check=False)
     report = out(verify)
     metrics["avisos de verify"] = "; ".join(report["warnings"]) or "ninguno"
     assert verify.returncode == 0, report["problems"]
@@ -190,6 +190,17 @@ def test_no_rule_of_districom_blocks_remote_desktop() -> None:
     cli("services", "stop")
     for name in services.ALL:
         assert winservice.status(name).state is State.STOPPED, name
+
+
+@pytest.mark.criterion("C4-3")
+def test_with_the_services_stopped_the_running_check_fails_and_the_static_one_passes() -> None:
+    """The dynamic check requires the listeners: stopped services are listener_missing, never a pass."""
+    running = cli("firewall", "verify", "--services-running", check=False)
+    assert running.returncode == 1
+    problems = out(running)["problems"]
+    assert sorted(problems) == sorted(f"port {i.port}: listener_missing (the service is not listening)"
+                                      for i in plan().internal), problems  # fmt: skip
+    assert cli("firewall", "verify", check=False).returncode == 0
 
 
 @pytest.mark.criterion("C4-R")

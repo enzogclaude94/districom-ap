@@ -12,7 +12,8 @@ changed or removed (not the rules of Store Sys, of Remote Desktop or of any othe
 Remote Desktop can only gain access: DistriCom never blocks 3389 and never changes the built-in Remote Desktop
 rules (whether they stay wider is the IT decision ``verify`` reports). The block rules name the program and its
 port, so they cannot affect another program on the same port; loopback traffic is not filtered by Windows, so
-the services keep talking to each other on ``127.0.0.1`` (where they listen: ``verify`` checks the sockets too).
+the services keep talking to each other on ``127.0.0.1`` (where they listen: ``verify --services-running``
+checks the sockets).
 
 ``apply`` is idempotent (a rule that is already right is not touched) and ``remove`` takes every DistriCom rule
 away and nothing else. Rules are read and written with the NetSecurity cmdlets through PowerShell, exchanging
@@ -279,8 +280,12 @@ def remove(run: Runner = powershell) -> list[str]:
     return names
 
 
-def verify(pol: Plan, run: Runner = powershell) -> tuple[list[Problem], list[Problem]]:
-    """(problems, warnings). Read only. Warnings are about what is not DistriCom's to change."""
+def verify(pol: Plan, run: Runner = powershell, services_running: bool = False) -> tuple[list[Problem], list[Problem]]:
+    """(problems, warnings). Read only. Warnings are only what is not DistriCom's to change (an IT decision).
+
+    Static (default): the rules and the profiles, whether the services run or not. With ``services_running`` it
+    is also a check of the running installation: each internal port must have a listener, only on ``127.0.0.1``,
+    opened by the program its rule names; anything else is a problem."""
     problems: list[Problem] = []
     warnings: list[Problem] = []
     current: dict[str, list[Rule]] = {}
@@ -301,13 +306,8 @@ def verify(pol: Plan, run: Runner = powershell) -> tuple[list[Problem], list[Pro
             problems.append(Problem(f"profile {profile.get('name')}", "firewall_off", "the rules have no effect"))
         elif str(profile.get("inbound")) not in ("Block", "NotConfigured"):
             problems.append(Problem(f"profile {profile.get('name')}", "inbound_allowed_by_default"))
-    if pol.internal:
-        programs = {i.port: i.program for i in pol.internal}
-        for listener in listeners(sorted(programs), run):
-            if listener.address != "127.0.0.1":
-                problems.append(Problem(f"port {listener.port}", "listens_outside_loopback", listener.address))
-            if listener.program and _program_key(listener.program) != _program_key(str(programs[listener.port])):
-                warnings.append(Problem(f"port {listener.port}", "other_program", "not the program of its rule"))
+    if services_running:
+        problems += _check_listeners(pol, run)
     for rule in read_all(run):
         if rule.name.startswith(PREFIX) or rule.group == GROUP:
             continue
@@ -317,6 +317,19 @@ def verify(pol: Plan, run: Runner = powershell) -> tuple[list[Problem], list[Pro
         if inbound_rdp and rule.action == "Block":
             warnings.append(Problem(rule.name, "rdp_blocked_by_other_rule", "not DistriCom's: an IT decision"))
     return problems, warnings
+
+
+def _check_listeners(pol: Plan, run: Runner) -> list[Problem]:
+    programs = {i.port: i.program for i in pol.internal}
+    found = listeners(sorted(programs), run)
+    problems = [Problem(f"port {p}", "listener_missing", "the service is not listening")
+                for p in sorted(programs) if not any(s.port == p for s in found)]  # fmt: skip
+    for listener in found:
+        if listener.address != "127.0.0.1":
+            problems.append(Problem(f"port {listener.port}", "listens_outside_loopback", listener.address))
+        if _program_key(listener.program or "?") != _program_key(str(programs[listener.port])):
+            problems.append(Problem(f"port {listener.port}", "other_program", "not the program of its rule"))
+    return problems
 
 
 def _opens(rule: Rule, port: int) -> bool:

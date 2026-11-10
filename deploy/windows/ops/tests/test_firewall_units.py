@@ -144,19 +144,53 @@ def test_a_rule_named_like_ours_in_another_group_is_still_ours_to_report() -> No
     assert ("DistriCom-Old", "unexpected") in {(p.name, p.code) for p in firewall.verify(plan(), fake)[0]}
 
 
-def test_verify_reports_a_listener_outside_loopback_and_a_firewall_off() -> None:
+def running(fake: FakeFirewall, **changes: dict[str, Any]) -> list[tuple[str, str]]:
+    """Problems of a running installation whose sockets are the right ones except ``changes`` (port → socket)."""
+    sockets = {i.port: {"address": "127.0.0.1", "port": i.port, "program": str(i.program)} for i in INTERNAL}
+    for port, socket_ in changes.items():
+        sockets[int(port.removeprefix("p"))] = socket_
+    fake.sockets = [s for s in sockets.values() if s]
+    return sorted((p.name, p.code) for p in firewall.verify(plan(), fake, services_running=True)[0])
+
+
+def test_a_running_installation_with_the_right_listeners_has_no_problems() -> None:
     fake = FakeFirewall()
     firewall.apply(plan(), fake)
-    fake.sockets = [
-        {"address": "127.0.0.1", "port": 5432, "program": str(INTERNAL[0].program)},
-        {"address": "0.0.0.0", "port": 8000, "program": str(INTERNAL[1].program)},  # noqa: S104
-        {"address": "127.0.0.1", "port": 3000, "program": "C:/Otro/node.exe"},
-    ]
+    assert running(fake) == []
+    assert firewall.verify(plan(), fake, services_running=True)[1] == firewall.verify(plan(), fake)[1]
+
+
+def test_another_program_on_an_internal_port_is_a_problem_not_a_warning() -> None:
+    fake = FakeFirewall()
+    firewall.apply(plan(), fake)
+    other = {"address": "127.0.0.1", "port": 3000, "program": "C:/Otro/node.exe"}
+    assert running(fake, p3000=other) == [("port 3000", "other_program")]
+    unknown = {"address": "127.0.0.1", "port": 5432, "program": ""}
+    assert running(fake, p5432=unknown) == [("port 5432", "other_program")]
+    assert "other_program" not in {w.code for w in firewall.verify(plan(), fake, services_running=True)[1]}
+
+
+def test_a_missing_listener_is_a_problem_when_the_services_must_be_running() -> None:
+    fake = FakeFirewall()
+    firewall.apply(plan(), fake)
+    assert running(fake, p8000={}) == [("port 8000", "listener_missing")]
+
+
+def test_a_listener_outside_loopback_is_a_problem() -> None:
+    fake = FakeFirewall()
+    firewall.apply(plan(), fake)
+    wide = {"address": "0.0.0.0", "port": 8000, "program": str(INTERNAL[1].program)}  # noqa: S104
+    assert running(fake, p8000=wide) == [("port 8000", "listens_outside_loopback")]
+
+
+def test_the_static_check_never_looks_at_sockets() -> None:
+    """Rules and profiles only: valid with the services stopped, and a stray socket does not change it."""
+    fake = FakeFirewall()
+    firewall.apply(plan(), fake)
+    fake.sockets = [{"address": "0.0.0.0", "port": 8000, "program": "C:/Otro/x.exe"}]  # noqa: S104
+    assert firewall.verify(plan(), fake)[0] == []
     fake.profiles[2]["enabled"] = False
-    problems, warnings = firewall.verify(plan(), fake)
-    assert {(p.name, p.code) for p in problems} == {("port 8000", "listens_outside_loopback"),
-                                                    ("profile Public", "firewall_off")}  # fmt: skip
-    assert ("port 3000", "other_program") in {(w.name, w.code) for w in warnings}
+    assert [(p.name, p.code) for p in firewall.verify(plan(), fake)[0]] == [("profile Public", "firewall_off")]
 
 
 def test_verify_warns_but_never_changes_a_wider_remote_desktop_rule() -> None:
@@ -194,6 +228,6 @@ def test_verify_logs_problems_and_warnings_without_reserved_log_keys(monkeypatch
 
     problem = firewall.Problem("DistriCom-HTTPS-In", "not_as_plan", "remote_addresses")
     monkeypatch.setattr(services, "firewall_plan", lambda install: plan())
-    monkeypatch.setattr(firewall, "verify", lambda pol: ([problem], [problem]))
+    monkeypatch.setattr(firewall, "verify", lambda pol, services_running: ([problem], [problem]))
     logging.getLogger("districom_ops").setLevel(logging.INFO)
-    assert cli._firewall("verify", None) == 1  # type: ignore[arg-type]
+    assert cli._firewall("verify", None, True) == 1  # type: ignore[arg-type]

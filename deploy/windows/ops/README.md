@@ -108,7 +108,8 @@ Las pruebas C3‑1 a C3‑5 (`permissions_tests/`) corren en el job «Windows pe
 | `DistriCom-Block-PostgreSQL` · `-Backend` · `-Frontend` | Bloquea TCP 5432 · 8000 · 3000 hacia el programa que escucha en cada uno |
 
 - `apply` es idempotente y corrige una regla alterada o sobrante del grupo. `remove` quita todas las de DistriCom, aunque no haya release.
-- `verify` (solo lectura) compara las reglas, los perfiles y los sockets: 5432, 8000 y 3000 solo en `127.0.0.1`, cada uno abierto por el programa de su regla. Avisa, sin cambiarlas, si las reglas propias de Windows para el Escritorio remoto están abiertas a cualquier origen.
+- `verify` (solo lectura, estática) compara las reglas y los perfiles. Avisa, sin cambiarlas, si las reglas propias de Windows para el Escritorio remoto están abiertas a cualquier origen.
+- `verify --services-running` revisa además la instalación en marcha: 5432, 8000 y 3000 tienen que escuchar solo en `127.0.0.1`, cada uno abierto por el programa de su regla. Un listener ausente o de otro programa es un problema, no una advertencia.
 - Nunca bloquea 3389 ni cambia reglas de Store Sys, del Escritorio remoto ni de otros programas, ni los perfiles.
 
 Las pruebas C4‑1 a C4‑4 (`firewall_tests/`) corren en el job «Windows firewall (W2-C4)», con dos reglas ficticias de Store Sys y todas las reglas ajenas comparadas antes y después de cada paso.
