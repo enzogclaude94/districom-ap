@@ -339,6 +339,92 @@ jobs:
             Get-Content $file.FullName -Tail 60
           }
 
+  windows-permissions:
+    # W2-C3 (ADR 016, proposed): the definitive NTFS permissions of the installation, measured for real under each
+    # identity (the five service accounts, another service and a local standard user) by a probe that tries each
+    # operation. Same disposable setup as W2-C2 (its first three tests), then C3-1 to C3-5. The client's real
+    # accounts, Store Sys, Windows 11 Pro and Defender stay PENDIENTE.
+    name: Windows permissions (W2-C3)
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      DISTRICOM_C2_ACCEPTANCE: "1"
+      DISTRICOM_C3_ACCEPTANCE: "1"
+      DISTRICOM_C2_ROOT: C:\DistriCom
+      DISTRICOM_C2_RELEASE: ci
+      DISTRICOM_C2_DISKS: C:\c2-disks
+      DISTRICOM_C2_RESULTS: ${{ github.workspace }}/deploy/windows/ops/test-results/setup
+      DISTRICOM_C3_PROBE: C:\c3-probe
+      DISTRICOM_C3_RESULTS: ${{ github.workspace }}/deploy/windows/ops/test-results
+    steps:
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            deploy/windows/ops/uv.lock
+            backend/uv.lock
+      - run: uv python install ${{ env.PYTHON_VERSION }}
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: frontend/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Build the frontend (standalone)
+        working-directory: frontend
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          pnpm install --frozen-lockfile
+          $env:NEXT_OUTPUT = "standalone"
+          $env:API_INTERNAL_URL = "http://127.0.0.1:8000"
+          pnpm build
+      - name: Tools (ruff, format, mypy)
+        working-directory: deploy/windows/ops
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          uv sync --frozen
+          uv run ruff check .
+          uv run ruff format --check .
+          uv run mypy
+      - name: Stage the release under C:\DistriCom
+        working-directory: deploy/windows/ops
+        run: uv run python services_tests/stage_release.py "${{ github.workspace }}" "$env:DISTRICOM_C2_ROOT" "$env:DISTRICOM_C2_RELEASE" "${{ env.PYTHON_VERSION }}"
+      - name: Setup (C2 install tests) and C3-1 to C3-5
+        working-directory: deploy/windows/ops
+        run: >-
+          uv run pytest -v -p no:cacheprovider
+          services_tests/test_c2_services.py::test_runtimes_are_verified_and_a_tampered_download_is_refused
+          services_tests/test_c2_services.py::test_disk_database_and_services_install_idempotently
+          services_tests/test_c2_services.py::test_migrations_with_postgresql_alone
+          permissions_tests
+      - name: W2-C3 results
+        if: always()
+        working-directory: deploy/windows/ops
+        run: |
+          if (Test-Path test-results\w2c3-results.md) {
+            Get-Content test-results\w2c3-results.md >> $env:GITHUB_STEP_SUMMARY
+            Get-Content test-results\w2c3-results.md
+          }
+      - name: Diagnostics (logs without secrets)
+        if: failure()
+        run: |
+          Get-Service DistriCom*, C3Outsider -ErrorAction SilentlyContinue | Format-Table -AutoSize Name, Status, StartType
+          $root = $env:DISTRICOM_C2_ROOT
+          foreach ($file in @(Get-Item "$root\logs\ops.log" -ErrorAction SilentlyContinue) +
+                            @(Get-ChildItem "$root\logs\services" -Recurse -Filter *.log -ErrorAction SilentlyContinue) +
+                            @(Get-ChildItem "$root\logs\postgresql" -Filter *.log -ErrorAction SilentlyContinue) +
+                            @(Get-ChildItem "$env:DISTRICOM_C3_PROBE\svclogs" -Recurse -Filter *.log -ErrorAction SilentlyContinue)) {
+            "===== $($file.FullName)"
+            Get-Content $file.FullName -Tail 60
+          }
+
   # --- W2-B (ADR 016, proposed): the application as it is, on Windows ----------------------------------------------
   # Informative for main's branch protection (Enzo, 2026-11-06), but W2-B is only approved with all three in green.
   # Windows Server runners, PostgreSQL 17 from the official binaries and fictitious data in disposable databases.

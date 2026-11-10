@@ -39,6 +39,24 @@ class Install:
     def service_logs(self) -> Path:
         return self.root / "logs" / "services"
 
+    def service_log_dir(self, name: str) -> Path:
+        """Each WinSW service logs in its own folder, writable only by its account (C3)."""
+        return self.service_logs / name
+
+    @property
+    def frontend_cache(self) -> Path:
+        """Next.js writes ``.next\\cache`` at run time; it lives here, not in the read-only release (C3)."""
+        return self.root / "state" / "frontend-cache"
+
+    @property
+    def integrity_record(self) -> Path:
+        return self.root / "config" / "integrity.json"
+
+    @property
+    def python_runtime(self) -> Path:
+        """The Python the release virtual environments use (``UV_PYTHON_INSTALL_DIR``)."""
+        return self.runtime / "python"
+
     @property
     def postgres_logs(self) -> Path:
         return self.root / "logs" / "postgresql"

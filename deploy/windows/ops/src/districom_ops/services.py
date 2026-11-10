@@ -23,10 +23,12 @@ import hashlib
 import http.client
 import json
 import logging
+import shutil
 import signal
 import socket
 import ssl
 import subprocess
+import sys
 import threading
 import time
 import xml.etree.ElementTree as ET
@@ -34,7 +36,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
-from districom_ops import acl, artifacts, backup_disk, database, winservice
+from districom_ops import artifacts, backup_disk, database, integrity, ntfs, permissions, winservice
 from districom_ops.install import Install
 from districom_ops.winservice import ServiceError, State, account, service_sid
 
@@ -281,7 +283,9 @@ def _install_winsw(install: Install, spec: WinswSpec) -> list[str]:
     winsw = install.artifact("winsw").path(install.runtime)
     if _write_if_changed(exe, winsw.read_bytes()):
         changes.append(f"{spec.id}: wrapper copied")
-    xml_changed = _write_if_changed(install.service_dir / f"{spec.id}.xml", render(spec, install.service_logs))
+    xml_changed = _write_if_changed(
+        install.service_dir / f"{spec.id}.xml", render(spec, install.service_log_dir(spec.id))
+    )
     current = winservice.config(spec.id)
     if current is None:
         result = winservice.run([str(exe), "install"])
@@ -300,13 +304,60 @@ def _install_winsw(install: Install, spec: WinswSpec) -> list[str]:
     return changes
 
 
+def permission_policy(install: Install) -> permissions.Policy:
+    """The C3 policy of this installation. The backup disk marker is included only when the disk verifies."""
+    runtimes = {
+        "python": (install.python_runtime, [BACKEND, STACK]),
+        "postgresql": (install.artifact("postgresql").home(install.runtime), [PG, STACK]),
+        "caddy": (install.artifact("caddy").home(install.runtime), [CADDY]),
+        "node": (install.artifact("node").home(install.runtime), [FRONTEND]),
+    }
+    marker = None
+    if check_disk(install).ok:
+        marker = install.services.backup_disk_root / backup_disk.MARKER
+    return permissions.policy(
+        root=install.root,
+        release=install.release_dir() if install.release else None,
+        pg_data=install.pg_data,
+        runtimes=runtimes,
+        winsw=list(WINSW),
+        names={"backend": BACKEND, "frontend": FRONTEND, "caddy": CADDY, "postgresql": PG, "stack": STACK},
+        backup_marker=marker,
+    )
+
+
+def _link_frontend_cache(install: Install) -> bool:
+    """``<release>\\frontend\\.next\\cache`` → ``state\\frontend-cache`` (a junction), so the release stays read-only.
+    A cache folder left by the build is removed: it is only a cache."""
+    link = install.frontend_dir / ".next" / "cache"
+    target = install.frontend_cache
+    if ntfs.is_link(link):
+        if ntfs.link_target(link) == target:
+            return False
+        link.rmdir() if sys.platform == "win32" else link.unlink()
+    elif link.exists():
+        shutil.rmtree(link)
+    link.parent.mkdir(parents=True, exist_ok=True)
+    if sys.platform == "win32":
+        import _winapi
+
+        _winapi.CreateJunction(str(target), str(link))
+    else:
+        link.symlink_to(target, target_is_directory=True)
+    return True
+
+
 def install_services(install: Install) -> list[str]:
     """Idempotent: a second run with the same release and configuration reports no change and touches nothing."""
     _check_release(install)
     changes: list[str] = []
-    for folder in (install.service_dir, install.service_logs, install.uploads, install.caddy_state,
-                   install.backend_env.parent):  # fmt: skip
+    folders = [install.service_dir, install.uploads, install.caddy_state, install.frontend_cache,
+               install.backend_env.parent, install.postgres_logs,
+               *(install.service_log_dir(name) for name in WINSW)]  # fmt: skip
+    for folder in folders:
         folder.mkdir(parents=True, exist_ok=True)
+    if _link_frontend_cache(install):
+        changes.append("frontend .next\\cache linked to state\\frontend-cache")
     if _write_if_changed(install.backend_env, backend_env(install).encode("utf-8")):
         changes.append("config\\backend\\.env written")
     template = (Path(__file__).parent / "templates" / "Caddyfile").read_bytes()
@@ -318,20 +369,13 @@ def install_services(install: Install) -> list[str]:
     for name in WINSW:
         changes += _install_winsw(install, all_specs[name])
 
-    # Minimal permissions to start (the definitive ACLs are C3's): each account gets only what it writes.
-    sids = {name: service_sid(name) for name in ALL}
-    acl.restrict(install.backend_env, readers=[sids[BACKEND]])
-    acl.restrict(install.layout.config_file, readers=[sids[STACK]])
-    for name in ALL:
-        acl.grant(install.service_logs, sids[name], "M")
-    acl.grant(install.pg_data, sids[PG], "F")
-    acl.grant(install.postgres_logs, sids[PG], "M")
-    acl.grant(install.uploads, sids[BACKEND], "M")
-    acl.grant(install.caddy_state, sids[CADDY], "M")
-    acl.grant(install.root / "logs", sids[STACK], "M")
-    acl.grant(install.root / "state", sids[STACK], "M")
+    if integrity.record(install):
+        changes.append("config\\integrity.json written")
+    # Definitive permissions (C3): exactly the policy, nothing inherited from C:\\. Last, so that every file
+    # written above (including the integrity record) is covered.
+    changes += permissions.apply(permission_policy(install))
     for name in CHAIN:
-        if winservice.grant_control(name, sids[STACK]):
+        if winservice.grant_control(name, service_sid(STACK)):
             changes.append(f"{name}: {STACK} may start and stop it")
 
     record = {
@@ -389,10 +433,23 @@ def caddy_ca(install: Install) -> Path:
     return install.caddy_state / "data" / "caddy" / "pki" / "authorities" / "local" / "root.crt"
 
 
+def _caddy_context(install: Install) -> ssl.SSLContext:
+    """Verified against Caddy's own CA when this account can read it (administrators, the tests). The stack cannot:
+    Caddy's keys sit next to that certificate and are Caddy's only (C3). For the stack this is a readiness probe
+    on 127.0.0.1, not a trust decision, so it then checks only that TLS answers."""
+    try:
+        return ssl.create_default_context(cafile=str(caddy_ca(install)))
+    except PermissionError:
+        context = ssl.create_default_context()
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        return context
+
+
 def https_get(install: Install, path: str, timeout: float = 10) -> tuple[int, bytes]:
     """Through Caddy on 127.0.0.1 (HTTPS port) with the configured name, checking the certificate with Caddy's CA."""
     port = install.services.https_port
-    context = ssl.create_default_context(cafile=str(caddy_ca(install)))
+    context = _caddy_context(install)
     raw = socket.create_connection(("127.0.0.1", port), timeout=timeout)
     connection = http.client.HTTPConnection(install.ops.host, port, timeout=timeout)
     try:
@@ -414,7 +471,7 @@ def ready(install: Install, name: str) -> bool:
         if name == FRONTEND:
             return http_status(FRONTEND_PORT, "/") < 500
         if name == CADDY:
-            return caddy_ca(install).exists() and https_get(install, "/api/v1/health/live")[0] == 200
+            return https_get(install, "/api/v1/health/live")[0] == 200
     except (OSError, http.client.HTTPException, ssl.SSLError):
         return False
     raise ValueError(name)

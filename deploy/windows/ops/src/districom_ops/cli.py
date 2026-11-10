@@ -12,7 +12,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from districom_ops import artifacts, backup_disk, database, services
+from districom_ops import artifacts, backup_disk, database, integrity, ntfs, permissions, services
 from districom_ops.config import ConfigError, OpsConfig, parse_env, read_config, read_services_config
 from districom_ops.install import Install
 from districom_ops.layout import Layout, LayoutError
@@ -77,6 +77,14 @@ def _parser() -> argparse.ArgumentParser:
     s.add_parser("stop", help="stop in reverse order")
     s.add_parser("status")
     s.add_parser("supervise", help="run by the DistriComStack service")
+
+    # W2-C3: permissions and integrity
+    a = sub.add_parser("permissions", help="NTFS permissions (C3)").add_subparsers(dest="action", required=True)
+    a.add_parser("apply", help="make them exactly the policy (idempotent; refuses while a foreign link exists)")
+    a.add_parser("verify", help="read the effective lists and compare them with the policy (read only)")
+    i = sub.add_parser("integrity", help="installed executables (C3)").add_subparsers(dest="action", required=True)
+    i.add_parser("record", help="record the SHA-256 of runtimes, wrappers and the release")
+    i.add_parser("verify", help="compare them with the record (read only)")
     return parser
 
 
@@ -111,7 +119,7 @@ def _run(args: argparse.Namespace) -> int:
         log.info("config_ok", extra={"root": str(layout.root), "host": config.host})
         return 0
 
-    if args.command in ("runtime", "backup-disk", "database", "services"):
+    if args.command in ("runtime", "backup-disk", "database", "services", "permissions", "integrity"):
         return _services(args, config)
 
     oplog = OperationsLog(layout.state / "operations.jsonl")
@@ -188,6 +196,33 @@ def _services(args: argparse.Namespace, config: OpsConfig) -> int:
         changed = database.init(install)
         log.info("database_init", extra={"changed": changed})
         return 0
+    if args.command in ("permissions", "integrity") and install.release is None:
+        log.error("refused", extra={"reason": "no release recorded in state\\services.json: run services install"})
+        return 2
+    if args.command == "permissions":
+        policy = services.permission_policy(install)
+        if args.action == "apply":
+            _print({"changes": permissions.apply(policy)})
+            return 0
+        problems = permissions.verify(policy)
+        for problem in problems[:50]:
+            extra = {"path": problem.path, "code": problem.code, "detail": problem.detail}
+            log.error("permissions_problem", extra=extra)
+        log.info("permissions_verified", extra={"problems": len(problems)})
+        _print({"problems": [p.describe() for p in problems]})
+        return 1 if problems else 0
+    if args.command == "integrity":
+        if args.action == "record":
+            _print({"changed": integrity.record(install)})
+            return 0
+        report = integrity.verify(install)
+        summary = {"files": report.files, "changed": report.changed[:20], "missing": report.missing[:20],
+                   "added": report.added[:20]}  # fmt: skip
+        (log.info if report.ok else log.error)("integrity_verified", extra={"ok": report.ok, **{
+            k: len(v) for k, v in (("changed", report.changed), ("missing", report.missing), ("added", report.added))
+        }})  # fmt: skip
+        _print(summary)
+        return 0 if report.ok else 1
     if args.action == "install":
         _print({"changes": services.install_services(install)})
         return 0
@@ -222,6 +257,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         artifacts.ArtifactError,
         backup_disk.BackupDiskError,
         database.DatabaseError,
+        permissions.PermissionsError,
+        ntfs.NtfsError,
     ) as exc:
         log.error("refused", extra={"reason": str(exc)})
         return 2

@@ -1,4 +1,4 @@
-# W2-C: operación de DistriCom en Windows (C1 base operativa, C2 servicios nativos)
+# W2-C: operación de DistriCom en Windows (C1 base operativa, C2 servicios nativos, C3 permisos)
 
 Primera subetapa de W2‑C (ADR 016, en estado **Propuesto**; plan en `docs/WINDOWS_DEPLOYMENT.md` y propuesta W2‑C revisión 1). Son las piezas que usan las subetapas siguientes. Esta carpeta **no** instala servicios, no toca el firewall ni bloquea escrituras: eso es C2 a C13.
 
@@ -40,7 +40,7 @@ Python con solo la biblioteca estándar (decisión D1). Reutiliza `districom_bac
 | `backup_disk` | Prepara y verifica `.districom-backup-disk`. El id, el GUID del volumen y que sea un volumen distinto del de sistema y del de datos tienen que coincidir. Una marca copiada a otro disco con la misma letra falla |
 | `database` | Crea el clúster una sola vez: ICU `es-AR`, checksums, SCRAM, `127.0.0.1`, logs O7 en `logs\postgresql`, superusuario con contraseña aleatoria en `config\postgres.secret`. También crea el rol y la base de la app |
 | `services` | Instala de forma idempotente, desinstala, arranca, detiene, informa el estado y supervisa |
-| `winservice`, `acl` | SCM por `advapi32`, independiente del idioma, y permisos NTFS mínimos por SID. Las ACL definitivas son de C3 |
+| `winservice`, `acl` | SCM por `advapi32`, independiente del idioma; `acl` solo restringe el archivo temporal de `database init` |
 
 ```powershell
 districom-ops runtime fetch
@@ -58,8 +58,44 @@ Las pruebas C2‑1 a C2‑7 (`services_tests/`) instalan servicios reales y corr
 - Windows 11 Pro;
 - el disco desconectado físicamente (en CI se desconecta un VHDX);
 - el número de serie físico del disco;
-- las ACL definitivas (C3);
 - la parada durante el apagado de Windows (C10 y C11).
+
+**Logs de cada servicio:** desde C3 cada servicio WinSW escribe en `logs\services\<servicio>\`.
+
+## C3: cuentas de servicio y permisos NTFS
+
+`services install` termina aplicando la política; `permissions apply|verify` y `install\acl.ps1` la aplican o la verifican aparte.
+
+| Dónde | Quién (además de Administradores y SYSTEM) |
+|---|---|
+| La raíz (protegida: no hereda de `C:\`) | nadie |
+| `runtime\python` · `runtime\postgresql-*` · `runtime\caddy-*` · `runtime\node-*` | lectura y ejecución: backend y Stack · PostgreSQL y Stack · Caddy · frontend |
+| `services\<servicio>.exe` y `.xml` | lectura y ejecución: ese servicio |
+| `releases\<versión>\backend` · `frontend` · `windows` | lectura y ejecución: backend · frontend · Stack |
+| `config\` (protegida) | nadie; `districom.env` → Stack (lectura), `backend\` → backend (lectura), `Caddyfile` → Caddy (lectura) |
+| `config\postgres.secret`, `config\integrity.json` | nadie |
+| Datos de PostgreSQL (protegida) | PostgreSQL (control total) |
+| `data\uploads` | backend (modificar) |
+| `logs\`, `state\` | Stack (modificar) |
+| `logs\services\<servicio>`, `logs\postgresql` (protegidas) | ese servicio (modificar) |
+| `state\caddy` (protegida, claves de Caddy) · `state\frontend-cache` (protegida) | Caddy · frontend (modificar) |
+| Marca del disco de backup (protegida) | Stack (lectura) |
+| Cada carpeta por encima de un permiso (hasta la raíz); datos de PostgreSQL para el Stack | atravesar: leer atributos, sin listar, sin herencia |
+
+| Módulo | Qué hace |
+|---|---|
+| `ntfs` | Lee y escribe listas de acceso por SID con `advapi32`; nunca interpreta texto localizado |
+| `permissions` | La política. `apply` es idempotente: primero revisa los enlaces (una junction que sale de su release frena todo, sin cambios), después aplica cada regla y quita los permisos sueltos de lo que está debajo. `verify` lee las listas efectivas de cada objeto e informa ruta y código, nunca valores |
+| `integrity` | `config\integrity.json` con el SHA‑256 de runtimes, envoltorios y release; `verify` informa cambiados, faltantes y agregados |
+
+- «Modificar» nunca incluye cambiar permisos, tomar posesión ni borrar lo de otros.
+- `.next\cache` es una junction a `state\frontend-cache`: la release sigue de solo lectura.
+- El Stack no puede leer `state\caddy` (están las claves de Caddy). Para saber si Caddy responde usa TLS sin verificar el certificado: es una prueba de disponibilidad en `127.0.0.1`, no una decisión de confianza. Los administradores y las pruebas sí verifican el certificado.
+- Solo se tocan la raíz de DistriCom, los datos de PostgreSQL y la marca del disco de backup; nunca ACL del sistema ni de otros programas.
+
+Las pruebas C3‑1 a C3‑5 (`permissions_tests/`) corren en el job «Windows permissions (W2-C3)». Una sonda de PowerShell intenta cada operación de verdad bajo siete identidades: los cinco servicios (apuntando el servicio a la sonda por un momento y restaurándolo), otro servicio de la máquina y un usuario local estándar.
+
+**PENDIENTE, nunca PASS:** las cuentas y el grupo de IT reales del cliente, Store Sys y su proveedor con sus cuentas reales, la cuenta de backups (C6), Windows 11 Pro y Defender.
 
 ## Regla de logs para C2 a C13
 
@@ -87,6 +123,5 @@ uv run districom-ops --config C:\DistriCom\config\districom.env check-config
 Ese mismo job deja la tabla PASS/FAIL en el log.
 
 **PENDIENTE, nunca PASS:**
-- los permisos NTFS de `config\` y `state\` (C3);
 - Windows 11 Pro;
 - un corte de energía real durante una escritura del registro.
