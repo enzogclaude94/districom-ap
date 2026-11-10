@@ -12,7 +12,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from districom_ops import artifacts, backup_disk, database, integrity, ntfs, permissions, services
+from districom_ops import artifacts, backup_disk, database, firewall, integrity, ntfs, permissions, services
 from districom_ops.config import ConfigError, OpsConfig, parse_env, read_config, read_services_config
 from districom_ops.install import Install
 from districom_ops.layout import Layout, LayoutError
@@ -82,6 +82,10 @@ def _parser() -> argparse.ArgumentParser:
     a = sub.add_parser("permissions", help="NTFS permissions (C3)").add_subparsers(dest="action", required=True)
     a.add_parser("apply", help="make them exactly the policy (idempotent; refuses while a foreign link exists)")
     a.add_parser("verify", help="read the effective lists and compare them with the policy (read only)")
+    f = sub.add_parser("firewall", help="Windows Firewall rules (C4)").add_subparsers(dest="action", required=True)
+    f.add_parser("apply", help="make the DistriCom rules exactly the plan (idempotent; never touches other rules)")
+    f.add_parser("verify", help="rules, profiles and listening sockets against the plan (read only)")
+    f.add_parser("remove", help="take away every DistriCom rule and nothing else")
     i = sub.add_parser("integrity", help="installed executables (C3)").add_subparsers(dest="action", required=True)
     i.add_parser("record", help="record the SHA-256 of runtimes, wrappers and the release")
     i.add_parser("verify", help="compare them with the record (read only)")
@@ -119,7 +123,7 @@ def _run(args: argparse.Namespace) -> int:
         log.info("config_ok", extra={"root": str(layout.root), "host": config.host})
         return 0
 
-    if args.command in ("runtime", "backup-disk", "database", "services", "permissions", "integrity"):
+    if args.command in ("runtime", "backup-disk", "database", "services", "permissions", "integrity", "firewall"):
         return _services(args, config)
 
     oplog = OperationsLog(layout.state / "operations.jsonl")
@@ -196,7 +200,9 @@ def _services(args: argparse.Namespace, config: OpsConfig) -> int:
         changed = database.init(install)
         log.info("database_init", extra={"changed": changed})
         return 0
-    if args.command in ("permissions", "integrity") and install.release is None:
+    if args.command == "firewall" and args.action == "remove":
+        return _firewall(args.action, install)  # reversible always, even without a release
+    if args.command in ("permissions", "integrity", "firewall") and install.release is None:
         log.error("refused", extra={"reason": "no release recorded in state\\services.json: run services install"})
         return 2
     if args.command == "permissions":
@@ -211,6 +217,8 @@ def _services(args: argparse.Namespace, config: OpsConfig) -> int:
         log.info("permissions_verified", extra={"problems": len(problems)})
         _print({"problems": [p.describe() for p in problems]})
         return 1 if problems else 0
+    if args.command == "firewall":
+        return _firewall(args.action, install)
     if args.command == "integrity":
         if args.action == "record":
             _print({"changed": integrity.record(install)})
@@ -244,6 +252,27 @@ def _services(args: argparse.Namespace, config: OpsConfig) -> int:
     return services.supervise(install)
 
 
+def _firewall(action: str, install: Install) -> int:
+    if action == "remove":
+        removed = firewall.remove()
+        log.info("firewall_removed", extra={"rules": removed})
+        _print({"removed": removed})
+        return 0
+    plan = services.firewall_plan(install)
+    if action == "apply":
+        changes = firewall.apply(plan)
+        log.info("firewall_applied", extra={"changes": changes})
+        _print({"changes": changes})
+        return 0
+    problems, warnings = firewall.verify(plan)
+    for item in problems:
+        log.error("firewall_problem", extra={"name": item.name, "code": item.code, "detail": item.detail})
+    for item in warnings:
+        log.warning("firewall_warning", extra={"name": item.name, "code": item.code, "detail": item.detail})
+    _print({"problems": [p.describe() for p in problems], "warnings": [w.describe() for w in warnings]})
+    return 1 if problems else 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
@@ -259,6 +288,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         database.DatabaseError,
         permissions.PermissionsError,
         ntfs.NtfsError,
+        firewall.FirewallError,
     ) as exc:
         log.error("refused", extra={"reason": str(exc)})
         return 2
