@@ -4,7 +4,16 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
-### Added — Servidor: W2‑C3, cuentas de servicio y permisos NTFS (en revisión)
+### Added — Servidor: W2‑C4, Firewall de Windows (en revisión)
+- `districom-ops firewall apply|verify|remove` e `install\firewall.ps1`: reglas propias en el grupo `DistriCom`.
+  - HTTP y HTTPS hacia Caddy, y Escritorio remoto, solo desde `LAN_SUBNET` y Tailscale;
+  - bloqueo de 5432, 8000 y 3000 hacia el programa exacto que escucha en cada uno.
+- `apply` es idempotente y corrige reglas alteradas o sobrantes; `remove` quita todas las de DistriCom y nada más. Nunca bloquea 3389 ni toca reglas de Store Sys, del Escritorio remoto, de otros programas ni los perfiles.
+- `verify` compara también los sockets: los puertos internos solo en `127.0.0.1`.
+- Job de CI «Windows firewall (W2-C4)», con C4‑1 a C4‑4; los once jobs existentes no cambian.
+- `docs/WINDOWS_DEPLOYMENT.md`: C3 DONE a nivel de implementación y CI; se describe C4; la verificación segura del certificado de Caddy desde el supervisor queda como requisito de C5.
+
+### Added — Servidor: W2‑C3, cuentas de servicio y permisos NTFS (DONE en implementación y CI, PR #81)
 - `deploy/windows/ops/` aplica las ACL definitivas al instalar los servicios:
   - la raíz no hereda de `C:\`;
   - cada cuenta virtual recibe solo lo que lee o escribe;
