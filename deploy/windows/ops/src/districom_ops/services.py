@@ -23,6 +23,7 @@ import hashlib
 import http.client
 import json
 import logging
+import os
 import shutil
 import signal
 import socket
@@ -31,10 +32,13 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
+
+from districom_backup.repo import write_atomic
 
 from districom_ops import artifacts, backup_disk, database, firewall, integrity, ntfs, permissions, winservice
 from districom_ops.install import Install
@@ -576,16 +580,76 @@ def stop_all(install: Install) -> None:
     stop_chain(install)
 
 
-def start_stack(install: Install) -> None:
-    """The normal start: the stack service, which checks the disk and starts the chain. Waits until Caddy answers."""
-    winservice.start(STACK)
-    deadline = time.monotonic() + install.services.backup_disk_wait_seconds + START_SECONDS * len(CHAIN)
-    while not ready(install, CADDY):
+# The supervisor's own word on a start: written by DistriComStack (``supervise``), read by ``start_stack``.
+# ``start-request.json`` carries a new nonce for each ``services start``; the supervisor copies it into
+# ``supervisor.json`` with its phase, so a record of an earlier run (another nonce) is never taken for this one.
+START_REQUEST = "start-request.json"
+SUPERVISOR_STATE = "supervisor.json"
+
+
+def _write_json(path: Path, data: dict[str, object]) -> None:
+    write_atomic(path, json.dumps(data).encode("utf-8"))
+
+
+def _read_json(path: Path) -> dict[str, object] | None:
+    try:
+        data = json.loads(path.read_text("utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def supervisor_state(install: Install) -> dict[str, object] | None:
+    return _read_json(install.layout.state / SUPERVISOR_STATE)
+
+
+def _own_service_pid() -> int:
+    try:
+        return winservice.status(STACK).pid
+    except ServiceError:
+        return 0
+
+
+def _record_phase(install: Install, run: dict[str, object], phase: str, reason: str | None = None) -> None:
+    _write_json(install.layout.state / SUPERVISOR_STATE, {**run, "phase": phase, "reason": reason})
+
+
+def start_stack(install: Install, poll_seconds: float = 1, timeout: float | None = None) -> None:
+    """The normal start: the stack service, which checks the disk and starts the chain.
+
+    Done only when the supervisor of *this* start says the whole chain is running (its record carries the nonce
+    this call wrote; an older record never counts) and Caddy answers with its certificate verified. No fixed
+    waits: it polls until then, and fails when the stack stops, reports a failed start, or the timeout passes.
+    If the stack is already running there is no new start: the record must be the one of the live service
+    (its WinSW process id), never one left by an earlier run."""
+    current = winservice.status(STACK)
+    if current.state is State.RUNNING:
+        live = current.pid
+
+        def ours(record: dict[str, object]) -> bool:
+            return record.get("service_pid") == live
+    else:
+        nonce = uuid.uuid4().hex
+        _write_json(install.layout.state / START_REQUEST, {"nonce": nonce})
+        winservice.start(STACK)
+
+        def ours(record: dict[str, object]) -> bool:
+            return record.get("request") == nonce
+
+    limit = timeout if timeout is not None else install.services.backup_disk_wait_seconds + START_SECONDS * len(CHAIN)
+    deadline = time.monotonic() + limit
+    while True:
+        record = supervisor_state(install)
+        if record and ours(record):
+            if record.get("phase") == "failed":
+                raise ServicesError(f"{STACK} could not start the services ({record.get('reason')}): see logs\\ops.log")
+            if record.get("phase") == "running" and ready(install, CADDY):
+                return
         if winservice.status(STACK).state is State.STOPPED:
             raise ServicesError(f"{STACK} stopped while starting: see logs\\ops.log")
         if time.monotonic() > deadline:
             raise ServicesError("the services did not become ready in time")
-        time.sleep(1)
+        time.sleep(poll_seconds)
 
 
 def status_report(install: Install) -> dict[str, object]:
@@ -622,12 +686,23 @@ def supervise(install: Install, stop: threading.Event | None = None, poll_second
         if hasattr(signal, name) and threading.current_thread() is threading.main_thread():
             signal.signal(getattr(signal, name), on_signal)
 
-    log.info("supervisor_started", extra={"release": install.release})
+    request = _read_json(install.layout.state / START_REQUEST) or {}
+    run: dict[str, object] = {
+        "run": uuid.uuid4().hex,
+        "request": request.get("nonce"),
+        "pid": os.getpid(),
+        # The WinSW process the Service Control Manager reports for this service: how a later ``services start``
+        # tells the record of the live run from one left by an earlier run (the parent is uv's launcher).
+        "service_pid": _own_service_pid(),
+    }
+    _record_phase(install, run, "starting")
+    log.info("supervisor_started", extra={"release": install.release, "run": run["run"]})
     deadline = time.monotonic() + install.services.backup_disk_wait_seconds
     disk = check_disk(install)
     while not disk.ok:
         if time.monotonic() >= deadline or stop.is_set():
             log.error("postgresql_start_refused", extra={"reason": disk.code, "detail": disk.detail})
+            _record_phase(install, run, "failed", f"backup disk {disk.code}")
             return 3
         log.warning("backup_disk_waiting", extra={"reason": disk.code})
         stop.wait(poll_seconds)
@@ -637,8 +712,10 @@ def supervise(install: Install, stop: threading.Event | None = None, poll_second
     except (ServicesError, ServiceError) as exc:
         log.error("services_start_failed", extra={"reason": str(exc)})
         stop_chain(install)
+        _record_phase(install, run, "failed", "a service did not start")
         return 4
     log.info("services_running")
+    _record_phase(install, run, "running")  # after every service_ready, Caddy's included
 
     restarts: list[float] = []
     disk_ok = True
@@ -668,6 +745,8 @@ def supervise(install: Install, stop: threading.Event | None = None, poll_second
         except (ServicesError, ServiceError) as exc:
             log.critical("postgresql_not_restarted", extra={"reason": str(exc)})
     log.info("supervisor_stopping")
+    _record_phase(install, run, "stopping")
     stop_chain(install)
     log.info("supervisor_stopped")
+    _record_phase(install, run, "stopped")
     return 0

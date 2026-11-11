@@ -33,6 +33,9 @@ Python con solo la biblioteca estándar (decisión D1). Reutiliza `districom_bac
 - WinSW reinicia el backend, el frontend y Caddy 3 veces; después deja de intentar.
 - Caddy escucha en 80 y 443. Si otro programa del servidor ya los usa, `HTTP_PORT` y `HTTPS_PORT` los cambian; hay que revisarlo en el equipo real (por ejemplo IIS o un servicio de Store Sys).
 - El Stack tiene permiso solo para consultar, arrancar y detener esos cuatro servicios.
+- **`services start` termina con la señal del supervisor de ese arranque.** Escribe `state\start-request.json` con un valor nuevo y el Stack lo copia en `state\supervisor.json` junto con su fase: `starting`, `running`, `failed`, `stopping` o `stopped`. `start` vuelve solo cuando ese registro dice `running`, que se escribe después del `service_ready` de Caddy, y Caddy responde con el certificado verificado.
+  - Un registro de un arranque anterior nunca cuenta. Si el Stack ya estaba en marcha, cuenta solo el del servicio vivo (su proceso WinSW).
+  - Falla si el Stack se detiene o informa `failed`, o si se cumple el tiempo máximo. No hay esperas fijas.
 
 | Módulo | Qué hace |
 |---|---|
