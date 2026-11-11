@@ -4,6 +4,7 @@ from app.modules.commercial.assignments import models as commercial_assignments_
 from app.modules.commercial.catalog import models as commercial_catalog_models
 from app.modules.commercial.config import models as commercial_config_models
 from app.modules.commercial.documents import models as commercial_documents_models
+from app.modules.commercial.no_purchase import models as commercial_no_purchase_models
 from app.modules.commercial.sales import models as commercial_sales_models
 from app.modules.settlements.cheques import models as settlements_cheques_models
 from app.modules.settlements.delivery import models as settlements_delivery_models
@@ -36,6 +37,7 @@ __all__ = [
     "commercial_catalog_models",
     "commercial_config_models",
     "commercial_documents_models",
+    "commercial_no_purchase_models",
     "commercial_sales_models",
     "customers_models",
     "imports_models",
