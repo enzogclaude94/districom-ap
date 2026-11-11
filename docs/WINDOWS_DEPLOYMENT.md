@@ -65,6 +65,8 @@ D:\ (disco de backup)
 | 5432, 8000, 3000 | Solo `127.0.0.1` | Internos |
 | Puertos de Store Sys | Según su proveedor | A definir |
 
+Desde W2‑C4 (`districom-ops firewall apply|verify|remove`, §8.5) las reglas de DistriCom están en el grupo `DistriCom` y se llaman `DistriCom-*`. Nunca se crean, cambian ni quitan reglas de Store Sys, del Escritorio remoto de Windows ni de otros programas, ni los perfiles del firewall.
+
 Nada expuesto a Internet; el router no reenvía puertos. La política de Tailscale es la misma que la de Linux.
 
 ## 5. Backups y recuperación
@@ -174,7 +176,7 @@ Si un paso falla antes del 4, la app vuelve a quedar disponible. Si falla despu�
 | **W1** | ADR 016 (Propuesto) y este plan | CI (documentación) | DONE (PR #70, 2026-11-04) |
 | **W2‑A** | Prueba de concepto aislada de backups físicos, WAL, PITR y restauración (`deploy/windows/backup/`) | GitHub Actions (Windows); lo no reproducible queda PENDIENTE | DONE como prueba de concepto y CI (PR #72, 2026-11-05); lo de laboratorio sigue PENDIENTE: ver §8.2 |
 | **W2‑B** | Pruebas automatizadas de los componentes compatibles con Windows (backend en Windows, orden de textos, frontend) | GitHub Actions (Windows) | DONE a nivel de compatibilidad y pruebas automatizadas (PR #75, 2026-11-06); lo de laboratorio sigue PENDIENTE: ver §8.4 |
-| **W2‑C** | El resto (operación, `install.ps1`, servicios, firewall, cierre de jornada, suite de aceptación) | CI y laboratorio Windows 11 Pro | En curso por subetapas (C1 a C13, ver §8.5): C1 DONE; C2 DONE en implementación y CI (Windows 11 Pro real PENDIENTE); C3 en curso; C4 a C13 sin autorizar |
+| **W2‑C** | El resto (operación, `install.ps1`, servicios, firewall, cierre de jornada, suite de aceptación) | CI y laboratorio Windows 11 Pro | En curso por subetapas (C1 a C13, ver §8.5): C1 DONE; C2 y C3 DONE en implementación y CI (Windows 11 Pro real PENDIENTE); C4 en curso; C5 a C13 sin autorizar |
 | W3 | Laboratorio Windows 11 Pro: suite completa y pruebas pendientes | PC de laboratorio (no el servidor) | Sin laboratorio confirmado |
 | W4 | Preparación del equipo: RAM, RAID, SMART, Windows 11 Pro, BitLocker, UPS | Servidor | No autorizado |
 | W5–W8 | Staging, pruebas en el servidor, transición y go‑live (O10) | Servidor | Equivalen a S3 |
@@ -313,7 +315,7 @@ Enzo los fijó el 2026-11-05 al cerrar W2‑A. Se suman a los dos requisitos del
     - Windows 11 Pro;
     - el disco desconectado físicamente (en CI se desconecta un disco virtual);
     - la parada durante el apagado de Windows (C10 y C11).
-- **C3, cuentas de servicio y permisos NTFS** (`deploy/windows/ops/`, README §C3; job de CI «Windows permissions (W2-C3)»). En curso, sin merge.
+- **C3, cuentas de servicio y permisos NTFS** (`deploy/windows/ops/`, README §C3; job de CI «Windows permissions (W2-C3)»). DONE a nivel de implementación y CI (PR #81, aprobada por Enzo el 2026-11-10); Windows 11 Pro real PENDIENTE.
   - La raíz de la instalación **no hereda de `C:\`** (que por defecto deja escribir a cualquier usuario que inició sesión): queda protegida, con Administradores y SYSTEM. Cada cuenta virtual recibe solo lo suyo:
     - `runtime\<runtime>`: lectura y ejecución, solo los servicios que lo usan;
     - `services\<servicio>.exe/.xml`: lectura y ejecución, ese servicio;
@@ -335,7 +337,21 @@ Enzo los fijó el 2026-11-05 al cerrar W2‑A. Se suman a los dos requisitos del
     - que Store Sys y su proveedor no tengan acceso, comprobado con sus cuentas reales;
     - la cuenta de backups y la carpeta de backups en el disco (C6);
     - Windows 11 Pro y Defender.
+- **C4, Firewall de Windows** (`deploy/windows/ops/`, README §C4; job de CI «Windows firewall (W2-C4)»). En curso, sin merge.
+  - Reglas propias, en el grupo `DistriCom`:
+    - `DistriCom-HTTP-In` y `DistriCom-HTTPS-In`: permiten `HTTP_PORT` y `HTTPS_PORT` (TCP) hacia el `caddy.exe` instalado, solo desde `LAN_SUBNET` y `100.64.0.0/10`;
+    - `DistriCom-RDP-In`: permite 3389 (TCP) solo desde `LAN_SUBNET` y `100.64.0.0/10`;
+    - `DistriCom-Block-PostgreSQL`, `-Backend` y `-Frontend`: bloquean 5432, 8000 y 3000 (TCP) hacia el programa exacto que escucha en cada uno (`postgres.exe`, el intérprete de Python del backend y `node.exe`). Nombrar programa y puerto evita afectar a otro programa en el mismo puerto. Windows no filtra el tráfico de `127.0.0.1`, así que los servicios siguen hablando entre sí.
+  - **Dos verificaciones:**
+    - `firewall verify` es estática: compara las reglas y los perfiles, con los servicios en marcha o detenidos.
+    - `firewall verify --services-running` revisa además la instalación en marcha. Exige que 5432, 8000 y 3000 tengan un listener, solo en `127.0.0.1`, abierto por el programa que nombra su regla. Un listener ausente, fuera de `127.0.0.1` o de otro programa es FAIL.
+    - Solo son advertencias las condiciones ajenas a DistriCom que deciden IT, como las reglas propias de Windows para el Escritorio remoto.
+  - **Escritorio remoto:** DistriCom nunca bloquea 3389 ni cambia las reglas propias de Windows para el Escritorio remoto; solo agrega un permiso. Si esas reglas siguen abiertas a cualquier origen, `verify` lo avisa como decisión de IT, sin tocarlas. En el equipo real, `firewall.ps1` se corre desde una sesión de Escritorio remoto ya abierta.
+  - **Idempotente y reversible:** `apply` no reescribe una regla que ya está bien y corrige una alterada o sobrante del grupo; `remove` quita todas las reglas de DistriCom y nada más.
+  - `verify` informa un perfil del firewall apagado o con entrada permitida por defecto, pero no cambia perfiles.
+  - **Pruebas de CI separadas de las de red real:** el runner no tiene otra máquina en su red. CI prueba las reglas como las informa Windows, los sockets y que las reglas ajenas (dos reglas ficticias de Store Sys, las del runner y las del Escritorio remoto) queden idénticas. PENDIENTE, nunca PASS: el acceso real desde otra PC de la LAN, Tailscale, el Escritorio remoto del grupo IT, los puertos reales de Store Sys, el perfil de red del equipo y Windows 11 Pro.
 - **Carrera de arranque de C2 corregida** (Enzo, 2026-11-10; PR independiente). `services start` ahora espera la señal verificable del supervisor de ese arranque: un valor nuevo por arranque, que el Stack repite en `state\supervisor.json` con su fase. Un registro de un arranque anterior no cuenta. No hay esperas fijas, el tiempo máximo devuelve FAIL y la comprobación final de Caddy mantiene el certificado verificado.
+- **Requisito pendiente para C5** (Enzo, 2026-11-10): el supervisor tiene que verificar de forma segura el certificado de Caddy. Hoy, por las ACL de C3, el Stack no lee la CA de `state\caddy` y su prueba de disponibilidad usa TLS sin verificar. No se resuelve desactivando TLS.
 - **Riesgos que siguen abiertos para las etapas siguientes** (Enzo, 2026-11-09):
   - la verificación física del disco y su número de serie;
   - el reinicio real de Windows sin sesión iniciada;

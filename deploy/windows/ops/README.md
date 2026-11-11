@@ -100,6 +100,25 @@ Las pruebas C3‑1 a C3‑5 (`permissions_tests/`) corren en el job «Windows pe
 
 **PENDIENTE, nunca PASS:** las cuentas y el grupo de IT reales del cliente, Store Sys y su proveedor con sus cuentas reales, la cuenta de backups (C6), Windows 11 Pro y Defender.
 
+## C4: Firewall de Windows
+
+`firewall apply|verify|remove` e `install\firewall.ps1` (administrador). Todas las reglas están en el grupo `DistriCom` y se llaman `DistriCom-*`; nada más se toca.
+
+| Regla | Qué |
+|---|---|
+| `DistriCom-HTTP-In` · `DistriCom-HTTPS-In` | Permite TCP `HTTP_PORT` · `HTTPS_PORT` hacia `caddy.exe`, solo desde `LAN_SUBNET` y `100.64.0.0/10` |
+| `DistriCom-RDP-In` | Permite TCP 3389, solo desde `LAN_SUBNET` y `100.64.0.0/10` |
+| `DistriCom-Block-PostgreSQL` · `-Backend` · `-Frontend` | Bloquea TCP 5432 · 8000 · 3000 hacia el programa que escucha en cada uno |
+
+- `apply` es idempotente y corrige una regla alterada o sobrante del grupo. `remove` quita todas las de DistriCom, aunque no haya release.
+- `verify` (solo lectura, estática) compara las reglas y los perfiles. Avisa, sin cambiarlas, si las reglas propias de Windows para el Escritorio remoto están abiertas a cualquier origen.
+- `verify --services-running` revisa además la instalación en marcha: 5432, 8000 y 3000 tienen que escuchar solo en `127.0.0.1`, cada uno abierto por el programa de su regla. Un listener ausente o de otro programa es un problema, no una advertencia.
+- Nunca bloquea 3389 ni cambia reglas de Store Sys, del Escritorio remoto ni de otros programas, ni los perfiles.
+
+Las pruebas C4‑1 a C4‑4 (`firewall_tests/`) corren en el job «Windows firewall (W2-C4)», con dos reglas ficticias de Store Sys y todas las reglas ajenas comparadas antes y después de cada paso.
+
+**PENDIENTE, nunca PASS:** el acceso real desde otra PC de la LAN, Tailscale, el Escritorio remoto del grupo IT, los puertos reales de Store Sys, el perfil de red del equipo y Windows 11 Pro.
+
 ## Regla de logs para C2 a C13
 
 Los logs operativos **no deben incorporar** información personal de clientes, teléfonos, direcciones ni valores completos de consultas SQL (texto o parámetros). El enmascarado de `logs` cubre secretos, credenciales y CUIT, y no es una red de seguridad para lo demás: cada etapa registra solo identificadores técnicos, conteos, estados y clases de error. Regla obligatoria (Enzo, 2026-11-07).

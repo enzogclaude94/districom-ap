@@ -40,7 +40,7 @@ from typing import Literal
 
 from districom_backup.repo import write_atomic
 
-from districom_ops import artifacts, backup_disk, database, integrity, ntfs, permissions, winservice
+from districom_ops import artifacts, backup_disk, database, firewall, integrity, ntfs, permissions, winservice
 from districom_ops.install import Install
 from districom_ops.winservice import ServiceError, State, account, service_sid
 
@@ -327,6 +327,35 @@ def permission_policy(install: Install) -> permissions.Policy:
         winsw=list(WINSW),
         names={"backend": BACKEND, "frontend": FRONTEND, "caddy": CADDY, "postgresql": PG, "stack": STACK},
         backup_marker=marker,
+    )
+
+
+def base_python(venv_python: Path) -> Path:
+    """The interpreter that really runs (and listens) for a uv virtual environment: ``python.exe`` of a venv is
+    a launcher that starts the one named by ``home`` in ``pyvenv.cfg``. The path is kept as written, links included
+    (uv's ``cpython-3.12-…`` link): Windows reports the image of the process by the path it was started with, and
+    that is the path a firewall rule must name."""
+    config = venv_python.parent.parent / "pyvenv.cfg"
+    for line in config.read_text("utf-8").splitlines():
+        key, _, value = line.partition("=")
+        if key.strip() == "home":
+            return Path(value.strip()) / "python.exe"
+    raise ServiceError("pyvenv.cfg has no home: is the backend environment installed?")
+
+
+def firewall_plan(install: Install) -> firewall.Plan:
+    """The C4 rules of this installation (``firewall.py``): what Caddy, Remote Desktop and the internal ports get."""
+    internal = [
+        firewall.Internal(install.database[3], install.pg_bin("postgres"), "PostgreSQL"),
+        firewall.Internal(BACKEND_PORT, base_python(install.backend_python), "Backend"),
+        firewall.Internal(FRONTEND_PORT, specs(install)[FRONTEND].executable, "Frontend"),
+    ]
+    return firewall.plan(
+        str(install.ops.lan_subnet),
+        install.services.http_port,
+        install.services.https_port,
+        install.artifact("caddy").path(install.runtime),
+        internal,
     )
 
 
