@@ -42,10 +42,12 @@ ignore = ["S101"]
 "services_tests/conftest.py" = ["E501"]
 "permissions_tests/**" = ["S105", "S106", "S108", "S603"]
 "permissions_tests/conftest.py" = ["E501"]
+"firewall_tests/**" = ["S603", "S607"]
+"firewall_tests/conftest.py" = ["E501"]
 
 [tool.mypy]
 strict = true
-files = ["src", "tests", "services_tests", "permissions_tests"]
+files = ["src", "tests", "services_tests", "permissions_tests", "firewall_tests"]
 # districom_backup has no py.typed marker: mypy reads its source, which is strictly typed too (W2-A).
 mypy_path = "../backup/src"
 
