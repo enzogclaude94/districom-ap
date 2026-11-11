@@ -18,7 +18,7 @@ import { authApi, currentUserQueryKey, moduleRole, roleAtLeast } from "@/lib/api
 import { importsApi, importsQueryKey, type ImportJobItem, type JobFilters } from "@/lib/api/imports";
 import { formatDateTime } from "@/lib/format";
 
-import { STATUS_LABELS, STATUS_TONES, STORE_SYS_TYPES, typeLabel } from "./labels";
+import { STATUS_LABELS, STATUS_TONES, IMPORT_TYPES, typeLabel } from "./labels";
 import { importHref, UploadForm } from "./upload-form";
 
 const PAGE_SIZE = 20;
@@ -81,7 +81,7 @@ export function ImportList() {
               }}
             >
               <option value="">Todos</option>
-              {STORE_SYS_TYPES.map((t) => (
+              {IMPORT_TYPES.map((t) => (
                 <option key={t.key} value={t.key}>
                   {t.label}
                 </option>

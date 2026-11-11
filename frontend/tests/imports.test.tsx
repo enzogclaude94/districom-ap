@@ -355,3 +355,120 @@ describe("Import detail", () => {
     expect(calls(api, "POST", "/imports/3/cancel")).toHaveLength(1);
   });
 });
+
+const noPurchaseJob = (overrides: Partial<ImportJobDetail> = {}): ImportJobDetail =>
+  salesJob({
+    import_type: "commercial.axum.no_purchase",
+    import_type_name: "AXUM · Compró / No compró",
+    source_system: "AXUM",
+    parser_version: "axum-no-purchase-1",
+    file: { ...salesJob().file, original_filename: "Compro no compro - Octubre.xlsx", detected_format: "XLSX" },
+    period_from: "2026-10-02",
+    period_to: "2026-10-31",
+    scope: { days: ["2026-10-02", "2026-10-03", "2026-10-31"], salespeople: ["01", "02", "40"], filters_detected: [] },
+    metadata: {
+      preview: {
+        replacement: { action: "insert", overlap_days: [], uncovered_days: [], reasons: [], replaces: [], lines: 0 },
+        report: {
+          data_rows: 2761,
+          salesperson_groups: 3,
+          purchases_skipped: 1490,
+          no_purchase_events: 1271,
+          rejected: 0,
+          days: 26,
+        },
+        customers: {
+          rule_enabled: true,
+          mapped: 0,
+          by_rule: 313,
+          pending: 0,
+          unknown_code: 1,
+          name_mismatch: 0,
+          unresolved_events: 1,
+        },
+        salespeople: { seen: ["01", "02", "40"], pending: ["01", "02", "40"], pending_events: 1271 },
+        reasons: {
+          by_category: { NO_DISPONIBLE: 259, OTRO_CANAL: 23, RESTRICCION_FINANCIERA: 20, STOCK: 969 },
+          unmapped: 0,
+          unmapped_events: 0,
+        },
+        date_warnings: 3,
+        date_warnings_events: 0,
+      },
+    },
+    ...overrides,
+  });
+
+const NO_PURCHASE_BLOCK = {
+  action: "blocked",
+  overlap_days: ["2026-10-02", "2026-10-31"],
+  uncovered_days: [],
+  reasons: ["no_purchase_overlap"],
+  replaces: [{ job_id: 4, scope: null, days: ["2026-10-02", "2026-10-31"], lines: 1271, salespeople: ["01", "02"] }],
+  lines: 1271,
+  kept_other_salespeople: 0,
+};
+
+describe("AXUM · Compró / No compró", () => {
+  it("is offered in the upload form without snapshot or scope", async () => {
+    mockApi("operator", { "GET /imports": () => jsonResponse(200, { items: [], total: 0 }) });
+    const user = userEvent.setup();
+    renderWithQuery(<ImportList />);
+    const type = await screen.findByLabelText("Qué reporte es");
+    await user.selectOptions(type, "commercial.axum.no_purchase");
+    expect(screen.queryByLabelText(/Día de la foto/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Completo, sin filtros/)).not.toBeInTheDocument();
+  });
+
+  it("explains the report in business words", async () => {
+    mockApi("operator", { "GET /imports/3": () => jsonResponse(200, noPurchaseJob()) });
+    renderWithQuery(<ImportDetailView jobId={3} />);
+    expect(await screen.findByText("Qué encontró DistriCom")).toBeInTheDocument();
+    expect(screen.getByText(/02\/10\/2026 al 31\/10\/2026 · 3 días con datos/)).toBeInTheDocument();
+    expect(screen.getByText(/Filas del reporte/).nextElementSibling).toHaveTextContent("2.761");
+    expect(screen.getByText(/Compró \(no se cargan/).nextElementSibling).toHaveTextContent("1.490 filas");
+    expect(screen.getByText("No compras a cargar").nextElementSibling).toHaveTextContent("1.271");
+    expect(screen.getByText(/313 clientes \(313 por la regla de código y nombre de STORE SYS\)/)).toBeInTheDocument();
+    expect(screen.getByText(/1 código que no existe en STORE SYS \(1 no compra\)/)).toBeInTheDocument();
+    expect(screen.getByText("Vendedor 01, Vendedor 02, Vendedor 40")).toBeInTheDocument();
+    expect(screen.getByText(/Tiene stock: 969/)).toBeInTheDocument();
+    expect(screen.getByText(/Compra por otro canal: 23/)).toBeInTheDocument();
+    expect(screen.getByText(/3 filas empiezan después de la hora de subida/)).toBeInTheDocument();
+    expect(screen.getByText(/Carga no compras de 3 días que todavía no estaban cargados/)).toBeInTheDocument();
+    expect(screen.queryByText("Alcance declarado")).not.toBeInTheDocument();
+  });
+
+  it("lets an admin decide an overlap in no-purchase words, always with a reason", async () => {
+    const blocked = noPurchaseJob({ can_decide: true, metadata: { preview: { replacement: NO_PURCHASE_BLOCK } } });
+    let body: unknown;
+    let job = blocked;
+    mockApi("admin", {
+      "GET /imports/3": () => jsonResponse(200, job),
+      "POST /imports/3/confirm": (init) => {
+        body = JSON.parse(String(init?.body));
+        job = { ...blocked, status: "completed_with_warnings", can_confirm: false, can_decide: false };
+        return jsonResponse(200, job);
+      },
+    });
+    const user = userEvent.setup();
+    renderWithQuery(<ImportDetailView jobId={3} />);
+    expect(await screen.findByText(/Se superpone con 1.271 no compras ya cargadas de 2 días/)).toBeInTheDocument();
+    expect(screen.getByText(/no dice qué período ni qué preventistas se pidieron/)).toBeInTheDocument();
+    expect(screen.getByText("Qué hacer con las no compras ya cargadas de esos días")).toBeInTheDocument();
+    await user.click(screen.getByLabelText(/Reemplazarlas/));
+    await user.type(screen.getByLabelText("Motivo (obligatorio)"), "Export del mes completo");
+    await user.click(screen.getByRole("button", { name: "Aplicar decisión y cargar" }));
+    expect(await screen.findByRole("heading", { name: "Resultado" })).toBeInTheDocument();
+    expect(body).toEqual({ decision: "replace", reason: "Export del mes completo" });
+  });
+
+  it("tells an operator an overlap waits for an admin", async () => {
+    mockApi("operator", {
+      "GET /imports/3": () =>
+        jsonResponse(200, noPurchaseJob({ metadata: { preview: { replacement: NO_PURCHASE_BLOCK } } })),
+    });
+    renderWithQuery(<ImportDetailView jobId={3} />);
+    expect(await screen.findByText(/necesita la decisión de un administrador de Comercial/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Confirmar y cargar" })).not.toBeInTheDocument();
+  });
+});

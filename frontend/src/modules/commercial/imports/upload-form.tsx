@@ -13,7 +13,7 @@ import { ApiError } from "@/lib/api/client";
 import { importsApi, importsQueryKey, type ScopeDeclaration } from "@/lib/api/imports";
 import { todayIso } from "@/lib/format";
 
-import { STORE_SYS_TYPES } from "./labels";
+import { IMPORT_TYPES } from "./labels";
 
 const selectClass =
   "flex h-9 w-full rounded-md border border-border bg-surface px-3 text-sm focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:opacity-50";
@@ -36,7 +36,7 @@ export function UploadForm() {
   const [scopeNote, setScopeNote] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
 
-  const chosen = STORE_SYS_TYPES.find((t) => t.key === importType);
+  const chosen = IMPORT_TYPES.find((t) => t.key === importType);
   const asksSnapshot = !chosen || chosen.snapshot;
   const asksScope = !chosen || chosen.scope;
 
@@ -94,7 +94,7 @@ export function UploadForm() {
                 onChange={(e) => setImportType(e.target.value)}
               >
                 <option value="">Detectarlo automáticamente</option>
-                {STORE_SYS_TYPES.map((t) => (
+                {IMPORT_TYPES.map((t) => (
                   <option key={t.key} value={t.key}>
                     {t.label}
                   </option>

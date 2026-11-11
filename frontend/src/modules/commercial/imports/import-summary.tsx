@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import type { ImportJobDetail, ReplacementPlan } from "@/lib/api/imports";
 import { formatDate } from "@/lib/format";
 
-import { BLOCK_REASONS, CUSTOMERS_TYPE, DOCUMENTS_TYPE, PRODUCTS_TYPE, SALES_TYPE } from "./labels";
+import { BLOCK_REASONS, CUSTOMERS_TYPE, DOCUMENTS_TYPE, NO_PURCHASE_TYPE, PRODUCTS_TYPE, SALES_TYPE } from "./labels";
 
 /** The importer's preview, read defensively: it is free-form JSON that each importer writes (docs/IMPORTS.md §3). */
 type Preview = Record<string, unknown>;
@@ -158,6 +158,78 @@ function documents(job: ImportJobDetail): Fact[] {
   ];
 }
 
+/** Business names of the no-purchase reason categories (DATA_MODEL.md §4.2). */
+const REASON_CATEGORIES: Record<string, string> = {
+  STOCK: "Tiene stock",
+  NO_DISPONIBLE: "No disponible (cerrado, sin encargado, vacaciones)",
+  OTRO_CANAL: "Compra por otro canal",
+  RESTRICCION_FINANCIERA: "Restricción financiera",
+  SIN_CATEGORIA: "Sin categoría",
+};
+
+function noPurchases(job: ImportJobDetail): Fact[] {
+  const p = preview(job);
+  const report = record(p.report);
+  const customers = record(p.customers);
+  const salespeople = record(p.salespeople);
+  const reasons = record(p.reasons);
+  const pendingPeople = list(salespeople.pending);
+  const byCategory = Object.entries(record(reasons.by_category));
+  const pendingCustomers = count(customers.pending) + count(customers.unknown_code) + count(customers.name_mismatch);
+  const dateWarnings = count(p.date_warnings);
+  return [
+    { label: "Filas del reporte (sin títulos ni grupos)", value: n(count(report.data_rows)) },
+    {
+      label: "Compró (no se cargan: quedan solo en la importación)",
+      value: plural(count(report.purchases_skipped), "fila", "filas"),
+    },
+    { label: "No compras a cargar", value: n(count(report.no_purchase_events)) },
+    {
+      label: "Clientes vinculados",
+      value: `${plural(count(customers.mapped) + count(customers.by_rule), "cliente", "clientes")}${
+        count(customers.by_rule) ? ` (${n(count(customers.by_rule))} por la regla de código y nombre de STORE SYS)` : ""
+      }`,
+    },
+    {
+      label: "Clientes sin vincular",
+      value: pendingCustomers
+        ? [
+            count(customers.unknown_code) &&
+              plural(
+                count(customers.unknown_code),
+                "código que no existe en STORE SYS",
+                "códigos que no existen en STORE SYS",
+              ),
+            count(customers.name_mismatch) &&
+              plural(count(customers.name_mismatch), "código con otro nombre", "códigos con otro nombre"),
+            count(customers.pending) && plural(count(customers.pending), "código pendiente", "códigos pendientes"),
+          ]
+            .filter(Boolean)
+            .join(" · ") + ` (${plural(count(customers.unresolved_events), "no compra", "no compras")})`
+        : "Ninguno",
+      attention: pendingCustomers > 0,
+    },
+    {
+      label: "Preventistas sin vincular a un empleado",
+      value: pendingPeople.length ? pendingPeople.map((code) => `Vendedor ${code}`).join(", ") : "Ninguno",
+      attention: pendingPeople.length > 0,
+    },
+    {
+      label: "Motivos por categoría",
+      value:
+        byCategory.map(([code, value]) => `${REASON_CATEGORIES[code] ?? code}: ${n(count(value))}`).join(" · ") || "—",
+      attention: count(reasons.unmapped) > 0,
+    },
+    {
+      label: "Horarios para revisar",
+      value: dateWarnings
+        ? `${plural(dateWarnings, "fila empieza", "filas empiezan")} después de la hora de subida: se toma el día de la subida`
+        : "Ninguno",
+      attention: dateWarnings > 0,
+    },
+  ];
+}
+
 /** The importer's own summary, in business words. */
 export function typeFacts(job: ImportJobDetail): Fact[] {
   switch (job.import_type) {
@@ -169,31 +241,51 @@ export function typeFacts(job: ImportJobDetail): Fact[] {
       return products(job);
     case DOCUMENTS_TYPE:
       return documents(job);
+    case NO_PURCHASE_TYPE:
+      return noPurchases(job);
     default:
       return [];
   }
 }
 
-/** What confirming a sales file does to what is already loaded, in one sentence plus its reasons when blocked. */
-export function replacementText(plan: ReplacementPlan, days: string[]) {
+/** What the plan replaces, in the words of each report: sales lines or AXUM no-purchases. */
+export interface Subject {
+  loaded: string;
+  one: string;
+  many: string;
+}
+export const SALES_SUBJECT: Subject = { loaded: "ventas", one: "línea ya cargada", many: "líneas ya cargadas" };
+export const NO_PURCHASE_SUBJECT: Subject = {
+  loaded: "no compras",
+  one: "no compra ya cargada",
+  many: "no compras ya cargadas",
+};
+
+/** What confirming a file does to what is already loaded, in one sentence plus its reasons when blocked. */
+export function replacementText(plan: ReplacementPlan, days: string[], subject: Subject = SALES_SUBJECT) {
   if (plan.action === "insert") {
     return {
-      title: `Carga ventas de ${plural(days.length, "día", "días")} que todavía no estaban cargados.`,
+      title: `Carga ${subject.loaded} de ${plural(days.length, "día", "días")} que todavía no estaban cargados.`,
       reasons: [] as string[],
     };
   }
   const jobs = plan.replaces.map((r) => `#${r.job_id}`).join(", ");
   if (plan.action === "replace") {
     return {
-      title: `Reemplaza ${plural(plan.lines, "línea ya cargada", "líneas ya cargadas")} de ${plural(plan.overlap_days.length, "día", "días")} (${daysText(plan.overlap_days)}, importación ${jobs}). Las anteriores quedan en la historia como reemplazadas: no se borra nada.`,
+      title: `Reemplaza ${plural(plan.lines, subject.one, subject.many)} de ${plural(plan.overlap_days.length, "día", "días")} (${daysText(plan.overlap_days)}, importación ${jobs}). Las anteriores quedan en la historia como reemplazadas: no se borra nada.`,
       reasons: [],
     };
   }
   const reasons = plan.reasons.map((r) => BLOCK_REASONS[r] ?? r);
   if (plan.uncovered_days.length)
     reasons.push(`Días ya cargados que este archivo no trae: ${daysText(plan.uncovered_days)}.`);
+  const kept = plan.kept_other_salespeople ?? 0;
+  if (kept)
+    reasons.push(
+      `Si reemplazás, ${plural(kept, "no compra de otro preventista queda", "no compras de otros preventistas quedan")} como están.`,
+    );
   return {
-    title: `Se superpone con ${plural(plan.lines, "línea ya cargada", "líneas ya cargadas")} de ${plural(plan.overlap_days.length, "día", "días")} (${daysText(plan.overlap_days)}, importación ${jobs}) y DistriCom no puede probar qué reemplaza.`,
+    title: `Se superpone con ${plural(plan.lines, subject.one, subject.many)} de ${plural(plan.overlap_days.length, "día", "días")} (${daysText(plan.overlap_days)}, importación ${jobs}) y DistriCom no puede probar qué reemplaza.`,
     reasons,
   };
 }
