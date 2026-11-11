@@ -4,6 +4,14 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Changed — Servidor: propuesta W2‑C revisión 2
+- Nuevo `docs/WINDOWS_W2C_PLAN.md`, copia versionada de la propuesta en su revisión 2, con las decisiones de Enzo del 2026-11-11:
+  - C9 se parte en C9‑A (coordinación de operaciones: bloqueo exclusivo, carrera de `maintenance open`, supervisor con estado `blocked`) y C9‑B (bloqueo reversible de escrituras);
+  - C9‑B incluye la máquina de estados del diario, el restablecimiento automático solo tras un cierre completo y `resume` auditado;
+  - C9‑B incluye también el nuevo modelo de roles: `districom_ops` es dueño de la base y la app pierde el acceso a otras bases, sin revocaciones globales.
+- C6 respeta el bloqueo de C9‑A. C11 y C12 dependen también del modo mantenimiento de C5. Toda operación nueva toma el bloqueo exclusivo.
+- `ROADMAP.md` y `docs/WINDOWS_DEPLOYMENT.md §8.5`: el nuevo orden. La siguiente es C9‑A, autorizada recién después de mergear esta revisión.
+
 ### Changed — Servidor: C4 DONE y requisitos pendientes
 - `ROADMAP.md` y `docs/WINDOWS_DEPLOYMENT.md §8.5`: C4 DONE a nivel de implementación y pruebas automatizadas (PR #82); la corrección de la carrera de C2 mergeada (PR #83).
 - Nuevo requisito para las etapas siguientes: coordinar arranque, actualización y mantenimiento, sin solicitudes simultáneas incompatibles.
