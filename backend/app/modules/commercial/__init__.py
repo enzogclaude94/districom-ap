@@ -5,6 +5,8 @@ from app.modules.commercial.imports.customers import TYPE_KEY as CUSTOMERS
 from app.modules.commercial.imports.customers import CustomersAdapter
 from app.modules.commercial.imports.documents import TYPE_KEY as DOCUMENTS
 from app.modules.commercial.imports.documents import DocumentsAdapter
+from app.modules.commercial.imports.no_purchase import TYPE_KEY as NO_PURCHASE
+from app.modules.commercial.imports.no_purchase import NoPurchaseAdapter
 from app.modules.commercial.imports.products import TYPE_KEY as PRODUCTS
 from app.modules.commercial.imports.products import ProductsAdapter
 from app.modules.commercial.imports.sales import TYPE_KEY as SALES
@@ -33,6 +35,8 @@ MODULE = ModuleSpec(
         ImportTypeSpec(
             SALES, "STORE SYS · Ventas artículos/clientes", "STORE_SYS", SalesAdapter(), identity=("scope",)
         ),
+        # AXUM's report declares nothing (no period, no filters): sha256 + type; an overlap waits for an admin.
+        ImportTypeSpec(NO_PURCHASE, "AXUM · Compró / No compró", "AXUM", NoPurchaseAdapter()),
     ),
     quality_codes=(
         QualityCodeSpec("commercial.zone.unconfigured", "warning", "Zona sin configurar"),
@@ -50,5 +54,11 @@ MODULE = ModuleSpec(
         QualityCodeSpec("commercial.customer.unresolved_code", "warning", "Código de cliente STORE SYS sin resolver"),
         QualityCodeSpec("commercial.seller.unmapped", "warning", "Vendedor STORE SYS sin vincular"),
         QualityCodeSpec("commercial.sale_line.product_pending", "warning", "Ventas con artículo pendiente"),
+        QualityCodeSpec("commercial.axum_customer.unresolved", "warning", "Cliente AXUM sin resolver"),
+        QualityCodeSpec(
+            "commercial.axum_customer.name_mismatch", "warning", "Cliente AXUM con nombre distinto al de STORE SYS"
+        ),
+        QualityCodeSpec("commercial.axum_salesperson.unmapped", "warning", "Preventista AXUM sin vincular"),
+        QualityCodeSpec("commercial.no_purchase.reason_unmapped", "warning", "Motivo de no compra sin categoría"),
     ),
 )
