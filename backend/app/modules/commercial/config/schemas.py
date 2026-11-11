@@ -115,6 +115,15 @@ class ArticlesPriceListOut(BaseModel):
     list_number: int | None
 
 
+class AxumCustomerCodeRuleIn(BaseModel):
+    enabled: bool
+    reason: str = Field(max_length=300)
+
+
+class AxumCustomerCodeRuleOut(BaseModel):
+    enabled: bool
+
+
 class CategoryOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
