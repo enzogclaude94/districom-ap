@@ -26,6 +26,8 @@ def test_commercial_parameters_match_metrics_defaults() -> None:
     defaults = {spec.key: spec.default for spec in COMMERCIAL.specs}
     # Not a metric parameter: the list of the articles master's `precio` (docs/IMPORTS.md §3.5), unset by default.
     assert defaults.pop("store_sys_articles_price_list") is None
+    # Not a metric parameter either: off in code; the seed turns it on with Enzo's decision (ADR 018).
+    assert defaults.pop("axum_customer_code_matches_store_sys") is False
     assert defaults == {
         "history_start_date": "2026-01-01",
         "new_customer_warmup_days": 60,

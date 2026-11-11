@@ -96,7 +96,7 @@ Las muestras son **de formato**: sirven para verificar firma, encoding, estructu
 | STORE SYS · Ventas artículos/clientes | `ventas.xls` (octubre 2026, con `codigo` y `cod_cliente`) | Recibida y validada en F1.3a (ADR 014 S7 cerrado; cliente por código, ADR 017) | `docs/IMPORTS.md §3.3` |
 | STORE SYS · Comprobantes emitidos | `comprobantes emitidos.xls` (1 día) | Recibida | `docs/IMPORTS.md §3.4` |
 | STORE SYS · Maestro de artículos | — | **Pendiente** | `docs/IMPORTS.md §3.5` |
-| AXUM · No Compra (CSV) | — | **Pendiente** | `docs/IMPORTS.md §3.6` |
+| AXUM · Compró / No compró | `Compro no compro - Octubre.xlsx` (octubre 2026) | Recibida y validada en F1.4 (es XLSX, no CSV; ADR 014 S6 cerrado por ADR 018) | `docs/IMPORTS.md §3.6` |
 | (derivados) Clientes por zona / por vendedor | `.xlsx` generados con openpyxl | No son fuente | `docs/IMPORTS.md §3.1` |
 
 Lo que ya no se pide en Fase 1 (D‑H): programación, visitas y pedidos de AXUM (A3–A5 de §3). Se vuelven a pedir cuando exista una fuente confiable.

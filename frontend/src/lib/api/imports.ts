@@ -45,14 +45,17 @@ export interface ImportFile {
   uploaded_at: string;
 }
 
-/** What the sales importer would do to the lines already loaded in the file's days (docs/IMPORTS.md §5.3). */
+/** What an importer would do to what is already loaded in the file's days: sales lines (docs/IMPORTS.md §5.3) or
+ * AXUM no-purchases (§5.4). */
 export interface ReplacementPlan {
   action: "insert" | "replace" | "blocked";
   overlap_days: string[];
   uncovered_days: string[];
   reasons: string[];
-  replaces: { job_id: number; scope: string | null; days: string[]; lines: number }[];
+  replaces: { job_id: number; scope: string | null; days: string[]; lines: number; salespeople?: string[] }[];
   lines: number;
+  /** AXUM: no-purchases of salespeople the file does not bring, which a replace keeps. */
+  kept_other_salespeople?: number;
 }
 
 export interface ImportJobDetail {
@@ -73,7 +76,14 @@ export interface ImportJobDetail {
   snapshot_date: string | null;
   period_from: string | null;
   period_to: string | null;
-  scope: { declared?: ScopeDeclaration | null; note?: string | null; days?: string[] } | null;
+  /** What the operator declared and the dimensions observed; AXUM adds the salespeople the report brings. */
+  scope: {
+    declared?: ScopeDeclaration | null;
+    note?: string | null;
+    days?: string[];
+    salespeople?: string[];
+    filters_detected?: string[];
+  } | null;
   /** Reader, detection and the importer's preview (`metadata.preview`): counts and labels, never row values. */
   metadata: { preview?: Record<string, unknown>; declared?: Record<string, unknown> } & Record<string, unknown>;
   failure_reason: string | null;

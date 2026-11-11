@@ -309,7 +309,7 @@ Clasificación de los tipos de comprobante de STORE SYS.
 
 #### no_purchase_reason_categories / no_purchase_reason_mappings
 `no_purchase_reason_categories`: `id`, `code` UNIQUE (`STOCK`, `NO_DISPONIBLE`, `OTRO_CANAL`, `RESTRICCION_FINANCIERA`, `OTRO`), `name`, `active`.
-`no_purchase_reason_mappings`: `id`, `source_system_id`, `reason_source` (tal cual), `reason_key` (normalizado) UNIQUE por sistema, `category_id` FK NULL, `decided_by`, `decided_at`. Un motivo nuevo se agrega sin categoría (issue `commercial.no_purchase.unmapped_reason`). Seed con los ejemplos de Enzo: TIENE STOCK → STOCK · CERRADO, NO ESTA EL ENCARGADO, VACACIONES → NO_DISPONIBLE · COMPRA POR BEES → OTRO_CANAL · SIN DINERO → RESTRICCION_FINANCIERA (a ajustar con el CSV real).
+`no_purchase_reason_mappings`: `id`, `source_system_id`, `reason_source` (tal cual), `reason_key` (normalizado) UNIQUE por sistema, `category_id` FK NULL, `decided_by`, `decided_at`. Un motivo nuevo se agrega sin categoría (issue `commercial.no_purchase.reason_unmapped`). Seed con los ejemplos de Enzo: TIENE STOCK → STOCK · CERRADO, NO ESTA EL ENCARGADO, VACACIONES → NO_DISPONIBLE · COMPRA POR BEES → OTRO_CANAL · SIN DINERO → RESTRICCION_FINANCIERA (verificados con el export real en F1.4: son los 6 motivos de la muestra).
 
 ### 4.3 Inteligencia Comercial — maestros
 
@@ -424,9 +424,33 @@ Unidades vendidas por cliente, producto y día. **Sin importe y sin vínculo a `
 - `source_seller` / `source_zone` coinciden con la asignación del maestro (no son atribución del documento); la atribución se resuelve con §5.
 - Idempotencia: reemplazo por **período y scope** (`docs/IMPORTS.md §5.3`); las líneas reemplazadas quedan `SUPERSEDED`, nunca se borran.
 
-### 6.3 no_purchase_events (AXUM No Compra)
-`id`, `business_date`, `customer_id` FK NULL, `source_customer_code`, `source_customer_name`, `salesperson_id` FK NULL, `source_salesperson`, `reason_source` text NOT NULL (tal cual), `reason_mapping_id` FK `no_purchase_reason_mappings`, `import_job_id`, `occurrence`.
-**Sin UNIQUE** sobre `fecha + cliente + preventista + motivo` (ajuste 1 de Enzo): puede haber varias visitas el mismo día. La estrategia de reimport se define con el CSV real (ADR 014 S6). Columnas exactas al recibir la muestra.
+### 6.3 no_purchase_events (AXUM Compró / No compró, F1.4)
+Una fila por cada fila del reporte con **motivo de no compra** (ADR 018). Las filas `Si` (compró) no llegan acá: quedan en `import_rows` como `skipped`. No es una tabla de visitas.
+| Columna | Notas |
+|---|---|
+| id | PK |
+| business_date | date NOT NULL — el día de `Fecha y Hora Subida` |
+| customer_id | FK `public.customers` NULL — por el mapping `customer/AXUM/customer` confirmado |
+| source_customer_code | varchar(40) NOT NULL — `Cliente Id` tal cual |
+| source_customer_name | varchar(200) NULL · source_customer_address varchar(300) NULL — tal cual |
+| customer_mapping_id | FK `external_entity_mappings` NULL |
+| salesperson_id | FK `public.employees` NULL — por `employee/AXUM/salesperson` confirmado |
+| source_salesperson | varchar(40) NOT NULL — el código de la fila `Vendedor: NN` |
+| salesperson_mapping_id | FK `external_entity_mappings` NULL |
+| reason_source | varchar(200) NOT NULL, no vacío — el motivo tal cual |
+| reason_mapping_id | FK `no_purchase_reason_mappings` NOT NULL |
+| reason_category_id | FK `no_purchase_reason_categories` NULL — la categoría al importar; NULL = sin categoría |
+| uploaded_at_source | timestamp (sin zona) NOT NULL — `Fecha y Hora Subida` |
+| start_time_source, end_time_source | time NULL — `Hora Ini.` / `Hora Fin.`, nunca combinadas con la fecha |
+| duration_source | varchar(20) NULL — `Minutos` tal cual · duration_seconds int NULL, ≥ 0 |
+| status | `ACTIVE`, `SUPERSEDED` · superseded_by_job_id FK `import_jobs` NULL (obligatorio si `SUPERSEDED`) |
+| import_job_id | FK NOT NULL · import_row_id FK `import_rows` NULL — la fila del staging |
+| occurrence | int ≥ 1 — filas idénticas se conservan como eventos separados |
+
+- **Sin UNIQUE** sobre `fecha + cliente + preventista + motivo` (ajuste 1 de Enzo).
+- **Sin DELETE:** un trigger lo impide; el downgrade de la migración 0038 se niega si hay eventos.
+- Reimport: cualquier superposición la decide un admin (`docs/IMPORTS.md §5.4`); `replace` marca `SUPERSEDED`, nunca borra.
+- Índices: `business_date` parcial sobre `ACTIVE`, `(customer_id, business_date)`, `(salesperson_id, business_date)`, `import_job_id`.
 
 ### 6.4 Futuras (no se crean en Fase 1)
 Se crean solo cuando exista una fuente real que las alimente (D‑H). Hasta entonces **no** se infieren visitas, cobertura ni pedidos.
