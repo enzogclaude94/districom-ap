@@ -337,7 +337,7 @@ Enzo los fijó el 2026-11-05 al cerrar W2‑A. Se suman a los dos requisitos del
     - que Store Sys y su proveedor no tengan acceso, comprobado con sus cuentas reales;
     - la cuenta de backups y la carpeta de backups en el disco (C6);
     - Windows 11 Pro y Defender.
-- **C4, Firewall de Windows** (`deploy/windows/ops/`, README §C4; job de CI «Windows firewall (W2-C4)»). En curso, sin merge.
+- **C4, Firewall de Windows** (`deploy/windows/ops/`, README §C4; job de CI «Windows firewall (W2-C4)»). **DONE a nivel de implementación y pruebas automatizadas** (PR #82, merge `1ed4e20`, aprobada por Enzo el 2026-11-11), validada solo en CI de Windows Server 2025.
   - Reglas propias, en el grupo `DistriCom`:
     - `DistriCom-HTTP-In` y `DistriCom-HTTPS-In`: permiten `HTTP_PORT` y `HTTPS_PORT` (TCP) hacia el `caddy.exe` instalado, solo desde `LAN_SUBNET` y `100.64.0.0/10`;
     - `DistriCom-RDP-In`: permite 3389 (TCP) solo desde `LAN_SUBNET` y `100.64.0.0/10`;
@@ -350,7 +350,7 @@ Enzo los fijó el 2026-11-05 al cerrar W2‑A. Se suman a los dos requisitos del
   - **Idempotente y reversible:** `apply` no reescribe una regla que ya está bien y corrige una alterada o sobrante del grupo; `remove` quita todas las reglas de DistriCom y nada más.
   - `verify` informa un perfil del firewall apagado o con entrada permitida por defecto, pero no cambia perfiles.
   - **Pruebas de CI separadas de las de red real:** el runner no tiene otra máquina en su red. CI prueba las reglas como las informa Windows, los sockets y que las reglas ajenas (dos reglas ficticias de Store Sys, las del runner y las del Escritorio remoto) queden idénticas. PENDIENTE, nunca PASS: el acceso real desde otra PC de la LAN, Tailscale, el Escritorio remoto del grupo IT, los puertos reales de Store Sys, el perfil de red del equipo y Windows 11 Pro.
-- **Carrera de arranque de C2 corregida** (Enzo, 2026-11-10; PR independiente). `services start` ahora espera la señal verificable del supervisor de ese arranque: un valor nuevo por arranque, que el Stack repite en `state\supervisor.json` con su fase. Un registro de un arranque anterior no cuenta. No hay esperas fijas, el tiempo máximo devuelve FAIL y la comprobación final de Caddy mantiene el certificado verificado.
+- **Carrera de arranque de C2 corregida** (Enzo, 2026-11-10; PR #83, merge `6c7e911`). `services start` ahora espera la señal verificable del supervisor de ese arranque: un valor nuevo por arranque, que el Stack repite en `state\supervisor.json` con su fase. Un registro de un arranque anterior no cuenta. No hay esperas fijas, el tiempo máximo devuelve FAIL y la comprobación final de Caddy mantiene el certificado verificado.
 - **Requisito pendiente para C5** (Enzo, 2026-11-10): el supervisor tiene que verificar de forma segura el certificado de Caddy. Hoy, por las ACL de C3, el Stack no lee la CA de `state\caddy` y su prueba de disponibilidad usa TLS sin verificar. No se resuelve desactivando TLS.
 - **Riesgos que siguen abiertos para las etapas siguientes** (Enzo, 2026-11-09):
   - la verificación física del disco y su número de serie;
@@ -362,6 +362,14 @@ Enzo los fijó el 2026-11-05 al cerrar W2‑A. Se suman a los dos requisitos del
   - la coordinación del supervisor con las operaciones de mantenimiento y el bloqueo de escrituras;
   - el cierre de PostgreSQL solo después de completar las garantías de C9, C10 y C11.
   Las simulaciones de GitHub Actions no dan PASS a las pruebas físicas.
+- **Requisito para las etapas siguientes** (Enzo, 2026-11-11): las operaciones de arranque, actualización y mantenimiento tienen que coordinarse, para que no corran solicitudes simultáneas incompatibles. Hoy, dos `services start` a la vez nunca reciben una confirmación equivocada: cada uno espera el valor que escribió, y el que pierde termina en FAIL por tiempo o por error del arranque. Pero nada impide que se lancen a la vez, ni que un arranque coincida con una actualización o una ventana de mantenimiento.
+- **Pendientes abiertos** (Enzo, 2026-11-11; PENDIENTE, nunca PASS):
+  - A‑14;
+  - la validación física en Windows 11 Pro;
+  - las pruebas reales de firewall, LAN, Escritorio remoto y Tailscale;
+  - la comprobación de los puertos y las cuentas de Store Sys;
+  - la verificación HTTPS segura del certificado de Caddy desde el supervisor;
+  - el cierre y la recuperación seguros de PostgreSQL.
 - **Requisito obligatorio para C9** (Enzo, 2026-11-09): la comprobación de reanudación (`writes_resume_check`) y el desbloqueo efectivo de escrituras tienen que estar coordinados, sin condición de carrera. Entre la comprobación y el desbloqueo no puede abrirse una ventana ni empezar una operación que la comprobación no haya visto. Por ejemplo, ambos se hacen bajo un mismo bloqueo exclusivo, que también toman `maintenance open` y el inicio de operaciones, y la comprobación se repite dentro de ese bloqueo justo antes de desbloquear.
 - **A‑14** (PR #73, segmento cerrado que no llegó en 180 s) sigue PENDIENTE, registrada aparte.
 - **Regla de logs para C2 a C13** (Enzo, 2026-11-07): los logs operativos no deben incorporar información personal de clientes, teléfonos, direcciones ni valores completos de consultas SQL.
