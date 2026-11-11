@@ -21,7 +21,12 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 - **Export real de octubre** (solo local): 2761 filas de datos, 1490 `Si` salteadas, 1271 no compras; 313 clientes vinculados por la regla, 1 código inexistente, 0 nombres distintos; preventistas `01`, `02` y `40` pendientes; analizar 3,7 s y confirmar 4,5 s.
 - **Tests:** `test_import_no_purchase.py` (29), `test_import_no_purchase_api.py` (7, incluida la privacidad con nombre y dirección), migración 0038 y 4 casos nuevos en `tests/imports.test.tsx`.
 
-### Added — Servidor: W2‑C4, Firewall de Windows (en revisión)
+### Changed — Servidor: C4 DONE y requisitos pendientes
+- `ROADMAP.md` y `docs/WINDOWS_DEPLOYMENT.md §8.5`: C4 DONE a nivel de implementación y pruebas automatizadas (PR #82); la corrección de la carrera de C2 mergeada (PR #83).
+- Nuevo requisito para las etapas siguientes: coordinar arranque, actualización y mantenimiento, sin solicitudes simultáneas incompatibles.
+- Lista de pendientes abiertos: A‑14, Windows 11 Pro físico, firewall en red real, puertos y cuentas de Store Sys, HTTPS verificado del supervisor y cierre seguro de PostgreSQL.
+
+### Added — Servidor: W2‑C4, Firewall de Windows
 - `districom-ops firewall apply|verify|remove` e `install\firewall.ps1`: reglas propias en el grupo `DistriCom`.
   - HTTP y HTTPS hacia Caddy, y Escritorio remoto, solo desde `LAN_SUBNET` y Tailscale;
   - bloqueo de 5432, 8000 y 3000 hacia el programa exacto que escucha en cada uno.
@@ -30,7 +35,7 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 - Job de CI «Windows firewall (W2-C4)», con C4‑1 a C4‑4; los once jobs existentes no cambian.
 - `docs/WINDOWS_DEPLOYMENT.md`: C3 DONE a nivel de implementación y CI; se describe C4; la verificación segura del certificado de Caddy desde el supervisor queda como requisito de C5.
 
-### Fixed — Servidor: carrera de arranque de C2 (en revisión)
+### Fixed — Servidor: carrera de arranque de C2
 - `services start` volvía en cuanto Caddy respondía a la comprobación del administrador, a veces antes de que el supervisor registrara su `service_ready` de Caddy.
 - Ahora espera la señal del supervisor de ese arranque:
   - `state\start-request.json` lleva un valor nuevo por arranque;
