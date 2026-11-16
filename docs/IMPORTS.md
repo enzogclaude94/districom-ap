@@ -1,6 +1,6 @@
 # IMPORTS — Importación de AXUM y STORE SYS
 
-> v0.1 · 2026-10-30 · Fase 1 de Inteligencia Comercial. Decisiones: ADR 014 (cliente de ventas: ADR 017). Tablas: `DATA_MODEL.md` §4–§7.
+> v0.1 · 2026-10-30 · Fase 1 de Inteligencia Comercial. Decisiones: ADR 014 (cliente de ventas: ADR 017; AXUM Compró / No compró: ADR 018). Tablas: `DATA_MODEL.md` §4–§7.
 > Estado: **diseño aprobado (F1.0); infraestructura de plataforma implementada en F1.1b** (lectores, pipeline, staging, lock, issues base, API y CLI; `app/platform/imports/`, `app/platform/quality/`). Los adaptadores de STORE SYS y AXUM llegan desde F1.2. Lo marcado *pendiente de muestra* se cierra con el archivo real antes de escribir su adaptador.
 
 Este documento dice qué fuente alimenta qué entidad, cómo se lee cada archivo, qué se excluye, cómo se evita duplicar y qué pasa con cada error. Si una regla de importación cambia, se actualiza acá en el mismo commit (`CLAUDE.md §9`).
@@ -81,7 +81,7 @@ SUBIR → DETECTAR → ANALIZAR ─────────────► PREVI
 | `commercial.store_sys.sales_lines` | Ventas artículos/clientes (`ventas.xls`) | XLS BIFF7, cp1252 | 1 fila = 1 artículo vendido a 1 cliente en 1 día (sin comprobante) | `commercial.sale_lines` | Cerrado con export real de varios días |
 | `commercial.store_sys.documents` | Comprobantes emitidos (`comprobantes emitidos.xls`) | XLS BIFF7, cp1252 | 1 fila = 1 comprobante (sin ítems) | `commercial.documents` | Formato verificado |
 | `commercial.store_sys.products` | Maestro de artículos (`lista de articulos.xls`) | XLS BIFF7, cp1252 | 1 fila = 1 artículo (foto actual) | `commercial.products`, `product_prices` | Formato verificado |
-| `commercial.axum.no_purchase` | AXUM No Compra (CSV) | *pendiente de muestra* | 1 fila = 1 no‑compra (cliente, fecha, preventista, motivo) | `commercial.no_purchase_events` | Pendiente |
+| `commercial.axum.no_purchase` | AXUM Compró / No compró (`Compro no compro - <mes>.xlsx`) | XLSX (export .NET, todo texto), filas de grupo por preventista | 1 fila = 1 visita con su resultado; solo las de motivo generan evento | `commercial.no_purchase_events` | Cerrado con export real (ADR 018) |
 
 **No son fuente:**
 - `clientes_por_zona.xlsx` y `clientes_por_vendedor.xlsx`: son informes derivados de `clientes.xls`, generados con openpyxl, con resúmenes, una hoja por zona o vendedor y columnas calculadas.
@@ -243,19 +243,47 @@ SUBIR → DETECTAR → ANALIZAR ─────────────► PREVI
 
 **Validado con el maestro real (2026-11-05, no commiteado):** 281 artículos, 0 códigos repetidos, 0 descripciones repetidas, ninguna celda vacía, 2 precios en 0 (artículos de regalo), 47 precios con centavos, máximo 3.436.400 (`SERVICIO LOGISTICO`). Primer import (antes de confirmar la lista): 281 productos creados, 281 sin categoría, 0 precios cargados y 1 issue `prices_not_loaded`. El mismo archivo con la misma fecha → `duplicate`; el reproceso → 281 `unchanged`; el mismo archivo con fecha nueva → 281 `unchanged`. Después de `seed-config` (Lista 1 confirmada), el reproceso del maestro del 05/11 carga 281 precios en Lista 1 (2 en $0) y resuelve `prices_not_loaded`; el reproceso siguiente → 281 `unchanged`, sin precios nuevos. Con el maestro cargado, 61 de los 63 códigos de la muestra de ventas de un día se resuelven.
 
-### 3.6 AXUM · No Compra (`commercial.axum.no_purchase`) — *pendiente de muestra*
+### 3.6 AXUM · Compró / No compró (`commercial.axum.no_purchase`)
 
-Campos esperados:
-- fecha, preventista;
-- cliente, razón social, dirección, código;
-- motivo.
+**Implementado en F1.4** con el export real de octubre 2026 (ADR 018, que reemplaza en esto a ADR 014 §1.2, §2.6 D‑B y §2.7.4). Adaptador: `app/modules/commercial/imports/no_purchase.py`.
 
-Reglas aprobadas:
-- **Código AXUM:** se resuelve con el mapping `customer/AXUM/customer`, que es **otro espacio** distinto del de STORE SYS (D‑B). La regla `commercial.axum_customer_code_matches_store_sys` está en `false`.
-- **Preventista:** mapping `employee/AXUM/salesperson`.
-- **Motivo:** se guarda **tal cual** (`reason_source`) y además su categoría canónica opcional, por `no_purchase_reason_mappings`. Un motivo nuevo queda sin categoría, con un issue.
-- **Ocurrencias** (ajuste 1): **sin UNIQUE** sobre `fecha + cliente + preventista + motivo`. Cada fila es un evento con su `occurrence`. La estrategia contra el reimport del mismo período se cierra con el CSV real.
-- **Visitas:** no se deducen. «Sin venta + sin no‑compra» **no** significa «no visitado».
+**Formato real:**
+- XLSX generado por AXUM (`System.IO.Packaging`), una hoja `Data`, todas las celdas como texto.
+- Fila 1: encabezado `'' | Cliente Id | Nombre | Direccion | Compro? | Fecha y Hora Subida | Hora Ini. | Hora Fin. | Minutos` (la columna A no tiene título).
+- Cada preventista empieza con una fila de grupo `Vendedor: NN` en la columna A; entre grupos hay una fila en blanco. En las filas de datos, la columna A está vacía.
+- `Compro?` dice `Si` o el motivo de no compra. `Fecha y Hora Subida` es `dd/mm/aaaa hh:mm:ss`; `Hora Ini.` y `Hora Fin.` son `hh:mm:ss`; `Minutos` es `m:ss` sin ceros a la izquierda.
+- El reporte no trae el período pedido, los filtros ni la fecha de la visita.
+
+**Muestra real (octubre 2026):** 2767 filas = 1 encabezado + 3 grupos (`01`, `02`, `40`) + 2 en blanco + 2761 de datos (1490 `Si`, 1271 con motivo), del 02/10 al 31/10 en 26 días.
+
+**Filas:**
+- Encabezado, grupos y blancos → `skipped`.
+- `Si` → `skipped`, con el mensaje informativo `purchase_reported` «Compró: la fila queda trazable pero no genera un evento de no compra.». Conserva su `normalized` y sus avisos de horario en el staging. **No es una visita modelada** y no se usa para inferir visitas, cobertura, cumplimiento ni conversión.
+- Con motivo → un evento en `commercial.no_purchase_events`.
+- **Rechazos** (`error`): fila antes de cualquier grupo (`missing_salesperson`), `Cliente Id` vacío o no numérico (`missing_customer_code` / `invalid_customer_code`), `Compro?` vacío (`missing_result`), `Fecha y Hora Subida` vacía o inválida (`missing_uploaded_at` / `invalid_uploaded_at`).
+- **Avisos** (`warning`, la fila se carga): hora de inicio o fin inválida o vacía, `Minutos` inválido, fin antes de inicio (`end_before_start`), `Minutos` distinto de fin − inicio (`minutes_mismatch`), inicio posterior a la subida (`start_after_upload`), nombre vacío.
+
+**Fecha de negocio:** el día de `Fecha y Hora Subida`. Se guardan `uploaded_at_source`, `start_time_source`, `end_time_source`, `duration_source` (texto tal cual) y `duration_seconds`, sin combinar horas. Una fila con inicio posterior a la subida conserva el día de la subida, con aviso (en la muestra son 3, todas `Si`).
+
+**Cliente (`Cliente Id`), en este orden:**
+1. Mapping `customer/AXUM/customer` exacto: si existe, manda (confirmado → `customer_id`; pendiente → `NULL`).
+2. Si no existe y `commercial.axum_customer_code_matches_store_sys` es `true` (sembrado así por la decisión de Enzo, ADR 018): el mapping `customer/STORE_SYS/customer` del mismo código, y el nombre normalizado debe coincidir exactamente con el nombre de fantasía o la razón social del cliente.
+   - Coinciden → al confirmar se crea `customer/AXUM/customer` `confirmed`, `method = rule`, mismo cliente, y un evento de auditoría `commercial.axum.customers_linked_by_rule` (solo ids de mappings).
+   - El nombre no coincide → mapping pendiente con ese cliente como candidato, evento con `customer_id NULL`, aviso `customer_name_mismatch` e issue `commercial.axum_customer.name_mismatch`.
+   - El código no existe en STORE SYS → pendiente, aviso `customer_unknown_code` e issue `commercial.axum_customer.unresolved`.
+3. Con la regla en `false`: pendiente (`customer_unresolved`) e issue `commercial.axum_customer.unresolved`.
+
+Nunca se crean clientes, nunca se resuelve solo por nombre y no hay fuzzy matching. La regla la cambia solo un admin de Comercial, con motivo y auditoría: `GET/PUT /api/v1/commercial/axum-customer-code-rule`. Un cambio aplica al próximo import; los mappings ya creados no cambian.
+
+**Preventista:** el código de la fila de grupo. Cada código del reporte (también uno con solo `Si`, como `40` en la muestra) se observa como `employee/AXUM/salesperson` con etiqueta «Vendedor NN»; si no está confirmado, el evento queda con `salesperson_id NULL` y se abre `commercial.axum_salesperson.unmapped`. Ningún import confirma preventistas, crea empleados ni usa `employee/STORE_SYS/seller` (F1.5).
+
+**Motivo:** `reason_source` guarda el texto tal cual. Su categoría sale de `no_purchase_reason_mappings` (AXUM). Los 6 de la muestra estaban sembrados: TIENE STOCK → `STOCK`; CERRADO, NO ESTA EL ENCARGADO y VACACIONES → `NO_DISPONIBLE`; COMPRA POR BEES → `OTRO_CANAL` (otro canal, no demanda perdida); SIN DINERO → `RESTRICCION_FINANCIERA`. Un motivo nuevo se crea sin categoría, con `reason_category_id NULL` y el issue `commercial.no_purchase.reason_unmapped`.
+
+**Ocurrencias:** sin UNIQUE sobre fecha + cliente + preventista + motivo. Filas idénticas en todo su contenido se conservan como eventos separados con `occurrence` 1, 2, …, y la segunda lleva el aviso informativo `identical_row`.
+
+**Estado de la fila:** `pending_resolution` si el cliente, el preventista o el motivo quedan sin resolver; si no, `valid` o `warning`. Todas se cargan.
+
+**Preview** (`metadata.preview`, solo conteos): `report` (filas de datos, grupos, `Si` salteadas, eventos, rechazadas, días), `customers` (regla, vinculados, por regla, pendientes, código inexistente, nombre distinto, eventos sin cliente), `salespeople` (vistos, pendientes, eventos), `reasons` (por categoría, sin categoría), `date_warnings` (todas las filas) y `date_warnings_events` (entre los eventos), y `replacement` (§5.4).
 
 ## 4. Formatos y lectores
 
@@ -308,7 +336,7 @@ Un upload repite un import cuando coinciden `sha256` + `import_type` + **las dec
 | Precio | `(producto, lista)` vigente | nada | cierre + alta |
 | Comprobante | `document_key` | `duplicate` | `rejected` + issue `document.changed` (nunca se pisa) |
 | Línea de venta | — (no hay clave segura) | §5.3 | §5.3 |
-| No‑compra | — (sin UNIQUE; ajuste 1) | se define con la muestra | — |
+| No‑compra | — (sin UNIQUE; ajuste 1) | §5.4 | §5.4 |
 
 ### 5.3 Ventas artículos/clientes: reemplazo por período **y scope** (D‑G)
 
@@ -349,7 +377,19 @@ La estrategia definitiva se valida con una muestra de varios días antes de F1.3
   - un `FILTERED` sobre días con líneas `FULL` → `blocked` (`new_scope_not_full`), 409 y el job queda `pending` sin escribir; el mismo archivo `FULL` → `replace`.
   - Vigentes al final: 4282 + 2870 + 262 = 7414, igual que el export completo.
 
-### 5.4 Concurrencia
+### 5.4 AXUM Compró / No compró: toda superposición la decide un admin (ADR 018)
+
+El reporte no trae el período pedido ni los filtros, y una visita sincronizada tarde puede aparecer recién en un export posterior. Nada prueba qué reemplaza un archivo, así que no se copia el reemplazo automático de ventas.
+
+- **Mismo archivo** (`sha256` + tipo) → `duplicate`, sin escritura.
+- **Sin no compras activas en el período** del archivo (primer y último día con datos, incluidas las filas `Si`) → `insert`.
+- **Cualquier no compra activa en ese período** → `blocked`, motivo `no_purchase_overlap`. Al confirmar sin decisión: 409 `import_decision_required`, con el plan en `details` (`overlap_days`, `lines` = no compras activas de los preventistas del archivo, `kept_other_salespeople`, `replaces` con el job anterior). También si el archivo no trae ninguna no compra.
+- La decide un **admin** de Comercial, con motivo obligatorio (`platform.import.decision_applied`):
+  - `replace`: las no compras activas del período **de los preventistas que trae el archivo** pasan a `SUPERSEDED` con `superseded_by_job_id`, nunca se borran (`commercial.no_purchase.events_superseded`, con conteo, período, preventistas y jobs reemplazados; `metadata.superseded_events`). Las de otros preventistas no se tocan.
+  - `additional`: se cargan y se conservan todas.
+- Un operador que manda una decisión recibe 403; una decisión sin bloqueo, 409 `import_decision_not_needed`.
+
+### 5.5 Concurrencia
 - Lock consultivo de PostgreSQL por `import_type` al confirmar (`pg_advisory_xact_lock`, se libera con el commit o el rollback).
 - Una transacción por job.
 - Dos confirmaciones del mismo tipo se serializan; las de tipos distintos no se esperan.
@@ -363,9 +403,9 @@ La estrategia definitiva se valida con una muestra de varios días antes de F1.3
 | entity_type / source / namespace | `external_id` | Cómo se crea | Auto‑confirmación |
 |---|---|---|---|
 | `customer / STORE_SYS / customer` | código | el maestro de clientes (comprobantes y ventas solo lo leen) | Sí (`created_from_master`, mismo sistema y código) |
-| `customer / AXUM / customer` | código AXUM | No Compra | **No** (salvo regla D‑B habilitada) |
+| `customer / AXUM / customer` | `Cliente Id` | Compró / No compró | Sí, con la regla de ADR 018 (`rule`: mismo código y nombre en STORE SYS); si no, `pending` |
 | `employee / STORE_SYS / seller` | etiqueta normalizada | maestro de clientes, ventas | **No**; los pseudo‑vendedores se marcan `excluded` |
-| `employee / AXUM / salesperson` | lo que traiga AXUM | No Compra | **No** |
+| `employee / AXUM / salesperson` | código de la fila `Vendedor: NN` | Compró / No compró | **No** (F1.5) |
 
 Zonas y productos **no usan mappings**: se identifican por `commercial.zones.name_key` y `commercial.products.source_code` (DATA_MODEL §1, excepción 2). Una zona nueva se crea `UNCLASSIFIED` al confirmar y recibe la regla que corresponda.
 
