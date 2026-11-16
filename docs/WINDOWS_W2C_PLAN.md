@@ -404,14 +404,40 @@ Lo que estaba en `main` (`274ad4d`) antes de la revisión:
    - Antes comprobaba que no hubiera una ventana y después la escribía, así que dos aperturas simultáneas podían pasar las dos.
    - Ahora la comprobación y la escritura se hacen dentro del bloqueo, y la ventana se crea con creación exclusiva del archivo.
 
-   **`services start` y `services stop`:**
-   - Toman el bloqueo.
+   **Regla contra el interbloqueo:**
+   - **Ningún proceso espera a otro proceso mientras tiene el bloqueo.** Lo único que puede esperar con el bloqueo tomado son sus propios pasos: servicios, disco y base.
+   - Toda espera por el bloqueo tiene un tiempo máximo y termina en FAIL o en `blocked`, nunca en una espera sin fin.
+   - Con esas dos reglas no puede haber dos procesos esperándose en círculo.
+   - Una operación que ya tiene el bloqueo y necesita arrancar o detener servicios lo hace desde adentro, en el mismo proceso, sin volver a pedirlo por la CLI. Es el caso de un cierre o una actualización.
+
+   **Protocolo de arranque entre `services start` y el supervisor** (revisión 2, precisión de Enzo del 2026-11-16):
+   1. `services start` toma el bloqueo, con un tiempo máximo corto. Si está ocupado, falla y nombra al dueño.
+   2. Con el bloqueo tomado, hace una **validación previa**: ventana, registro y, en C9‑B, diario. Si algo es inseguro, falla sin arrancar nada.
+   3. Escribe `state\start-request.json` con un valor nuevo, que identifica este arranque (PR #83), y lo deja en `logs\ops.log`.
+
+   El arranque no es una operación del registro de operaciones. Ese registro es para las operaciones que bloquean o mantienen (cierre, actualización, manual y `resume`). Si lo fuera, el supervisor encontraría el propio arranque como operación incompleta y nunca arrancaría.
+   4. **Suelta el bloqueo** y recién entonces arranca el servicio del Stack. Desde aquí espera la señal del supervisor sin tener el bloqueo.
+   5. El supervisor toma el bloqueo, con un tiempo máximo. Si no lo consigue, registra `blocked` («bloqueo ocupado por …») y no arranca la app.
+   6. Con el bloqueo tomado, el supervisor hace la **validación decisiva**: vuelve a comprobar todo, sin fiarse de la previa. Mantiene el bloqueo mientras arranca la cadena, y lo suelta recién después de registrar su fase: `running`, `failed` o `blocked`, con el valor del arranque.
+   7. `services start` acepta solo el registro del supervisor con su valor: `running` es PASS, y `failed`, `blocked` o el tiempo máximo son FAIL. Deja el resultado en `logs\ops.log`.
+
+   **Por qué el protocolo es seguro:**
+   - **No hay interbloqueo:** `services start` nunca espera al supervisor con el bloqueo tomado, y el supervisor nunca espera a `services start`.
+   - **No hay hueco entre validar y arrancar:** la validación que cuenta es la del supervisor, que la hace con el bloqueo tomado y lo mantiene hasta que la cadena quedó arriba. Ningún mantenimiento, actualización ni recuperación puede empezar en el medio.
+   - Si un mantenimiento toma el bloqueo entre los pasos 4 y 5, el supervisor encuentra la ventana abierta y registra `blocked`. `services start` informa FAIL. Es el resultado correcto, no una confirmación equivocada.
+   - **Arranque vigente:** el valor de `start-request.json` identifica el arranque, y el registro del supervisor lo repite. Un registro con otro valor no cuenta. Al arrancar Windows, el Stack hace los pasos 5 y 6 sin ninguna solicitud previa.
+
+   **`services stop`:**
+   - Toma el bloqueo y detiene el Stack, que ante el pedido de parada no pide el bloqueo.
+   - Mientras el supervisor está arrancando la cadena con el bloqueo tomado, `services stop` falla al instante y nombra la operación en curso.
+
+   **Requisitos previos de los dos comandos:**
    - Se niegan con una ventana de mantenimiento abierta o vencida.
    - También se niegan con una operación incompleta o incierta en el registro.
-   - Una operación que tiene la ventana arranca y detiene los servicios desde adentro, con el bloqueo ya tomado. No vuelve a pedirlo por la CLI.
 
    **El supervisor:**
-   - Toma el bloqueo solo para decidir al arrancar, no durante su vigilancia normal.
+   - Toma el bloqueo para decidir y arrancar (pasos 5 y 6), no durante su vigilancia normal.
+   - Para reiniciar PostgreSQL después de una caída, intenta tomar el bloqueo sin esperar. No lo reinicia si el bloqueo está ocupado o hay una ventana abierta: un cierre o una actualización pueden haberlo detenido a propósito.
    - Si encuentra cualquiera de estos estados:
      - una ventana abierta o vencida;
      - una operación incompleta o incierta;
@@ -420,7 +446,7 @@ Lo que estaba en `main` (`274ad4d`) antes de la revisión:
      arranca **solo PostgreSQL**, que hace falta para recuperar. No arranca backend, frontend ni Caddy, y registra la fase **`blocked`** con el motivo en `state\supervisor.json`.
    - `services start` informa `blocked` como FAIL explícito, con el motivo. Nunca lo cuenta como un arranque correcto.
    - Volver a intentar el arranque, reiniciar Windows o que venza una espera no cambia nada: sigue en `blocked` hasta que una operación explícita resuelva el estado.
-   - El reinicio de PostgreSQL después de una caída se mantiene. En C9‑B, la marca de la base sobrevive al reinicio porque vive en el catálogo.
+   - El reinicio de PostgreSQL después de una caída se mantiene, con la condición de arriba. En C9‑B, la marca de la base sobrevive al reinicio porque vive en el catálogo.
 2. **Archivos:**
    - `districom_ops/oplock.py`;
    - cambios en `maintenance.py`, `services.py` y `cli.py`;
@@ -434,6 +460,16 @@ Lo que estaba en `main` (`274ad4d`) antes de la revisión:
    - **C9A‑5:** el arranque del Stack con un estado inseguro deja PostgreSQL arriba y la app abajo. Registra `blocked` con su motivo, y `services start` da FAIL.
    - **C9A‑6:** volver a arrancar el Stack, reiniciar PostgreSQL o dejar vencer la ventana no saca a la instalación de `blocked`.
    - **C9A‑7:** dos `services start` simultáneos: uno arranca y el otro falla al instante, sin confirmación equivocada.
+   - **C9A‑9 (sin interbloqueo):** `services start` arranca el Stack y el supervisor consigue el bloqueo y llega a `running`. Ningún arranque queda esperando hasta el tiempo máximo por el bloqueo.
+   - **C9A‑10 (sin hueco):** se abre una ventana de mantenimiento en cada punto entre los pasos 1 y 7 del protocolo.
+     - Si entra antes del paso 5, el supervisor registra `blocked`, la app no arranca y `services start` da FAIL.
+     - Después del paso 5 no puede entrar, porque el bloqueo está ocupado, hasta que el supervisor registró su fase.
+   - **C9A‑11 (fallas):** se matan procesos en distintos momentos del arranque.
+     - Si se mata `services start` después del paso 4, el supervisor sigue solo: valida y registra su fase. Nadie queda esperando, y `services status` muestra la fase.
+     - Si se mata el supervisor con el bloqueo tomado, el bloqueo queda libre y `services start` da FAIL por tiempo o porque el Stack se detuvo.
+     - En ningún caso queda un PASS falso ni una espera sin fin.
+   - **C9A‑12:** con el bloqueo ocupado o una ventana abierta, el supervisor no reinicia un PostgreSQL detenido.
+   - **C9A‑13 (arranque vigente):** un registro del supervisor con el valor de un arranque anterior nunca da PASS, incluso con el bloqueo y una ventana de por medio.
    - **C9A‑8:** ruff, formato, mypy estricto, y los logs sin secretos ni datos personales.
 5. **Riesgos:**
    - Un bloqueo de archivos que no se libere en algún caso de Windows. Se cubre con C9A‑2 sobre procesos reales.
@@ -492,21 +528,33 @@ Lo que estaba en `main` (`274ad4d`) antes de la revisión:
    | `none` | sin bloqueo | `blocking` (inicio de un bloqueo) |
    | `blocking` (paso *k*) | bloqueo en curso | `blocked` (paso 6 verificado) · `reverting` (falla o tiempo máximo) |
    | `blocked` | bloqueo verificado; la operación dueña sigue | `closed_complete` (C11, con las garantías de C10) · `reverting` (la operación dueña desiste) |
-   | `closed_complete` | cierre terminado y verificado | `resuming` (automático al arrancar, o `resume`) |
+   | `closed_complete` | cierre terminado; **candidato** a recuperación automática, que por sí solo no habilita nada | `resuming` (recuperación automática al arrancar, o `resume`, si pasan todas sus condiciones) · sigue en `closed_complete` y el supervisor en `blocked`, si alguna falla |
    | `reverting` | deshaciendo lo registrado | `none` (verificado) |
    | `resuming` | restableciendo las escrituras | `none` (verificado) |
 
-   Cualquier estado distinto de `none` deja al supervisor en `blocked` (C9‑A). Hasta C10 y C11, ningún cierre real llega a `closed_complete`.
+   Cualquier estado distinto de `none` deja al supervisor en `blocked` (C9‑A), `closed_complete` incluido. **`closed_complete` no habilita por sí solo el arranque de la app.** Hasta C10 y C11, ningún cierre real llega a `closed_complete`.
 
-   **Restablecimiento automático (D2 de C9, Enzo 2026-11-11).** Solo pasa cuando se cumple todo esto:
-   - el diario está en `closed_complete`, con la evidencia que exigen C10 y C11;
-   - `writes_resume_check` da sí: ventana cerrada, registro coherente y ninguna operación incompleta, incierta ni incompatible;
-   - se cumplen las comprobaciones de seguridad aplicables (disco de backup y conexión operativa).
+   **Restablecimiento automático (D2 de C9, Enzo 2026-11-11; precisado el 2026-11-16).** Un diario en `closed_complete` es solo candidato. El supervisor hace la recuperación en este orden, y cada paso tiene que pasar:
+   1. toma el bloqueo exclusivo (paso 5 del protocolo de arranque) y registra su propia operación de tipo `resume`, automática;
+   2. verifica la **evidencia del cierre seguro** que exigen C10 y C11. Su contenido se comprueba (LSN, WAL, apagado y copias), no basta con que exista;
+   3. llama a `writes_resume_check` con su contexto de recuperación (ver más abajo): ventana cerrada, registro coherente y ninguna otra operación incompleta, incierta ni incompatible;
+   4. comprueba el disco de backup y arranca **solo PostgreSQL**;
+   5. reanuda: `ALLOW_CONNECTIONS true` por la conexión operativa, y verificación en `pg_database`;
+   6. verifica las conexiones: una conexión de prueba con el rol de la app, y `pg_stat_activity` coherente;
+   7. marca el diario `none` y cierra su operación;
+   8. **recién entonces** arranca backend, frontend y Caddy y registra `running`.
 
-   El supervisor lo hace con el bloqueo exclusivo tomado. **Nunca** habilita escrituras porque terminó una espera, venció una ventana o se reinició Windows. Un cierre incompleto, una actualización fallida o cualquier duda dejan el sistema en `blocked`.
+   Si cualquier paso falla, el sistema queda en `blocked`:
+   - el diario queda en `closed_complete` o en `resuming`, que se reconcilia en el próximo intento;
+   - si la marca ya se había puesto en `true`, se vuelve a `false` antes de registrar el fallo;
+   - la app no arranca;
+   - queda la alerta.
+
+   **Nunca** se habilitan escrituras porque terminó una espera, venció una ventana o se reinició Windows. Un cierre incompleto, una actualización fallida o cualquier duda dejan el sistema en `blocked`.
 
    **Hasta C10 y C11 el mecanismo queda preparado pero no validado:**
-   - C9‑B lo implementa y lo prueba en CI con diarios fabricados para la prueba;
+   - C9‑B lo implementa y lo prueba en CI solo con diarios y evidencias ficticios, fabricados para la prueba;
+   - no se declara validado ningún cierre real;
    - el cierre completo no se declara validado antes de esas etapas.
 
    **Restablecimiento manual (`districom-ops resume`):**
@@ -531,10 +579,34 @@ Lo que estaba en `main` (`274ad4d`) antes de la revisión:
    7. marcar el diario `none`;
    8. soltar el bloqueo.
 
-   **La recuperación no se bloquea a sí misma:**
-   - `resume` es una operación del registro. `writes_resume_check` recibe el id de la operación que la llama, y solo puede pasar por alto esa operación, que tiene que ser de tipo `resume` y tener el bloqueo.
-   - Si un `resume` anterior murió a mitad, el siguiente lo cierra como FAILED después de volver a verificar el estado real, y lo deja registrado.
+   **La recuperación no se bloquea a sí misma** (excepción de `writes_resume_check`, aprobada conceptualmente por Enzo el 2026-11-16):
+   - `resume`, manual o automático, es una operación del registro. Mientras corre está incompleta, y sin una excepción `writes_resume_check` daría siempre no.
+   - **Sin contexto de recuperación, la función es tan estricta como hoy.**
+   - El contexto de recuperación no es un id ni un booleano que se pasa a mano: es el bloqueo exclusivo que el proceso tiene realmente. Solo el módulo del bloqueo lo crea, a partir del archivo abierto en exclusiva, y lo vuelve a comprobar en el momento de usarse.
+   - Con ese contexto, la función puede pasar por alto **una sola** operación, y solo si cumple todo esto:
+     - existe en el registro;
+     - está activa, sin fin;
+     - es exactamente de tipo `resume`;
+     - es la operación dueña del bloqueo que el proceso tiene en ese momento.
+   - Aun con contexto:
+     - nunca se pasa por alto otra operación incompleta o incierta;
+     - nunca se toleran líneas inválidas ni registros corruptos, salvo la última línea cortada que C1 ya tolera;
+     - una ventana abierta o vencida sigue dando no.
+   - **Reconciliación de un `resume` interrumpido:** antes de registrar su resultado, el siguiente `resume` compara:
+     - lo que dice el diario;
+     - el estado real de PostgreSQL: `datallowconn` en `pg_database` y las sesiones en `pg_stat_activity`.
+
+     Con eso cierra el `resume` anterior como FAILED y registra lo que encontró. Si la marca había quedado en `true` sin que el diario terminara, la vuelve a `false` antes de seguir.
    - Los pasos de `resume` son idempotentes, así que repetirlo siempre puede terminar.
+
+   **Pruebas negativas de la excepción** (C9‑B):
+   - **C9‑X1:** sin contexto, una operación `resume` activa hace que la función dé no, igual que hoy.
+   - **C9‑X2:** un contexto armado a mano, con un id o un booleano y sin el bloqueo real, se rechaza.
+   - **C9‑X3:** un contexto cuyo bloqueo ya se soltó, o que pertenece a otro proceso, se rechaza.
+   - **C9‑X4:** con contexto, otra operación incompleta o incierta de cualquier tipo sigue dando no. Lo mismo pasa con un segundo `resume` activo que no es el dueño del bloqueo.
+   - **C9‑X5:** con contexto, una línea inválida o un registro corrupto siguen dando no.
+   - **C9‑X6:** con contexto, la operación que se pasa por alto no puede ser de otro tipo (por ejemplo `close` o `update`), ni estar ya terminada, ni faltar en el registro.
+   - **C9‑X7:** un `resume` matado en cada paso se reconcilia contra el diario y `pg_database`. Si había dejado la marca en `true`, vuelve a `false` antes de registrar el resultado.
 
    **Fallas y reinicios:**
    - Si PostgreSQL no está levantado, no se restablece nada.
@@ -576,13 +648,19 @@ Lo que estaba en `main` (`274ad4d`) antes de la revisión:
      - el rol de la app es dueño de los schemas, tablas, secuencias y demás objetos que creó, y puede usarlos.
    - **C9‑R (restablecimiento automático):**
      - con un diario `closed_complete` fabricado y todo en regla, el Stack restablece las escrituras;
-     - con cualquier otra combinación (diario en otro estado, operación incompleta, ventana abierta, conexión operativa rota), queda en `blocked`.
+     - con cualquier otra combinación queda en `blocked`, sin arrancar la app:
+       - diario en otro estado;
+       - evidencia ausente o inválida;
+       - operación incompleta;
+       - ventana abierta;
+       - conexión operativa rota;
+       - fallo de la conexión de prueba después de reanudar (en este caso la marca vuelve a `false`).
 5. **Riesgos:**
    - Un superusuario conectado por fuera queda cubierto por el paso 5, pero un superusuario puede revertir la marca. Queda documentado como acción de administrador.
    - `districom_ops` es dueño de la base y podría borrarla. Su credencial la leen solo el Stack y los administradores (C3).
    - Store Sys no se ve afectado porque es otra base. Hay que confirmar con su proveedor que no use el mismo clúster.
 6. **CI / laboratorio:**
-   - **En CI:** C9‑1 a C9‑9, C9‑H1, C9‑M y C9‑R.
+   - **En CI:** C9‑1 a C9‑9, C9‑H1, C9‑M, C9‑R y C9‑X1 a C9‑X7.
    - **PENDIENTE:**
      - el ensayo con la app real cargada por usuarios en la LAN;
      - el reinicio real de Windows a mitad de un cierre, en el laboratorio;

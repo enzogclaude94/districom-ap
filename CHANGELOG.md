@@ -10,6 +10,10 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
   - C9‑B incluye la máquina de estados del diario, el restablecimiento automático solo tras un cierre completo y `resume` auditado;
   - C9‑B incluye también el nuevo modelo de roles: `districom_ops` es dueño de la base y la app pierde el acceso a otras bases, sin revocaciones globales.
 - C6 respeta el bloqueo de C9‑A. C11 y C12 dependen también del modo mantenimiento de C5. Toda operación nueva toma el bloqueo exclusivo.
+- Precisiones de Enzo del 2026-11-16:
+  - **Protocolo de arranque sin interbloqueo:** `services start` valida, escribe la solicitud y suelta el bloqueo antes de arrancar el Stack. El supervisor hace la validación decisiva con el bloqueo tomado y lo mantiene hasta registrar su fase.
+  - **Excepción de `writes_resume_check`:** solo para el `resume` dueño del bloqueo real, con las pruebas negativas C9‑X1 a C9‑X7.
+  - **`closed_complete`:** es solo candidato a recuperación automática; la app arranca recién después de reanudar y verificar las conexiones.
 - `ROADMAP.md` y `docs/WINDOWS_DEPLOYMENT.md §8.5`: el nuevo orden. La siguiente es C9‑A, autorizada recién después de mergear esta revisión.
 
 ### Changed — Servidor: C4 DONE y requisitos pendientes
