@@ -4,6 +4,23 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Added — F1.4: importador AXUM «Compró / No compró» (en revisión)
+- **Tipo `commercial.axum.no_purchase`** (`app/modules/commercial/imports/no_purchase.py`), en la pantalla Importaciones existente. Lee el export real de AXUM: XLSX con una hoja `Data`, encabezado con la columna A vacía, una fila `Vendedor: NN` por preventista y todas las celdas como texto (`docs/IMPORTS.md §3.6`).
+  - Solo las filas con motivo crean un evento. Las filas `Si` quedan en el staging como `skipped`, con el mensaje «Compró: la fila queda trazable pero no genera un evento de no compra.». No se modelan ni se infieren visitas.
+  - Fecha de negocio = día de `Fecha y Hora Subida`; las horas de subida, inicio y fin y la duración se guardan tal cual, sin combinarlas. Un inicio posterior a la subida es un aviso y no cambia el día.
+  - Filas idénticas se conservan como eventos separados con `occurrence`.
+- **Tabla `commercial.no_purchase_events`** (migración 0038): valores fuente del cliente, el preventista y el motivo, mappings, categoría al importar, horarios, `ACTIVE`/`SUPERSEDED`, trazabilidad a job y fila. Sin UNIQUE por fecha + cliente + preventista + motivo, un trigger impide el DELETE y el downgrade se niega si hay eventos (`DATA_MODEL.md §6.3`).
+- **Cliente por `Cliente Id`:** primero el mapping `customer/AXUM/customer` exacto. Si no hay, y con la regla `commercial.axum_customer_code_matches_store_sys` activa, el cliente de STORE SYS con el mismo código **y el mismo nombre** se vincula con un mapping `confirmed` de método `rule` y un evento de auditoría. Un nombre distinto o un código que no existe queda pendiente con su issue. Nunca crea clientes ni resuelve por nombre.
+- **Regla auditada:** la siembra la crea en `true` con el motivo de la decisión de Enzo; solo un admin de Comercial la cambia, con motivo (`GET/PUT /api/v1/commercial/axum-customer-code-rule`). `seed-config` reporta `settings: 2`.
+- **Preventistas:** cada código del reporte (también uno con solo compras) queda como mapping `employee/AXUM/salesperson` pendiente, con issue. No se crean empleados ni se usa el vendedor de STORE SYS.
+- **Motivos:** texto tal cual más la categoría de `no_purchase_reason_mappings`; COMPRA POR BEES es `OTRO_CANAL`. Un motivo nuevo queda sin categoría, con issue.
+- **Reimport (`docs/IMPORTS.md §5.4`):** el mismo archivo es `duplicate`; un período sin no compras se carga; cualquier superposición pide la decisión de un admin con motivo. `replace` marca `SUPERSEDED` solo las de los preventistas del archivo; `additional` conserva todas. No se copia el reemplazo automático de ventas.
+- **UI:** el resumen del detalle muestra filas del reporte, compras salteadas, no compras a cargar, clientes vinculados y pendientes, preventistas sin vincular, motivos por categoría y horarios para revisar; la decisión de admin habla de «no compras».
+- **Issues nuevos:** `commercial.axum_customer.unresolved`, `commercial.axum_customer.name_mismatch`, `commercial.axum_salesperson.unmapped`, `commercial.no_purchase.reason_unmapped`.
+- **ADR 018** (`AXUM «Compró / No compró»`): fuente XLSX, naturaleza del reporte, `Cliente Id`, equivalencia comprobada y regla activada, filas `Si` fuera de los eventos, fecha de subida, decisión de admin ante superposición y preventistas como espacio propio. Reemplaza ADR 014 solo en §1.2/S6, D‑B para el cliente y §2.7.4.
+- **Export real de octubre** (solo local): 2761 filas de datos, 1490 `Si` salteadas, 1271 no compras; 313 clientes vinculados por la regla, 1 código inexistente, 0 nombres distintos; preventistas `01`, `02` y `40` pendientes; analizar 3,7 s y confirmar 4,5 s.
+- **Tests:** `test_import_no_purchase.py` (29), `test_import_no_purchase_api.py` (7, incluida la privacidad con nombre y dirección), migración 0038 y 4 casos nuevos en `tests/imports.test.tsx`.
+
 ### Changed — Servidor: C4 DONE y requisitos pendientes
 - `ROADMAP.md` y `docs/WINDOWS_DEPLOYMENT.md §8.5`: C4 DONE a nivel de implementación y pruebas automatizadas (PR #82); la corrección de la carrera de C2 mergeada (PR #83).
 - Nuevo requisito para las etapas siguientes: coordinar arranque, actualización y mantenimiento, sin solicitudes simultáneas incompatibles.

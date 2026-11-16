@@ -771,3 +771,36 @@ def set_articles_price_list(db: Session, actor: User, list_number: int | None, *
         )
     db.commit()
     return list_number
+
+
+# --- AXUM «Cliente Id» = STORE SYS customer code (ADR 018) --------------------------------------------------------
+
+AXUM_CUSTOMER_CODE_SETTING = "commercial.axum_customer_code_matches_store_sys"
+
+
+def axum_customer_code_matches_store_sys(db: Session) -> bool:
+    return bool(get_setting(db, AXUM_CUSTOMER_CODE_SETTING))
+
+
+def set_axum_customer_code_rule(db: Session, actor: User, enabled: bool, *, reason: str | None) -> bool:
+    """Whether an AXUM «Cliente Id» without a mapping of its own may be linked through the STORE SYS customer with
+    the same code, when the name agrees too (docs/IMPORTS.md §3.6): a module admin's decision, with a reason,
+    audited. It applies to the next AXUM import; mappings already created stay as they are."""
+    clean_reason = _clean(reason)
+    if not clean_reason:
+        raise AppError(422, "reason_required", "Indicá el motivo del cambio.")
+    before = axum_customer_code_matches_store_sys(db)
+    if before != enabled:
+        set_setting(db, AXUM_CUSTOMER_CODE_SETTING, enabled, user_id=actor.id)
+        record_change(
+            db,
+            "commercial.config.axum_customer_code_rule_set",
+            action="update",
+            user_id=actor.id,
+            entity_type="app_setting",
+            entity_id=AXUM_CUSTOMER_CODE_SETTING,
+            before={"enabled": before},
+            after={"enabled": enabled, "reason": clean_reason},
+        )
+    db.commit()
+    return enabled

@@ -11,6 +11,8 @@ from app.modules.commercial.config.models import Zone
 from app.modules.commercial.config.schemas import (
     ArticlesPriceListIn,
     ArticlesPriceListOut,
+    AxumCustomerCodeRuleIn,
+    AxumCustomerCodeRuleOut,
     CategoryIn,
     CategoryOut,
     CategoryPatch,
@@ -134,6 +136,26 @@ def get_articles_price_list(db: DbSession, _: Viewer) -> ArticlesPriceListOut:
 def set_articles_price_list(db: DbSession, user: Admin, body: ArticlesPriceListIn) -> ArticlesPriceListOut:
     number = service.set_articles_price_list(db, user, body.list_number, reason=body.reason)
     return ArticlesPriceListOut(list_number=number)
+
+
+@router.get(
+    "/axum-customer-code-rule",
+    response_model=AxumCustomerCodeRuleOut,
+    summary="Regla «Cliente Id» de AXUM = código de STORE SYS",
+)
+def get_axum_customer_code_rule(db: DbSession, _: Viewer) -> AxumCustomerCodeRuleOut:
+    return AxumCustomerCodeRuleOut(enabled=service.axum_customer_code_matches_store_sys(db))
+
+
+@router.put(
+    "/axum-customer-code-rule",
+    response_model=AxumCustomerCodeRuleOut,
+    summary="Activar o desactivar la regla de códigos AXUM = STORE SYS",
+)
+def set_axum_customer_code_rule(db: DbSession, user: Admin, body: AxumCustomerCodeRuleIn) -> AxumCustomerCodeRuleOut:
+    return AxumCustomerCodeRuleOut(
+        enabled=service.set_axum_customer_code_rule(db, user, body.enabled, reason=body.reason)
+    )
 
 
 @router.patch("/price-lists/{list_id}", response_model=PriceListOut, summary="Modificar lista de precios")

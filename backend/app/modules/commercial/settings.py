@@ -33,5 +33,12 @@ SETTINGS = SettingsScope(
             "Número de lista que representa la columna «precio» del maestro de artículos de STORE SYS. Sin valor, "
             "los precios del maestro no se cargan (docs/IMPORTS.md §3.5).",
         ),
+        SettingSpec(
+            "axum_customer_code_matches_store_sys",
+            False,
+            "«Cliente Id» de AXUM = código de cliente de STORE SYS",
+            "Con valor verdadero, un «Cliente Id» de AXUM sin vínculo propio se vincula al cliente con el mismo código "
+            "de STORE SYS, solo si el nombre también coincide (ADR 018, docs/IMPORTS.md §3.6). Lo decide un admin.",
+        ),
     ),
 )

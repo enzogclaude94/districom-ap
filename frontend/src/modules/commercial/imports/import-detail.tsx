@@ -23,9 +23,26 @@ import {
 } from "@/lib/api/imports";
 import { formatDate, formatDateTime } from "@/lib/format";
 
-import { daysText, replacementOf, replacementText, typeFacts, type Fact } from "./import-summary";
+import {
+  daysText,
+  NO_PURCHASE_SUBJECT,
+  replacementOf,
+  replacementText,
+  SALES_SUBJECT,
+  typeFacts,
+  type Fact,
+  type Subject,
+} from "./import-summary";
 import { ImportRows } from "./import-rows";
-import { SALES_TYPE, SEVERITY_LABELS, SEVERITY_TONES, STATUS_LABELS, STATUS_TONES, typeLabel } from "./labels";
+import {
+  NO_PURCHASE_TYPE,
+  SALES_TYPE,
+  SEVERITY_LABELS,
+  SEVERITY_TONES,
+  STATUS_LABELS,
+  STATUS_TONES,
+  typeLabel,
+} from "./labels";
 import { importHref } from "./upload-form";
 
 const n = (value: number) => value.toLocaleString("es-AR");
@@ -122,9 +139,11 @@ function Attention({
 
 function DecisionForm({
   pending,
+  subject,
   onDecide,
 }: {
   pending: boolean;
+  subject: Subject;
   onDecide: (decision: ImportDecision, reason: string) => void;
 }) {
   const ids = { reason: useId(), name: useId() };
@@ -136,14 +155,14 @@ function DecisionForm({
       className="space-y-3"
       onSubmit={(event) => {
         event.preventDefault();
-        if (!decision) return setProblem("Elegí qué hacer con las ventas ya cargadas.");
+        if (!decision) return setProblem(`Elegí qué hacer con las ${subject.loaded} ya cargadas.`);
         if (!reason.trim()) return setProblem("Escribí el motivo de la decisión: queda registrado.");
         setProblem(null);
         onDecide(decision, reason.trim());
       }}
     >
       <fieldset disabled={pending} className="space-y-2">
-        <legend className="text-sm font-medium">Qué hacer con las ventas ya cargadas de esos días</legend>
+        <legend className="text-sm font-medium">Qué hacer con las {subject.loaded} ya cargadas de esos días</legend>
         <label className="flex items-start gap-2 text-sm">
           <input
             type="radio"
@@ -153,8 +172,8 @@ function DecisionForm({
             onChange={() => setDecision("replace")}
           />
           <span>
-            <strong>Reemplazarlas.</strong> Las ventas ya cargadas de los días en conflicto quedan como reemplazadas y
-            valen las de este archivo.
+            <strong>Reemplazarlas.</strong> Las {subject.loaded} ya cargadas de los días en conflicto quedan como
+            reemplazadas y valen las de este archivo.
           </span>
         </label>
         <label className="flex items-start gap-2 text-sm">
@@ -167,7 +186,7 @@ function DecisionForm({
           />
           <span>
             <strong>Cargar como adicionales.</strong> Se suman a las ya cargadas. Usalo solo si sabés que este archivo
-            no repite ventas que ya están.
+            no repite {subject.loaded} que ya están.
           </span>
         </label>
         <div className="space-y-1.5 pt-1">
@@ -267,11 +286,13 @@ export function ImportDetailView({ jobId }: { jobId: number }) {
   const detail: ImportJobDetail = job.data;
   const c = detail.counts;
   const isSales = detail.import_type === SALES_TYPE;
+  const isNoPurchase = detail.import_type === NO_PURCHASE_TYPE;
+  const subject = isNoPurchase ? NO_PURCHASE_SUBJECT : SALES_SUBJECT;
   const plan = replacementOf(detail);
   const days = detail.scope?.days ?? [];
   const needsDecision = detail.status === "pending" && (plan?.action === "blocked" || blocked !== null);
   const done = detail.status === "completed" || detail.status === "completed_with_warnings";
-  const superseded = Number(detail.metadata.superseded_lines ?? 0) || c.superseded;
+  const superseded = Number(detail.metadata.superseded_lines ?? detail.metadata.superseded_events ?? 0) || c.superseded;
   const declaredScope = detail.scope?.declared;
 
   const facts: Fact[] = [
@@ -282,7 +303,9 @@ export function ImportDetailView({ jobId }: { jobId: number }) {
           {
             label: "Período",
             value: `${formatDate(detail.period_from)} al ${formatDate(detail.period_to)}${
-              days.length ? ` · ${n(days.length)} ${days.length === 1 ? "día" : "días"} con ventas` : ""
+              days.length
+                ? ` · ${n(days.length)} ${days.length === 1 ? "día" : "días"} con ${isNoPurchase ? "datos" : "ventas"}`
+                : ""
             }`,
           },
         ]
@@ -394,10 +417,10 @@ export function ImportDetailView({ jobId }: { jobId: number }) {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {isSales && plan && (
+            {(isSales || isNoPurchase) && plan && (
               <div className="space-y-1 text-sm">
-                <p className="font-medium">{replacementText(plan, days).title}</p>
-                {replacementText(plan, days).reasons.map((reason) => (
+                <p className="font-medium">{replacementText(plan, days, subject).title}</p>
+                {replacementText(plan, days, subject).reasons.map((reason) => (
                   <p key={reason} className="text-muted-foreground">
                     {reason}
                   </p>
@@ -430,6 +453,7 @@ export function ImportDetailView({ jobId }: { jobId: number }) {
                   </p>
                   <DecisionForm
                     pending={confirm.isPending}
+                    subject={subject}
                     onDecide={(decision, reason) => confirm.mutate({ decision, reason })}
                   />
                 </div>
@@ -501,7 +525,14 @@ export function ImportDetailView({ jobId }: { jobId: number }) {
                 { label: "Nuevas", value: c.inserted },
                 { label: "Actualizadas", value: c.updated },
                 { label: "Sin cambios", value: c.unchanged },
-                { label: isSales ? "Ventas anteriores reemplazadas" : "Reemplazadas", value: superseded },
+                {
+                  label: isSales
+                    ? "Ventas anteriores reemplazadas"
+                    : isNoPurchase
+                      ? "No compras anteriores reemplazadas"
+                      : "Reemplazadas",
+                  value: superseded,
+                },
                 { label: "No cargadas", value: c.rejected, tone: "danger" },
                 { label: "Problemas abiertos", value: issues.data?.length ?? 0, tone: "warning" },
               ]}

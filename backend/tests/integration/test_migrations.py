@@ -475,6 +475,8 @@ COMMERCIAL_TABLES = {
     "customer_salesperson_assignments",
     "documents",
     "sale_lines",
+    # F1.4 (0038)
+    "no_purchase_events",
 }
 
 
@@ -590,3 +592,66 @@ def test_masters_migrations_go_down_and_up_and_refuse_to_drop_data() -> None:
             conn.execute(text("TRUNCATE customers"))
         engine.dispose()
         command.upgrade(cfg, "head")
+
+
+def test_no_purchase_events_migration_goes_down_and_up_and_refuses_to_drop_data() -> None:
+    """F1.4: 0038 creates the AXUM no-purchase events. Empty it goes down and up; an event is never deleted and,
+    with one, the downgrade is refused and nothing is dropped."""
+    cfg = alembic_config()
+    url = cfg.get_main_option("sqlalchemy.url")
+    assert url
+
+    command.upgrade(cfg, "head")
+    command.downgrade(cfg, "0037")
+    assert "no_purchase_events" not in _commercial_tables(url)
+    command.upgrade(cfg, "head")
+    assert _commercial_tables(url) == COMMERCIAL_TABLES
+
+    engine = create_engine(url)
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("INSERT INTO users (email, full_name, role) VALUES ('m@districom.test', 'M', 'admin')"))
+            conn.execute(
+                text(
+                    "INSERT INTO import_files (original_filename, storage_key, size_bytes, sha256, uploaded_by) "
+                    "SELECT 'f.xlsx', 'k', 1, repeat('a', 64), id FROM users"
+                )
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO import_jobs (status, file_id, created_by) "
+                    "SELECT 'completed', f.id, f.uploaded_by FROM import_files f"
+                )
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO commercial.no_purchase_reason_mappings (source_system_id, reason_source, reason_key) "
+                    "SELECT id, 'CERRADO', 'CERRADO' FROM source_systems WHERE code = 'AXUM'"
+                )
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO commercial.no_purchase_events (business_date, source_customer_code, "
+                    "source_salesperson, reason_source, reason_mapping_id, uploaded_at_source, import_job_id, "
+                    "occurrence, status) "
+                    "SELECT '2026-10-20', '101', '01', 'CERRADO', r.id, '2026-10-20 12:30', j.id, 1, 'ACTIVE' "
+                    "FROM commercial.no_purchase_reason_mappings r, import_jobs j"
+                )
+            )
+        with pytest.raises(DBAPIError, match="never deleted"), engine.begin() as conn:
+            conn.execute(text("DELETE FROM commercial.no_purchase_events"))
+        with pytest.raises(DBAPIError, match="downgrade refused"):
+            command.downgrade(cfg, "0037")
+        assert _commercial_tables(url) == COMMERCIAL_TABLES
+    finally:
+        with engine.begin() as conn:
+            conn.execute(
+                text("ALTER TABLE commercial.no_purchase_events DISABLE TRIGGER trg_no_purchase_events_no_delete")
+            )
+            conn.execute(text("DELETE FROM commercial.no_purchase_events"))
+            conn.execute(
+                text("ALTER TABLE commercial.no_purchase_events ENABLE TRIGGER trg_no_purchase_events_no_delete")
+            )
+            conn.execute(text("DELETE FROM commercial.no_purchase_reason_mappings"))
+            conn.execute(text("TRUNCATE import_jobs, import_files, users CASCADE"))
+        engine.dispose()

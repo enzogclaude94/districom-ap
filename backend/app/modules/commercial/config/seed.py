@@ -20,7 +20,7 @@ from app.modules.commercial.config.models import (
     ProductCategory,
     ZoneClassificationRule,
 )
-from app.modules.commercial.config.service import ARTICLES_PRICE_LIST_SETTING, source_key
+from app.modules.commercial.config.service import ARTICLES_PRICE_LIST_SETTING, AXUM_CUSTOMER_CODE_SETTING, source_key
 from app.platform.audit.service import record_change, record_event
 from app.platform.mappings.service import source_system_id
 from app.platform.settings.models import AppSetting
@@ -91,7 +91,14 @@ REASON_CATEGORIES = (
     ("OTRO", "Otro"),
 )
 
-# Enzo's examples; to be checked against the real AXUM CSV in F1.4.
+AXUM_CUSTOMER_CODE_REASON = (
+    "Confirmado por Enzo (2026-11-11) con el reporte real de AXUM «Compro no compro - Octubre.xlsx»: 401 de 402 "
+    "«Cliente Id» existen como código del maestro de clientes de STORE SYS con el mismo nombre, y 1484 de 1490 filas "
+    "«Si» tienen venta en STORE SYS del mismo cliente y día (ADR 018). Cada vínculo exige además que el nombre "
+    "coincida."
+)
+
+# Checked against the real AXUM report (F1.4, 2026-11-11): the six reasons it brings, with these categories.
 AXUM_REASONS = (
     ("TIENE STOCK", "STOCK"),
     ("CERRADO", "NO_DISPONIBLE"),
@@ -227,6 +234,20 @@ def seed_config(db: Session) -> SeedResult:
             entity_id=ARTICLES_PRICE_LIST_SETTING,
             before={"list_number": None},
             after={"list_number": ARTICLES_PRICE_LIST, "reason": ARTICLES_PRICE_LIST_REASON},
+        )
+        result.settings += 1
+    if db.get(AppSetting, AXUM_CUSTOMER_CODE_SETTING) is None:
+        # Only while nobody set it: an admin's later decision (turning it off) is never undone here.
+        db.add(AppSetting(key=AXUM_CUSTOMER_CODE_SETTING, value=True, description=AXUM_CUSTOMER_CODE_REASON))
+        record_change(
+            db,
+            "commercial.config.axum_customer_code_rule_set",
+            action="create",
+            user_id=None,
+            entity_type="app_setting",
+            entity_id=AXUM_CUSTOMER_CODE_SETTING,
+            before={"enabled": False},
+            after={"enabled": True, "reason": AXUM_CUSTOMER_CODE_REASON},
         )
         result.settings += 1
     if result.total():
