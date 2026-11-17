@@ -17,6 +17,21 @@ each service starts once the previous one answers.
 
 WinSW restarts the backend, frontend and Caddy after a crash (``onfailure``: three times, then it stops trying;
 the count resets after an hour). Stops are always in reverse order and graceful: WinSW sends Ctrl+C and waits.
+
+Coordination (C9-A, ``docs/WINDOWS_W2C_PLAN.md``): starting, stopping and the supervisor's decision take the
+exclusive operations lock (``districom_ops.oplock``), and the application never starts while
+``safety.start_blockers`` reports a reason (maintenance window, invalid record, incomplete or uncertain operation).
+The start protocol never lets two processes wait for each other on the lock:
+
+1. ``services start`` takes the lock, checks (early check), writes ``start-request.json`` with a new nonce and
+   asks the Service Control Manager to start the stack (which does not wait for the supervisor), then **releases
+   the lock** and only then waits for the supervisor, without the lock.
+2. The supervisor takes the lock (bounded wait), checks again (the check that counts) and keeps the lock until
+   it has recorded its phase for that nonce: ``running``, ``failed`` or ``blocked`` (PostgreSQL only, no app).
+3. ``services start`` accepts only the supervisor's record with its nonce (or, if the stack was already running,
+   the record of the live service): ``running`` passes, ``blocked``, ``failed`` or the timeout fail.
+
+So no maintenance can begin between the check that counts and the start, and an old record never passes.
 """
 
 import hashlib
@@ -42,6 +57,10 @@ from districom_backup.repo import write_atomic
 
 from districom_ops import artifacts, backup_disk, database, firewall, integrity, ntfs, permissions, winservice
 from districom_ops.install import Install
+from districom_ops.maintenance import MaintenanceWindow, WindowState
+from districom_ops.oplock import LockBusy, OperationLock
+from districom_ops.oplog import OperationsLog
+from districom_ops.safety import start_blockers
 from districom_ops.winservice import ServiceError, State, account, service_sid
 
 PG = database.PG_SERVICE
@@ -59,6 +78,8 @@ START_SECONDS = 180
 STOP_SECONDS = 180
 PG_RESTARTS = 3
 PG_RESTART_WINDOW_SECONDS = 3600
+LOCK_SECONDS = 10  # a command that does not get the operations lock fails after this
+SUPERVISOR_LOCK_SECONDS = 60  # the supervisor's bounded wait for it, then ``blocked``
 log = logging.getLogger("districom_ops")
 
 
@@ -599,6 +620,46 @@ def _read_json(path: Path) -> dict[str, object] | None:
     return data if isinstance(data, dict) else None
 
 
+def operations_lock(install: Install, operation: str) -> OperationLock:
+    return OperationLock(install.layout.state, operation)
+
+
+def _window(install: Install) -> MaintenanceWindow:
+    return MaintenanceWindow(install.layout.state, OperationsLog(install.layout.state / "operations.jsonl"))
+
+
+def blockers(install: Install) -> tuple[str, ...]:
+    """Why the application must not start now (``safety.start_blockers``); empty when it may."""
+    return start_blockers(_window(install), install.ops.maintenance_max_minutes)
+
+
+def _locked(install: Install, operation: str) -> OperationLock:
+    try:
+        return operations_lock(install, operation).acquire(timeout=LOCK_SECONDS)
+    except LockBusy as exc:
+        raise ServicesError(str(exc)) from exc
+
+
+def _refuse_if_blocked(operation: str, reasons: tuple[str, ...]) -> None:
+    if reasons:
+        log.error("start_refused", extra={"operation": operation, "reasons": list(reasons)})
+        raise ServicesError(f"{operation} refused: " + "; ".join(reasons))
+
+
+def start_direct(install: Install, until: str = CADDY) -> None:
+    """``services start --direct`` (administrator): the chain without the stack, under the lock and the check."""
+    with _locked(install, "services_start_direct"):
+        _refuse_if_blocked("services start --direct", blockers(install))
+        start_chain(install, until)
+
+
+def stop_services(install: Install) -> None:
+    """``services stop``: under the lock. Stopping is always allowed, even with an unsafe state: it only moves
+    towards safety, and refusing it would leave an operator unable to stop a blocked installation."""
+    with _locked(install, "services_stop"):
+        stop_all(install)
+
+
 def supervisor_state(install: Install) -> dict[str, object] | None:
     return _read_json(install.layout.state / SUPERVISOR_STATE)
 
@@ -614,6 +675,15 @@ def _record_phase(install: Install, run: dict[str, object], phase: str, reason: 
     _write_json(install.layout.state / SUPERVISOR_STATE, {**run, "phase": phase, "reason": reason})
 
 
+def _pending_request(install: Install) -> str | None:
+    """The nonce of a start that was requested and that the supervisor has not answered yet, if any."""
+    request = (_read_json(install.layout.state / START_REQUEST) or {}).get("nonce")
+    record = supervisor_state(install) or {}
+    if request and (record.get("request") != request or record.get("phase") == "starting"):
+        return str(request)
+    return None
+
+
 def start_stack(install: Install, poll_seconds: float = 1, timeout: float | None = None) -> None:
     """The normal start: the stack service, which checks the disk and starts the chain.
 
@@ -622,16 +692,34 @@ def start_stack(install: Install, poll_seconds: float = 1, timeout: float | None
     waits: it polls until then, and fails when the stack stops, reports a failed start, or the timeout passes.
     If the stack is already running there is no new start: the record must be the one of the live service
     (its WinSW process id), never one left by an earlier run."""
-    current = winservice.status(STACK)
-    if current.state is State.RUNNING:
-        live = current.pid
+    with _locked(install, "services_start"):
+        _refuse_if_blocked("services start", blockers(install))  # the early check; the supervisor's counts
+        current = winservice.status(STACK)
+        if current.state is State.RUNNING:
+            pending = _pending_request(install)
+            if pending:
+                # Another ``services start`` started the stack and its supervisor has not answered yet: two
+                # starters must never both wait on one start.
+                raise ServicesError(f"services start refused: another start is in progress (request {pending})")
+            live = current.pid
+            nonce = None
+        elif current.state is not State.STOPPED:
+            raise ServicesError(f"services start refused: {STACK} is {current.state.name}")
+        else:
+            nonce = uuid.uuid4().hex
+            _write_json(install.layout.state / START_REQUEST, {"nonce": nonce})
+            log.info("services_start_requested", extra={"request": nonce})
+            # Asked of the Service Control Manager with the lock held, so no other start can overwrite the request
+            # in between. StartService does not wait for the supervisor (WinSW reports running once it launched
+            # it), so this is not a wait for another process on the lock.
+            winservice.start(STACK)
+    # Released here, before waiting: the supervisor needs the lock, and nobody waits for it while holding it.
+    if nonce is None:
+        log.info("services_start_already_running", extra={"service_pid": live})
 
         def ours(record: dict[str, object]) -> bool:
             return record.get("service_pid") == live
     else:
-        nonce = uuid.uuid4().hex
-        _write_json(install.layout.state / START_REQUEST, {"nonce": nonce})
-        winservice.start(STACK)
 
         def ours(record: dict[str, object]) -> bool:
             return record.get("request") == nonce
@@ -643,7 +731,11 @@ def start_stack(install: Install, poll_seconds: float = 1, timeout: float | None
         if record and ours(record):
             if record.get("phase") == "failed":
                 raise ServicesError(f"{STACK} could not start the services ({record.get('reason')}): see logs\\ops.log")
+            if record.get("phase") == "blocked":
+                log.error("services_start_blocked", extra={"request": nonce, "reason": record.get("reason")})
+                raise ServicesError(f"{STACK} is blocked, the application was not started: {record.get('reason')}")
             if record.get("phase") == "running" and ready(install, CADDY):
+                log.info("services_start_done", extra={"request": nonce})
                 return
         if winservice.status(STACK).state is State.STOPPED:
             raise ServicesError(f"{STACK} stopped while starting: see logs\\ops.log")
@@ -664,19 +756,115 @@ def status_report(install: Install) -> dict[str, object]:
             "depends": list(cfg.dependencies) if cfg else [],
         }
     disk = check_disk(install)
-    return {"services": services, "backup_disk": {"ok": disk.ok, "code": disk.code}}
+    record = supervisor_state(install) or {}
+    supervisor = {"phase": record.get("phase"), "reason": record.get("reason"), "request": record.get("request")}
+    return {"services": services, "backup_disk": {"ok": disk.ok, "code": disk.code}, "supervisor": supervisor}
 
 
 # --- supervisor (the DistriComStack service) -------------------------------------------------------------------
 
 
+def _decide_and_start(
+    install: Install, run: dict[str, object], stop: threading.Event, poll_seconds: float
+) -> int | None:
+    """Holding the lock: the check that counts, the disk, then the chain or PostgreSQL alone. ``None`` = watch."""
+    deadline = time.monotonic() + install.services.backup_disk_wait_seconds
+    disk = check_disk(install)
+    while not disk.ok:
+        if time.monotonic() >= deadline or stop.is_set():
+            log.error("postgresql_start_refused", extra={"reason": disk.code, "detail": disk.detail})
+            _record_phase(install, run, "failed", f"backup disk {disk.code}")
+            return 3
+        log.warning("backup_disk_waiting", extra={"reason": disk.code})
+        stop.wait(poll_seconds)
+        disk = check_disk(install)
+    reasons = blockers(install)  # the check that counts: with the lock held, nothing can begin until the phase
+    try:
+        start_chain(install, until=PG if reasons else CADDY)
+    except (ServicesError, ServiceError) as exc:
+        log.error("services_start_failed", extra={"reason": str(exc)})
+        stop_chain(install)
+        _record_phase(install, run, "failed", "a service did not start")
+        return 4
+    if reasons:
+        log.error("supervisor_blocked", extra={"reasons": list(reasons)})
+        _record_phase(install, run, "blocked", "; ".join(reasons))
+        return None
+    log.info("services_running")
+    _record_phase(install, run, "running")  # after every service_ready, Caddy's included
+    return None
+
+
+def _pg_restart_allowed(install: Install) -> tuple[OperationLock | None, str]:
+    """The lock for a PostgreSQL restart, or why not: held by an operation, or a maintenance window open."""
+    lock = operations_lock(install, "supervisor_postgresql_restart")
+    try:
+        lock.acquire(timeout=0)
+    except LockBusy as exc:
+        return None, str(exc)
+    state = _window(install).status(install.ops.maintenance_max_minutes).state
+    if state is not WindowState.CLOSED:
+        lock.release()
+        return None, f"maintenance window {state.value.lower()}"
+    return lock, ""
+
+
+def _watch(install: Install, stop: threading.Event, poll_seconds: float) -> None:
+    restarts: list[float] = []
+    disk_ok = True
+    held_back = ""
+    next_disk_check = time.monotonic() + 60
+    while not stop.wait(poll_seconds):
+        if time.monotonic() >= next_disk_check:
+            next_disk_check = time.monotonic() + 60
+            disk = check_disk(install)
+            if disk.ok != disk_ok:
+                (log.info if disk.ok else log.critical)(
+                    "backup_disk_back" if disk.ok else "backup_disk_lost", extra={"reason": disk.code}
+                )
+                disk_ok = disk.ok
+        if winservice.status(PG).state is not State.STOPPED:
+            held_back = ""
+            continue
+        now = time.monotonic()
+        restarts = [t for t in restarts if now - t < PG_RESTART_WINDOW_SECONDS]
+        if len(restarts) >= PG_RESTARTS:
+            log.critical("postgresql_not_restarted", extra={"reason": "restart limit reached"})
+            stop.wait(60)
+            continue
+        lock, why = _pg_restart_allowed(install)
+        if lock is None:
+            if why != held_back:  # once per cause, not every poll
+                log.warning("postgresql_not_restarted", extra={"reason": why})
+                held_back = why
+            continue
+        held_back = ""
+        try:
+            log.error("postgresql_stopped_unexpectedly", extra={"restarts_last_hour": len(restarts)})
+            restarts.append(now)
+            try:
+                _start(install, PG)
+                log.info("postgresql_restarted")
+            except (ServicesError, ServiceError) as exc:
+                log.critical("postgresql_not_restarted", extra={"reason": str(exc)})
+        finally:
+            lock.release()
+
+
 def supervise(install: Install, stop: threading.Event | None = None, poll_seconds: float = 5) -> int:
     """Run by ``DistriComStack``. Exit codes: 0 stopped on request, 3 backup disk unavailable, 4 start failed.
 
-    Waits up to ``BACKUP_DISK_WAIT_SECONDS`` for the disk (it may mount after the services start), then starts
-    the chain in order and watches PostgreSQL: after an unexpected stop it re-checks the disk and restarts it, at
-    most ``PG_RESTARTS`` times an hour. A disk lost while running is a critical log entry; PostgreSQL keeps running
-    (ADR 013) and the monitor (C8) alerts. On Ctrl+C (service stop) the chain stops in reverse order."""
+    Takes the operations lock (bounded wait) and, holding it, decides: with ``blockers`` it starts **only
+    PostgreSQL** (needed for a recovery) and records ``blocked`` with the reasons; without them it starts the
+    chain and records ``running``. It releases the lock once the phase is recorded. If it cannot get the lock it
+    starts nothing and records ``blocked``. Retrying, a reboot or an expired wait never lift ``blocked``: only an
+    explicit operation that resolves the state, then a new start.
+
+    Waits up to ``BACKUP_DISK_WAIT_SECONDS`` for the disk (it may mount after the services start), then watches
+    PostgreSQL: after an unexpected stop it re-checks the disk and restarts it, at most ``PG_RESTARTS`` times an
+    hour, and **never** while the lock is held by an operation or a maintenance window is open (a day close or an
+    update may have stopped it on purpose). A disk lost while running is a critical log entry; PostgreSQL keeps
+    running (ADR 013) and the monitor (C8) alerts. On Ctrl+C (service stop) the chain stops in reverse order."""
     stop = stop or threading.Event()
 
     def on_signal(signum: int, frame: object) -> None:
@@ -697,53 +885,20 @@ def supervise(install: Install, stop: threading.Event | None = None, poll_second
     }
     _record_phase(install, run, "starting")
     log.info("supervisor_started", extra={"release": install.release, "run": run["run"]})
-    deadline = time.monotonic() + install.services.backup_disk_wait_seconds
-    disk = check_disk(install)
-    while not disk.ok:
-        if time.monotonic() >= deadline or stop.is_set():
-            log.error("postgresql_start_refused", extra={"reason": disk.code, "detail": disk.detail})
-            _record_phase(install, run, "failed", f"backup disk {disk.code}")
-            return 3
-        log.warning("backup_disk_waiting", extra={"reason": disk.code})
-        stop.wait(poll_seconds)
-        disk = check_disk(install)
+    lock = operations_lock(install, "supervisor_start")
     try:
-        start_chain(install)
-    except (ServicesError, ServiceError) as exc:
-        log.error("services_start_failed", extra={"reason": str(exc)})
-        stop_chain(install)
-        _record_phase(install, run, "failed", "a service did not start")
-        return 4
-    log.info("services_running")
-    _record_phase(install, run, "running")  # after every service_ready, Caddy's included
-
-    restarts: list[float] = []
-    disk_ok = True
-    next_disk_check = time.monotonic() + 60
-    while not stop.wait(poll_seconds):
-        if time.monotonic() >= next_disk_check:
-            next_disk_check = time.monotonic() + 60
-            disk = check_disk(install)
-            if disk.ok != disk_ok:
-                (log.info if disk.ok else log.critical)(
-                    "backup_disk_back" if disk.ok else "backup_disk_lost", extra={"reason": disk.code}
-                )
-                disk_ok = disk.ok
-        if winservice.status(PG).state is not State.STOPPED:
-            continue
-        now = time.monotonic()
-        restarts = [t for t in restarts if now - t < PG_RESTART_WINDOW_SECONDS]
-        log.error("postgresql_stopped_unexpectedly", extra={"restarts_last_hour": len(restarts)})
-        if len(restarts) >= PG_RESTARTS:
-            log.critical("postgresql_not_restarted", extra={"reason": "restart limit reached"})
-            stop.wait(60)
-            continue
-        restarts.append(now)
+        lock.acquire(timeout=SUPERVISOR_LOCK_SECONDS)
+    except LockBusy as exc:
+        log.error("supervisor_blocked", extra={"reason": str(exc)})
+        _record_phase(install, run, "blocked", str(exc))
+    else:
         try:
-            _start(install, PG)
-            log.info("postgresql_restarted")
-        except (ServicesError, ServiceError) as exc:
-            log.critical("postgresql_not_restarted", extra={"reason": str(exc)})
+            code = _decide_and_start(install, run, stop, poll_seconds)
+        finally:
+            lock.release()
+        if code is not None:
+            return code
+    _watch(install, stop, poll_seconds)
     log.info("supervisor_stopping")
     _record_phase(install, run, "stopping")
     stop_chain(install)
