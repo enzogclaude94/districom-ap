@@ -4,6 +4,22 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Added — F1.5: revisión manual de mappings y re‑resolución (en revisión)
+- **Pantalla Comercial › Datos › Mapeos** (`/comercial/datos/mapeos`). Datos muestra solo Importaciones y Mapeos (sale el ítem «Calidad», que era un marcador de fase).
+  - **Cola:** tarjetas por estado, filtros (estado, sistema, tipo de código), búsqueda por código o nombre y primero los abiertos más antiguos, en palabras de negocio («Preventista AXUM», «Vendedor STORE SYS», «Cliente AXUM», «Cliente STORE SYS»).
+  - **Detalle:** origen, candidatos (nunca preseleccionados), última decisión y el impacto de cada decisión contado por el backend, por ejemplo «655 eventos de no compra históricos quedarán asociados a este preventista.».
+  - **Búsqueda de la entidad:** clientes por nombre, razón social o código STORE SYS, con zona; empleados activos, primero los preventistas. Nunca CUIT, teléfono ni dirección, y nunca crea entidades.
+- **Re‑resolución** (`docs/IMPORTS.md §6.4`):
+  - nuevo `ModuleSpec.mapping_resolvers` y registro de plataforma (`app/platform/mappings/resolvers.py`); la plataforma decide y el módulo declara qué columnas siguen al mapping y qué issues cierra;
+  - Comercial registra los cuatro tipos;
+  - toda decisión completa, mueve (reasignar) o desvincula (excluir) solo los hechos de ese mapping, por su id y nunca por nombre;
+  - cierra los issues cuya condición desapareció.
+- **Decisiones sin `commit`:** el endpoint hace el commit. `confirm`, `reassign`, `reject` y `exclude` devuelven `Decision(mapping, resolution)` y aceptan `expected_status`, que responde 409 `mapping_changed` si otra pestaña decidió antes. La re‑resolución corre dentro del bloqueo de fila.
+- **Lote:** `POST /api/v1/commercial/mappings/batch-confirm` (operator, hasta 200). Es todo o nada, con el `mapping_id` del primer fallo; la pantalla solo confirma candidatos propuestos después de revisarlos.
+- **API nueva** (aditiva): `GET /mappings/summary`, `q` y orden en `GET /mappings`, `GET /mappings/{id}/impact`, `GET /mappings/{id}/targets`. `MappingOut` suma tipo en palabras de negocio, primera y última importación, quién decidió, entidad, candidatos, hechos (vigentes e historial) y `resolution`.
+- **Migración 0039** `commercial: mapping links for re-resolution`: `documents.customer_mapping_id` (con backfill desde el mapping STORE SYS del mismo código, solo para los tipos cuyo `codcli` es cliente) e índices sobre las columnas `*_mapping_id`. El importador de comprobantes la completa desde ahora.
+- **Auditoría:** `platform.mapping.facts_resolved` por decisión y `platform.mapping.batch_confirmed` por lote. Solo llevan ids y conteos.
+
 ### Changed — Servidor: propuesta W2‑C revisión 2
 - Nuevo `docs/WINDOWS_W2C_PLAN.md`, copia versionada de la propuesta en su revisión 2, con las decisiones de Enzo del 2026-11-11:
   - C9 se parte en C9‑A (coordinación de operaciones: bloqueo exclusivo, carrera de `maintenance open`, supervisor con estado `blocked`) y C9‑B (bloqueo reversible de escrituras);
@@ -16,7 +32,7 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
   - **`closed_complete`:** es solo candidato a recuperación automática; la app arranca recién después de reanudar y verificar las conexiones.
 - `ROADMAP.md` y `docs/WINDOWS_DEPLOYMENT.md §8.5`: el nuevo orden. La siguiente es C9‑A, autorizada recién después de mergear esta revisión.
 
-### Added — F1.4: importador AXUM «Compró / No compró» (en revisión)
+### Added — F1.4: importador AXUM «Compró / No compró» (DONE, PR #85)
 - **Tipo `commercial.axum.no_purchase`** (`app/modules/commercial/imports/no_purchase.py`), en la pantalla Importaciones existente. Lee el export real de AXUM: XLSX con una hoja `Data`, encabezado con la columna A vacía, una fila `Vendedor: NN` por preventista y todas las celdas como texto (`docs/IMPORTS.md §3.6`).
   - Solo las filas con motivo crean un evento. Las filas `Si` quedan en el staging como `skipped`, con el mensaje «Compró: la fila queda trazable pero no genera un evento de no compra.». No se modelan ni se infieren visitas.
   - Fecha de negocio = día de `Fecha y Hora Subida`; las horas de subida, inicio y fin y la duración se guardan tal cual, sin combinarlas. Un inicio posterior a la subida es un aviso y no cambia el día.
