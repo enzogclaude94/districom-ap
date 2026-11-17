@@ -119,7 +119,12 @@ class Cluster:
         self.install = make_install(self.env)
         self.log = base / "server.log"
         started = time.monotonic()
-        assert database.init(self.install)
+        try:
+            assert database.init(self.install)
+        except database.DatabaseError as exc:
+            init_log = self.install.postgres_logs / "init.log"
+            detail = init_log.read_text("utf-8", "replace")[-4000:] if init_log.exists() else "(no init.log)"
+            raise AssertionError(f"{exc}\n{detail}") from exc
         self.init_seconds = round(time.monotonic() - started, 1)
         self.start()
 
