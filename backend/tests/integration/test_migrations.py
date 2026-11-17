@@ -675,7 +675,8 @@ def _document_columns(url: str) -> set[str]:
 
 def test_mapping_links_migration_backfills_documents_and_goes_down_and_up() -> None:
     """F1.5: 0039 links each document to the STORE SYS customer mapping of its keyed code, only when the type's
-    codcli is a customer code; down drops only the link and the indexes."""
+    codcli is a customer code; sale lines stored without a mapping are adopted by the mapping of their exact keyed
+    code (D2); facts of a confirmed mapping get its customer; down drops only the link and the indexes."""
     cfg = alembic_config()
     url = cfg.get_main_option("sqlalchemy.url")
     assert url
@@ -729,6 +730,33 @@ def test_mapping_links_migration_backfills_documents_and_goes_down_and_up() -> N
                     ),
                     {"number": number, "type_name": type_name, "code": code},
                 )
+            conn.execute(text("INSERT INTO customers (display_name, display_name_key) VALUES ('X', 'X')"))
+            conn.execute(
+                text(
+                    "INSERT INTO external_entity_mappings (entity_type, source_system_id, namespace, external_id, "
+                    "status, method, entity_id, candidates) SELECT 'customer', s.id, 'customer', '13', 'confirmed', "
+                    "'created_from_master', c.id, '[]'::jsonb FROM source_systems s, customers c "
+                    "WHERE s.code = 'STORE_SYS'"
+                )
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO commercial.documents (document_type_id, source_type_name, point_of_sale, number, "
+                    "document_key, business_date, net_amount, total_amount, discount_amount, import_job_id, "
+                    "source_row_hash, source_customer_code) SELECT t.id, t.source_name, '0003', '4', "
+                    "'FACTURA A|0003|4', '2026-10-23', 100, 121, 0, j.id, '\\x00', '13' "
+                    "FROM commercial.document_types t, import_jobs j WHERE t.source_name = 'FACTURA A'"
+                )
+            )
+            for occurrence, code in ((1, " 12 "), (2, "13"), (3, "99")):
+                conn.execute(
+                    text(
+                        "INSERT INTO commercial.sale_lines (business_date, source_customer_code, source_product_code, "
+                        "quantity, import_job_id, occurrence) SELECT '2026-10-23', :code, 'P', 1, id, :occurrence "
+                        "FROM import_jobs"
+                    ),
+                    {"code": code, "occurrence": occurrence},
+                )
         command.upgrade(cfg, "0039")
         with engine.connect() as conn:
             linked = dict(
@@ -739,7 +767,25 @@ def test_mapping_links_migration_backfills_documents_and_goes_down_and_up() -> N
                     )
                 ).all()
             )
-        assert linked == {"1": "12", "2": None, "3": None}
+        assert linked == {"1": "12", "2": None, "3": None, "4": "13"}
+        with engine.connect() as conn:
+            facts = conn.execute(
+                text(
+                    "SELECT 'line ' || l.source_customer_code, m.external_id, l.customer_id IS NOT NULL "
+                    "FROM commercial.sale_lines l LEFT JOIN external_entity_mappings m ON m.id = l.customer_mapping_id "
+                    "UNION ALL SELECT 'document ' || d.number, NULL, d.customer_id IS NOT NULL "
+                    "FROM commercial.documents d ORDER BY 1"
+                )
+            ).all()
+        assert [tuple(row) for row in facts] == [
+            ("document 1", None, False),  # pending mapping: no customer
+            ("document 2", None, False),
+            ("document 3", None, False),
+            ("document 4", None, True),  # confirmed mapping: its customer
+            ("line  12 ", "12", False),
+            ("line 13", "13", True),
+            ("line 99", None, False),
+        ]
         command.downgrade(cfg, "0038")
         assert "customer_mapping_id" not in _document_columns(url)
         command.upgrade(cfg, "head")
@@ -749,6 +795,7 @@ def test_mapping_links_migration_backfills_documents_and_goes_down_and_up() -> N
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE commercial.documents DISABLE TRIGGER trg_documents_no_delete"))
             conn.execute(text("DELETE FROM commercial.documents"))
+            conn.execute(text("TRUNCATE commercial.sale_lines"))
             conn.execute(text("ALTER TABLE commercial.documents ENABLE TRIGGER trg_documents_no_delete"))
             conn.execute(text("ALTER TABLE commercial.document_types DISABLE TRIGGER trg_document_types_no_delete"))
             conn.execute(text("DELETE FROM commercial.document_types"))
@@ -761,4 +808,5 @@ def test_mapping_links_migration_backfills_documents_and_goes_down_and_up() -> N
                 text("ALTER TABLE external_entity_mappings ENABLE TRIGGER trg_external_entity_mappings_no_delete")
             )
             conn.execute(text("TRUNCATE import_jobs, import_files, users CASCADE"))
+            conn.execute(text("TRUNCATE customers CASCADE"))
         engine.dispose()

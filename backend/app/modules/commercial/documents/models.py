@@ -9,7 +9,18 @@ the same key with other content is an issue for a person, never an overwrite.
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, CheckConstraint, Date, DateTime, ForeignKey, Index, LargeBinary, Numeric, String
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    LargeBinary,
+    Numeric,
+    String,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, IdMixin, TimestampMixin
@@ -22,6 +33,12 @@ class Document(IdMixin, TimestampMixin, Base):
         CheckConstraint("length(btrim(document_key)) > 0", name="key_not_blank"),
         Index("ix_documents_customer_id_business_date", "customer_id", "business_date"),
         Index("ix_documents_document_type_id_business_date", "document_type_id", "business_date"),
+        # Documents stored before their code had a mapping, by the keyed code their mapping will adopt them by (D2).
+        Index(
+            "ix_documents_orphan_customer_code",
+            text(r"regexp_replace(btrim(source_customer_code), '\s+', ' ', 'g')"),
+            postgresql_where=text("customer_mapping_id IS NULL"),
+        ),
         {"schema": SCHEMA},
     )
 

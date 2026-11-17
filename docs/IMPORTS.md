@@ -447,11 +447,11 @@ El detalle muestra el origen (sistema, código, etiqueta, primera y última impo
 - qué columnas tomaron su identidad del mapping (`FactLink`: columna de entidad + columna `*_mapping_id`);
 - qué issues puede cerrar la decisión.
 
-La plataforma lo aplica sin importar el módulo (mismo patrón que los tipos de import y los códigos de calidad). La regla es una sola: toda fila cuyo `*_mapping_id` es el mapping decidido termina con la entidad del mapping si está `confirmed`, o NULL si no. Solo se escriben las filas que difieren, así que es idempotente. **Nunca se actualiza por nombre ni por código**: el vínculo es el id guardado al importar.
+La plataforma lo aplica sin importar el módulo (mismo patrón que los tipos de import y los códigos de calidad). La regla es una sola: toda fila cuyo `*_mapping_id` es el mapping decidido termina con la entidad del mapping si está `confirmed`, o NULL si no. Solo se escriben las filas que difieren, así que es idempotente. **Nunca se actualiza por nombre**: el vínculo es el id guardado al importar, salvo la adopción por identidad exacta (abajo).
 
 | Tipo | Hechos | Cierra |
 |---|---|---|
-| Cliente STORE SYS | `sale_lines.customer_id`, `documents.customer_id` | `commercial.customer.unresolved_code` del código, solo si no quedan ventas ni comprobantes de ese código importados sin mapping |
+| Cliente STORE SYS | `sale_lines.customer_id`, `documents.customer_id` (más la adopción exacta de los importados sin mapping, abajo) | `commercial.customer.unresolved_code` del código, solo si no quedan ventas ni comprobantes de ese código sin mapping |
 | Cliente AXUM | `no_purchase_events.customer_id` | `commercial.axum_customer.unresolved` / `.name_mismatch` |
 | Vendedor STORE SYS | `customer_salesperson_assignments.salesperson_id` (la misma fila: no se abre un período nuevo ni se toca la historia), `sale_lines.salesperson_id` | `commercial.seller.unmapped` |
 | Preventista AXUM | `no_purchase_events.salesperson_id` | `commercial.axum_salesperson.unmapped` |
@@ -477,14 +477,20 @@ La plataforma lo aplica sin importar el módulo (mismo patrón que los tipos de 
 
 **Auditoría:**
 - `platform.mapping.*` como antes;
-- `platform.mapping.facts_resolved` por decisión: mapping, acción, tipo, namespace, sistema, entidad, filas por tipo de hecho e issues cerrados;
+- `platform.mapping.facts_resolved` por decisión: mapping, acción, tipo, namespace, sistema, entidad, filas adoptadas y re‑resueltas por tipo de hecho e issues cerrados;
+- `platform.mapping.orphans_adopted` cuando un import crea un mapping que adopta hechos (ver arriba);
 - `platform.mapping.batch_confirmed` como resumen del lote.
 
 Ningún evento lleva códigos, etiquetas, nombres, CUIT, teléfono ni dirección.
 
 **Privacidad:** el viewer ve la cola y los estados con el nombre de la entidad vinculada. La búsqueda de entidades (`…/targets`) es solo para quien decide y nunca devuelve CUIT, teléfono ni dirección: de un cliente, el nombre, la razón social, el código STORE SYS y la zona; de un empleado, solo activos (primero los preventistas) con sus funciones.
 
-**Fuera de alcance:** los hechos importados **sin** mapping (un código que el maestro todavía no traía) no se re‑resuelven cuando el maestro crea el mapping después. Siguen con su issue abierto. No hay similitud de texto.
+**Adopción por identidad externa exacta** (D2, Enzo 2026‑11‑17). Una venta o un comprobante puede llegar antes que el maestro que crea su cliente: se guarda sin `customer_mapping_id` y con el issue del código abierto. Un `FactLink` puede declarar una `OrphanAdoption` (columna del código fuente, la normalización del namespace en SQL y, si hace falta, qué filas llevan ese tipo de código). Cuando el mapping **aparece** (`observe` lo crea en un import, `created_from_master` incluido, o `pending`) o **se decide** (confirmar, reasignar, excluir, rechazar, lote), en la misma transacción:
+1. los hechos de ese contrato con `*_mapping_id` NULL, entidad NULL y `code_key(código fuente) == external_id` toman el id del mapping;
+2. después corre la re‑resolución normal: con el mapping `confirmed` reciben su entidad; `pending` o `ambiguous` quedan con la entidad NULL;
+3. el issue `commercial.customer.unresolved_code` se cierra solo si el mapping está decidido y ya no queda ningún hecho de ese código sin mapping.
+
+Alcance: solo `customer/STORE_SYS/customer`, en `sale_lines` y en `documents` (en comprobantes, solo los tipos cuyo `codcli` es un cliente; nunca vales ni movimientos internos). Los otros tipos no lo necesitan: sus imports crean el mapping en el mismo momento que el hecho. **Nunca** por nombre, etiqueta, dirección o CUIT, nunca similitud ni coincidencias parciales, nunca entre AXUM y STORE SYS ni entre namespaces: un cliente AXUM `998` no adopta una venta STORE SYS `998`. Las filas `SUPERSEDED` se adoptan igual que las vigentes. Dos índices parciales (`ix_sale_lines_orphan_customer_code`, `ix_documents_orphan_customer_code`, por el código normalizado de las filas sin mapping) evitan recorrer las tablas en cada alta del maestro. La migración 0039 aplica la misma regla a los datos existentes. Auditoría: `platform.mapping.orphans_adopted` cuando un import crea un mapping que adopta hechos o cierra issues (mapping, job, estado, tipo, namespace, sistema, entidad, filas adoptadas y re‑resueltas por tipo de hecho, issues cerrados), y `facts_adopted` dentro de `facts_resolved` en las decisiones. Sin códigos ni nombres.
 
 ## 7. Errores, calidad de datos y reproceso
 

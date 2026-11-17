@@ -18,7 +18,12 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 - **Lote:** `POST /api/v1/commercial/mappings/batch-confirm` (operator, hasta 200). Es todo o nada, con el `mapping_id` del primer fallo; la pantalla solo confirma candidatos propuestos después de revisarlos.
 - **API nueva** (aditiva): `GET /mappings/summary`, `q` y orden en `GET /mappings`, `GET /mappings/{id}/impact`, `GET /mappings/{id}/targets`. `MappingOut` suma tipo en palabras de negocio, primera y última importación, quién decidió, entidad, candidatos, hechos (vigentes e historial) y `resolution`.
 - **Migración 0039** `commercial: mapping links for re-resolution`: `documents.customer_mapping_id` (con backfill desde el mapping STORE SYS del mismo código, solo para los tipos cuyo `codcli` es cliente) e índices sobre las columnas `*_mapping_id`. El importador de comprobantes la completa desde ahora.
-- **Auditoría:** `platform.mapping.facts_resolved` por decisión y `platform.mapping.batch_confirmed` por lote. Solo llevan ids y conteos.
+- **Adopción por identidad externa exacta** (D2, Enzo 2026‑11‑17): una venta o un comprobante importado antes que el maestro que crea su cliente ya no queda pendiente para siempre.
+  - Nuevo `OrphanAdoption` opcional en `FactLink`: columna del código fuente, normalización del namespace y filtro de filas elegibles. Comercial lo declara para `customer/STORE_SYS/customer` en `sale_lines` y `documents` (solo tipos cuyo `codcli` es cliente).
+  - Corre cuando `observe` crea el mapping (el maestro con `created_from_master`, sin reimportar la venta) y en cada decisión, en la misma transacción: primero el `*_mapping_id`, después la re‑resolución normal (la entidad solo si está `confirmed`), y el issue `commercial.customer.unresolved_code` se cierra solo si no quedan hechos de ese código sin mapping.
+  - Solo el mismo tipo, sistema, namespace y código exacto normalizado; nunca por nombre, etiqueta, CUIT, similitud, otro sistema u otro namespace. El historial `SUPERSEDED` se adopta igual.
+  - La migración 0039 suma dos índices parciales por el código de las filas sin mapping y aplica la regla a los datos existentes.
+- **Auditoría:** `platform.mapping.facts_resolved` por decisión (con `facts_adopted`), `platform.mapping.orphans_adopted` cuando un import crea un mapping que adopta hechos y `platform.mapping.batch_confirmed` por lote. Solo llevan ids y conteos.
 
 ### Changed — Servidor: propuesta W2‑C revisión 2
 - Nuevo `docs/WINDOWS_W2C_PLAN.md`, copia versionada de la propuesta en su revisión 2, con las decisiones de Enzo del 2026-11-11:

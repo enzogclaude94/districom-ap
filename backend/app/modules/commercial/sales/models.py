@@ -27,6 +27,12 @@ class SaleLine(IdMixin, TimestampMixin, Base):
         Index("ix_sale_lines_active_business_date", "business_date", postgresql_where=text("status = 'ACTIVE'")),
         Index("ix_sale_lines_customer_id_business_date", "customer_id", "business_date"),
         Index("ix_sale_lines_product_id_business_date", "product_id", "business_date"),
+        # Lines stored before their code had a mapping, by the keyed code their mapping will adopt them by (D2).
+        Index(
+            "ix_sale_lines_orphan_customer_code",
+            text(r"regexp_replace(btrim(source_customer_code), '\s+', ' ', 'g')"),
+            postgresql_where=text("customer_mapping_id IS NULL"),
+        ),
         {"schema": SCHEMA},
     )
 

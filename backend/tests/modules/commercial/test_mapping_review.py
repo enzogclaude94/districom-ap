@@ -166,24 +166,168 @@ def test_store_sys_customer_completes_its_sales_and_documents_only(db: Session, 
     assert open_issues(db, "commercial.customer.unresolved_code") == set()
 
 
-def test_the_code_issue_stays_open_while_facts_without_a_mapping_remain(
-    db: Session, operator: User, admin: User
-) -> None:
-    run(db, operator, sales_file([sale(100, 998, "SIN MAPPING")]), SALES, scope="FULL")  # no mapping existed then
+# --- D2: adopción por identidad externa exacta ----------------------------------------------------------------------
+
+NEW = 998
+D21 = date(2026, 10, 21)
+
+
+def master_with_new_customer(db: Session, user: User, name: str = "CLIENTE NUEVO") -> None:
+    """The next master snapshot: the three customers of the fixture plus 998, created from the master."""
+    run(
+        db,
+        user,
+        customers_file(
+            [
+                customer(1, "ALMACEN UNO", seller=SECRET_SELLER),
+                customer(2, "KIOSCO DOS", seller=SECRET_SELLER),
+                customer(3, "DESPENSA TRES", seller="BOCA DE EXPENDIO"),
+                customer(NEW, name, seller=SECRET_SELLER),
+            ]
+        ),
+        CUSTOMERS,
+        snapshot_date=D21,
+    )
+
+
+def lines_of(db: Session, code: int) -> list[tuple[int | None, int | None]]:
+    db.expire_all()
+    rows = db.scalars(select(SaleLine).where(SaleLine.source_customer_code == str(code)).order_by(SaleLine.id))
+    return [(line.customer_mapping_id, line.customer_id) for line in rows]
+
+
+def documents_of(db: Session, code: int) -> dict[str, tuple[int | None, int | None]]:
+    db.expire_all()
+    rows = db.scalars(select(Document).where(Document.source_customer_code == str(code)))
+    return {d.source_type_name: (d.customer_mapping_id, d.customer_id) for d in rows}
+
+
+def test_a_sale_before_its_master_is_adopted_when_the_master_creates_the_customer(db: Session, operator: User) -> None:
+    # A different name on the sale neither prevents nor causes the match: only the exact code does.
+    run(db, operator, sales_file([sale(100, NEW, "OTRO NOMBRE"), sale(101, NEW, "OTRO NOMBRE")]), SALES, scope="FULL")
+    assert lines_of(db, NEW) == [(None, None), (None, None)]
+    assert open_issues(db, "commercial.customer.unresolved_code") == {f"customer_code:{NEW}"}
+
+    master_with_new_customer(db, operator)  # the sale is not imported again
+
+    created = mapping_of(db, "customer", "STORE_SYS", "customer", str(NEW))
+    assert (created.status, created.method) == ("confirmed", "created_from_master")
+    assert lines_of(db, NEW) == [(created.id, created.entity_id), (created.id, created.entity_id)]
+    assert open_issues(db, "commercial.customer.unresolved_code") == set()
+    [adopted] = [e for e in mapping_audit(db) if e.event_type == "platform.mapping.orphans_adopted"]
+    assert adopted.payload is not None
+    assert adopted.payload["mapping_id"] == created.id
+    assert adopted.payload["facts_adopted"] == {"commercial.sale_lines": 2, "commercial.documents": 0}
+    assert adopted.payload["issues_closed"] == 1
+    values = " ".join(_strings(adopted.payload))
+    for secret in (str(NEW), "OTRO NOMBRE", "CLIENTE NUEVO"):
+        assert secret not in values.split(), secret
+
+
+def test_a_document_before_its_master_is_adopted_only_for_customer_code_types(db: Session, operator: User) -> None:
+    run(
+        db,
+        operator,
+        documents_file(
+            [
+                document("FACTURA A 0003-00000001", code=NEW, name="OTRO NOMBRE"),
+                document("VALE PERSONAL V 0003-00000002", code=NEW, name="OTRO NOMBRE"),  # codcli is not a customer
+            ]
+        ),
+        DOCUMENTS,
+    )
+    assert documents_of(db, NEW) == {"FACTURA A": (None, None), "VALE PERSONAL V": (None, None)}
+    assert open_issues(db, "commercial.customer.unresolved_code") == {f"customer_code:{NEW}"}
+
+    master_with_new_customer(db, operator)
+
+    created = mapping_of(db, "customer", "STORE_SYS", "customer", str(NEW))
+    assert documents_of(db, NEW) == {"FACTURA A": (created.id, created.entity_id), "VALE PERSONAL V": (None, None)}
+    assert open_issues(db, "commercial.customer.unresolved_code") == set()
+
+
+def test_a_different_code_is_not_adopted_even_with_the_same_name(db: Session, operator: User) -> None:
+    run(db, operator, sales_file([sale(100, NEW, "OTRO NOMBRE"), sale(100, 997, "CLIENTE NUEVO")]), SALES, scope="FULL")
+
+    master_with_new_customer(db, operator, name="CLIENTE NUEVO")
+
+    created = mapping_of(db, "customer", "STORE_SYS", "customer", str(NEW))
+    assert lines_of(db, NEW) == [(created.id, created.entity_id)]
+    assert lines_of(db, 997) == [(None, None)]  # same name as the new customer, another code: untouched
+    assert open_issues(db, "commercial.customer.unresolved_code") == {"customer_code:997"}
+
+
+def test_another_source_or_namespace_with_the_same_number_adopts_nothing(db: Session, operator: User) -> None:
+    run(db, operator, sales_file([sale(100, NEW, "OTRO NOMBRE")]), SALES, scope="FULL")
+    run(db, operator, documents_file([document("FACTURA A 0003-00000001", code=NEW, name="OTRO NOMBRE")]), DOCUMENTS)
+
+    # An AXUM customer 998 confirmed to a customer, and the same number in another STORE SYS namespace.
+    mappings.observe(
+        db,
+        mappings.MappingKey("customer", "AXUM", "customer", str(NEW)),
+        label="OTRO NOMBRE",
+        job_id=None,
+        entity_id=customer_id(db, 1),
+        method="exact_external_id",
+    )
+    mappings.observe(
+        db, mappings.MappingKey("customer", "STORE_SYS", "customer_name", str(NEW)), label=None, job_id=None
+    )
+    mappings.observe(db, mappings.MappingKey("employee", "STORE_SYS", "seller", str(NEW)), label=None, job_id=None)
+    db.commit()
+
+    assert lines_of(db, NEW) == [(None, None)]
+    assert documents_of(db, NEW) == {"FACTURA A": (None, None)}
+    assert open_issues(db, "commercial.customer.unresolved_code") == {f"customer_code:{NEW}"}
+
+
+def test_a_pending_mapping_adopts_the_mapping_id_but_no_customer(db: Session, operator: User) -> None:
+    run(db, operator, sales_file([sale(100, NEW, "OTRO NOMBRE")]), SALES, scope="FULL")
     pending = mappings.observe(
-        db, mappings.MappingKey("customer", "STORE_SYS", "customer", "998"), label="SIN MAPPING", job_id=None
+        db, mappings.MappingKey("customer", "STORE_SYS", "customer", str(NEW)), label="OTRO NOMBRE", job_id=None
     )
     db.commit()
-    run(db, operator, sales_file([sale(100, 998, "SIN MAPPING", day=date(2026, 10, 24))]), SALES, scope="FULL")
+    assert lines_of(db, NEW) == [(pending.id, None)]
+    assert open_issues(db, "commercial.customer.unresolved_code") == {f"customer_code:{NEW}"}  # still undecided
 
-    decision = mappings.confirm(db, operator, pending.id, customer_id(db, 2), reason=None, is_admin=False)
+    # A line left without the id (stored before this rule existed) is adopted when the mapping is decided.
+    run(db, operator, sales_file([sale(100, NEW, "OTRO NOMBRE", day=date(2026, 10, 24))]), SALES, scope="FULL")
+    db.execute(text("UPDATE commercial.sale_lines SET customer_mapping_id = NULL WHERE business_date = '2026-10-24'"))
     db.commit()
 
-    assert decision.resolution.updated["commercial.sale_lines"] == 1
-    orphan = db.scalars(select(SaleLine).where(SaleLine.customer_mapping_id.is_(None))).one()
-    assert orphan.customer_id is None  # never completed by its code
-    assert decision.resolution.issues_closed == 0
-    assert open_issues(db, "commercial.customer.unresolved_code") == {"customer_code:998"}
+    target = customer_id(db, 2)
+    decision = mappings.confirm(db, operator, pending.id, target, reason=None, is_admin=False)
+    db.commit()
+
+    assert decision.resolution.adopted == {"commercial.sale_lines": 1, "commercial.documents": 0}
+    assert decision.resolution.updated == {"commercial.sale_lines": 2, "commercial.documents": 0}
+    assert lines_of(db, NEW) == [(pending.id, target), (pending.id, target)]
+    assert decision.resolution.issues_closed == 1
+    assert open_issues(db, "commercial.customer.unresolved_code") == set()
+
+
+def test_a_superseded_orphan_is_adopted_like_a_current_one(db: Session, operator: User) -> None:
+    run(db, operator, sales_file([sale(100, NEW, "OTRO NOMBRE"), sale(101, NEW, "OTRO NOMBRE")]), SALES, scope="FULL")
+    old = db.scalars(select(SaleLine).order_by(SaleLine.id)).first()
+    assert old is not None
+    db.execute(
+        text(
+            "UPDATE commercial.sale_lines SET status = 'SUPERSEDED', superseded_by_job_id = import_job_id "
+            "WHERE id = :id"
+        ),
+        {"id": old.id},
+    )
+    db.commit()
+
+    master_with_new_customer(db, operator)
+
+    created = mapping_of(db, "customer", "STORE_SYS", "customer", str(NEW))
+    db.expire_all()
+    assert (db.get_one(SaleLine, old.id).customer_mapping_id, db.get_one(SaleLine, old.id).customer_id) == (
+        created.id,
+        created.entity_id,
+    )
+    assert lines_of(db, NEW) == [(created.id, created.entity_id), (created.id, created.entity_id)]
 
 
 # --- Cliente AXUM ---------------------------------------------------------------------------------------------------

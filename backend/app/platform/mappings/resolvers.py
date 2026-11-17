@@ -6,8 +6,15 @@ close. The platform never imports a module: it only receives SQLAlchemy columns 
 
 The rule is the same for every fact: a row whose `mapping_column` is the decided mapping ends with its
 `entity_column` equal to the mapping's entity when it is `confirmed`, NULL otherwise. Only rows that differ are
-written, so a decision is idempotent and a row resolved by another mapping is never touched. Nothing is matched by
-name or code here: the link is the stored mapping id.
+written, so a decision is idempotent and a row resolved by another mapping is never touched. The link is the stored
+mapping id.
+
+The one exception is a fact stored before its code had a mapping (D2, «adopción por identidad externa exacta»): a
+link may declare an `OrphanAdoption`, and when the mapping appears (an import creates it, `created_from_master`
+included) or is decided, facts with no mapping and no entity whose keyed source code equals the mapping's
+`external_id` take the mapping id first and are then re-resolved like any other. Only the same kind (entity type,
+source system and namespace: the spec's key) and the exact code: never a name, another source or namespace, or a
+partial match.
 """
 
 from collections.abc import Callable, Mapping, Sequence
@@ -23,6 +30,19 @@ from app.platform.mappings.models import ExternalEntityMapping
 KindKey = tuple[str, str, str]
 
 
+# Turns a fact's source code column into the namespace's own key, in SQL (e.g. `mappings.code_key`).
+KeyExpression = Callable[[InstrumentedAttribute[Any]], ColumnElement[Any]]
+
+
+@dataclass(frozen=True)
+class OrphanAdoption:
+    """How a fact without a mapping is recognised as the exact external identity of a mapping of this kind."""
+
+    source_column: InstrumentedAttribute[Any]  # the code exactly as the source sent it
+    keyed: KeyExpression  # the same normalization the importer applies before looking up the mapping
+    eligible: ColumnElement[bool] | None = None  # rows whose code is this kind of code (the importer's own rule)
+
+
 @dataclass(frozen=True)
 class FactLink:
     """A fact column that holds the entity a mapping resolved, next to the column that holds the mapping."""
@@ -34,11 +54,12 @@ class FactLink:
     # Which rows are current (not superseded nor voided). Every row is re-resolved, history included, so it never
     # contradicts its mapping; the current ones are what the screen counts first. None: every row is current.
     current: ColumnElement[bool] | None = None
+    adopt: OrphanAdoption | None = None
 
 
 # Closes the quality issues whose condition the decision removed; returns how many it closed. It runs after the
 # facts were re-resolved, inside the same transaction.
-IssueCloser = Callable[[Session, ExternalEntityMapping, int], int]
+IssueCloser = Callable[[Session, ExternalEntityMapping, int | None], int]
 
 
 @dataclass(frozen=True)
@@ -83,8 +104,13 @@ class FactCount:
 
 @dataclass
 class ReResolution:
-    updated: dict[str, int] = field(default_factory=dict)  # kind → rows written
+    adopted: dict[str, int] = field(default_factory=dict)  # kind → orphan rows that took the mapping id
+    updated: dict[str, int] = field(default_factory=dict)  # kind → rows whose entity was written
     issues_closed: int = 0
+
+    @property
+    def facts_adopted(self) -> int:
+        return sum(self.adopted.values())
 
     @property
     def facts_updated(self) -> int:
@@ -163,10 +189,34 @@ def totals(db: Session, mapping_ids_by_key: Mapping[KindKey, Sequence[int]]) -> 
     return found
 
 
-def apply(db: Session, key: KindKey, mapping: ExternalEntityMapping, user_id: int) -> ReResolution:
-    """Make every fact of this mapping agree with its decision, in the caller's (locked) transaction."""
+def _adopt(db: Session, fact: FactLink, adoption: OrphanAdoption, mapping: ExternalEntityMapping) -> int:
+    conditions = [
+        fact.mapping_column.is_(None),
+        fact.entity_column.is_(None),
+        adoption.source_column.is_not(None),
+        adoption.keyed(adoption.source_column) == mapping.external_id,
+    ]
+    if adoption.eligible is not None:
+        conditions.append(adoption.eligible)
+    statement = (
+        update(fact.mapping_column.class_)
+        .where(*conditions)
+        .values({fact.mapping_column.key: mapping.id})
+        .execution_options(synchronize_session=False)
+    )
+    return cast(CursorResult[Any], db.execute(statement)).rowcount
+
+
+def apply(db: Session, key: KindKey, mapping: ExternalEntityMapping, user_id: int | None) -> ReResolution:
+    """Make every fact of this mapping agree with its status, in the caller's (locked) transaction: first the
+    orphans of its exact identity take the mapping id, then every fact of the mapping gets its entity (the mapping's
+    when `confirmed`, none otherwise), then the issues whose condition went away are closed."""
     target = mapping.entity_id if mapping.status == "confirmed" else None
     outcome = ReResolution()
+    for fact in _facts(key):
+        if fact.adopt is not None:
+            adopted = _adopt(db, fact, fact.adopt, mapping)
+            outcome.adopted[fact.kind] = outcome.adopted.get(fact.kind, 0) + adopted
     for fact in _facts(key):
         statement = (
             update(fact.entity_column.class_)

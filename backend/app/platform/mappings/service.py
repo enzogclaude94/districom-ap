@@ -16,8 +16,9 @@ mapping that exists. There is no similarity matching anywhere.
 import unicodedata
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
+from typing import Any
 
-from sqlalchemy import Select, case, func, or_, select, tuple_
+from sqlalchemy import Select, case, func, literal_column, or_, select, tuple_
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -142,12 +143,16 @@ def observe(
     entity_id: int | None = None,
     method: str | None = None,
     candidates: Sequence[int] = (),
+    user_id: int | None = None,
 ) -> ExternalEntityMapping:
     """Record that an import saw `key`, inside the confirmation's transaction.
 
     A new key is created `confirmed` only with an automatic method and its entity; otherwise `pending` (with at
     most one proposed candidate) or `ambiguous` (two or more). An existing mapping keeps its status, entity and
-    candidates: only its label and last job are refreshed."""
+    candidates: only its label and last job are refreshed.
+
+    A new mapping adopts, in the same transaction, the facts its module stored before it existed with exactly this
+    identity (D2), and closes the issues that leaves without a condition; `user_id` is who confirmed the import."""
     _check_key(key)
     if (entity_id is None) != (method is None):
         raise ValueError("An automatic confirmation needs both the entity and its method")
@@ -157,7 +162,7 @@ def observe(
     status = "confirmed" if entity_id is not None else ("ambiguous" if len(proposed) >= 2 else "pending")
     system_id = source_system_id(db, key.source_system)
     clean_label = " ".join(label.split())[:200] if label else None
-    db.execute(
+    row: Any = db.execute(
         insert(ExternalEntityMapping)
         .values(
             entity_type=key.entity_type,
@@ -180,17 +185,44 @@ def observe(
                 "updated_at": func.now(),
             },
         )
-    )
-    mapping = db.scalars(
-        select(ExternalEntityMapping).where(
-            ExternalEntityMapping.entity_type == key.entity_type,
-            ExternalEntityMapping.source_system_id == system_id,
-            ExternalEntityMapping.namespace == key.namespace,
-            ExternalEntityMapping.external_id == key.external_id,
-        )
+        # xmax is 0 only for a row this statement inserted (PostgreSQL), not for one it updated on conflict.
+        .returning(ExternalEntityMapping.id, literal_column("xmax = 0"))
     ).one()
+    mapping = db.get_one(ExternalEntityMapping, row[0])
     db.refresh(mapping)
+    if row[1]:
+        _adopt_orphans(db, mapping, (key.entity_type, key.source_system, key.namespace), job_id, user_id)
     return mapping
+
+
+def _adopt_orphans(
+    db: Session, mapping: ExternalEntityMapping, kind: resolvers.KindKey, job_id: int | None, user_id: int | None
+) -> None:
+    if not any(fact.adopt is not None for spec in resolvers.registry.specs(kind) for fact in spec.facts):
+        return
+    resolution = resolvers.apply(db, kind, mapping, user_id)
+    if resolution.facts_adopted == 0 and resolution.issues_closed == 0:
+        return  # the usual case (the master came first): nothing to audit
+    # Ids and counts only, never the code or label.
+    record_event(
+        db,
+        "platform.mapping.orphans_adopted",
+        user_id=user_id,
+        entity_type="external_entity_mapping",
+        entity_id=str(mapping.id),
+        payload={
+            "mapping_id": mapping.id,
+            "job_id": job_id,
+            "status": mapping.status,
+            "entity_type": mapping.entity_type,
+            "namespace": mapping.namespace,
+            "source_system": kind[1],
+            "entity_id": mapping.entity_id,
+            "facts_adopted": resolution.adopted,
+            "facts_updated": resolution.updated,
+            "issues_closed": resolution.issues_closed,
+        },
+    )
 
 
 # --- what a person decides ---------------------------------------------------------------------------------------
@@ -294,6 +326,7 @@ def _decide(
                 "namespace": mapping.namespace,
                 "source_system": key[1],
                 "entity_id": mapping.entity_id,
+                "facts_adopted": resolution.adopted,
                 "facts_updated": resolution.updated,
                 "issues_closed": resolution.issues_closed,
             },
