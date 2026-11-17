@@ -416,8 +416,10 @@ Lo que estaba en `main` (`274ad4d`) antes de la revisión:
    3. Escribe `state\start-request.json` con un valor nuevo, que identifica este arranque (PR #83), y lo deja en `logs\ops.log`.
 
    El arranque no es una operación del registro de operaciones. Ese registro es para las operaciones que bloquean o mantienen (cierre, actualización, manual y `resume`). Si lo fuera, el supervisor encontraría el propio arranque como operación incompleta y nunca arrancaría.
-   4. **Suelta el bloqueo** y recién entonces arranca el servicio del Stack. Desde aquí espera la señal del supervisor sin tener el bloqueo.
-   5. El supervisor toma el bloqueo, con un tiempo máximo. Si no lo consigue, registra `blocked` («bloqueo ocupado por …») y no arranca la app.
+   4. Pide al SCM que arranque el Stack, que no espera al supervisor, y **suelta el bloqueo**. Desde aquí espera la señal del supervisor sin tener el bloqueo.
+
+      *Precisión de la implementación de C9‑A (2026-11-17), en revisión de Enzo:* el pedido al SCM se hace con el bloqueo tomado. Si se hiciera después de soltarlo, otro `services start` podría reemplazar la solicitud en el medio. El SCM no espera al supervisor, así que nadie espera a otro proceso con el bloqueo tomado.
+   5. El supervisor toma el bloqueo, con un tiempo máximo. Si no lo consigue, registra `blocked` («bloqueo ocupado por …») y no arranca nada, ni siquiera PostgreSQL: la operación que tiene el bloqueo decide.
    6. Con el bloqueo tomado, el supervisor hace la **validación decisiva**: vuelve a comprobar todo, sin fiarse de la previa. Mantiene el bloqueo mientras arranca la cadena, y lo suelta recién después de registrar su fase: `running`, `failed` o `blocked`, con el valor del arranque.
    7. `services start` acepta solo el registro del supervisor con su valor: `running` es PASS, y `failed`, `blocked` o el tiempo máximo son FAIL. Deja el resultado en `logs\ops.log`.
 
@@ -431,9 +433,12 @@ Lo que estaba en `main` (`274ad4d`) antes de la revisión:
    - Toma el bloqueo y detiene el Stack, que ante el pedido de parada no pide el bloqueo.
    - Mientras el supervisor está arrancando la cadena con el bloqueo tomado, `services stop` falla al instante y nombra la operación en curso.
 
-   **Requisitos previos de los dos comandos:**
-   - Se niegan con una ventana de mantenimiento abierta o vencida.
-   - También se niegan con una operación incompleta o incierta en el registro.
+   **Requisitos previos de `services start` (y `--direct`):**
+   - Se niega con una ventana de mantenimiento abierta o vencida.
+   - También se niega con una operación incompleta o incierta en el registro.
+   - Con el Stack en marcha y una solicitud de arranque todavía sin respuesta, se niega: dos arranques nunca esperan el mismo arranque.
+
+   *Precisión de la implementación de C9‑A (2026-11-17), en revisión de Enzo:* `services stop` solo exige el bloqueo, no esos requisitos. Detener siempre acerca a un estado seguro, y negarlo dejaría al operador sin forma de detener una instalación en `blocked` con una operación incompleta.
 
    **El supervisor:**
    - Toma el bloqueo para decidir y arrancar (pasos 5 y 6), no durante su vigilancia normal.

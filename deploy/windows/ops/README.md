@@ -1,4 +1,4 @@
-# W2-C: operación de DistriCom en Windows (C1 base operativa, C2 servicios nativos, C3 permisos)
+# W2-C: operación de DistriCom en Windows (C1 base operativa, C2 servicios, C3 permisos, C4 firewall, C9‑A coordinación)
 
 Primera subetapa de W2‑C (ADR 016, en estado **Propuesto**; plan en `docs/WINDOWS_DEPLOYMENT.md` y propuesta W2‑C revisión 1). Son las piezas que usan las subetapas siguientes. Esta carpeta **no** instala servicios, no toca el firewall ni bloquea escrituras: eso es C2 a C13.
 
@@ -14,6 +14,7 @@ Python con solo la biblioteca estándar (decisión D1). Reutiliza `districom_bac
 | `oplog` | Registro de operaciones `state\operations.jsonl`, solo agregado, con `fsync` en cada evento. Cada operación (cierre, actualización, rollback, manual) tiene un id, sus pasos y un único final: `completed`, `failed` o `reverted`. Sin final queda **incompleta**. La lectura es estricta y nunca modifica el archivo: una línea JSON válida con campos faltantes, tipos incorrectos, un evento o tipo desconocido, eventos de una operación que no empezó o posteriores a su final es **inválida** y deja la operación **incierta** (o todo el registro, si no nombra ninguna). La única línea tolerada es la última cortada por un corte, que el evento siguiente cierra con un `torn_line_sealed` que la nombra |
 | `maintenance` | Ventana de mantenimiento `state\maintenance.json` con la **operación dueña**. Solo su dueña la cierra y no se abre una segunda. Al pasar `MAINTENANCE_MAX_MINUTES` da **FAIL** (alerta), pero **nunca se cierra sola ni habilita escrituras**. Un archivo ilegible cuenta como ventana abierta con dueña desconocida |
 | `safety` | `writes_resume_check`: verificación conjunta y de solo lectura. Dice que sería seguro reactivar escrituras **solo si** la ventana está cerrada, el registro se lee y no tiene líneas inválidas, y no hay operaciones incompletas ni inciertas. Que falte `maintenance.json` no alcanza. C1 no desbloquea nada: **C9 debe consultar esta verificación antes de reactivar la aplicación** |
+| `oplock` | (C9‑A) Bloqueo exclusivo entre operaciones, `state\operations.lock`. Es el bloqueo de archivos del sistema operativo: si el proceso muere, Windows lo libera, y nunca vence. Quien no lo consigue falla enseguida o tras una espera acotada, y nombra al dueño. `operations.lock.json` dice quién lo tiene (operación, proceso, hora), solo para los mensajes. Soltarlo nunca cambia la ventana, el registro ni el resto del estado persistente |
 | `cli` | `districom-ops init`, `check-config`, `maintenance open\|close\|status`, `operations` y `resume-check` |
 
 ## C2: servicios nativos de Windows
@@ -118,6 +119,29 @@ Las pruebas C3‑1 a C3‑5 (`permissions_tests/`) corren en el job «Windows pe
 Las pruebas C4‑1 a C4‑4 (`firewall_tests/`) corren en el job «Windows firewall (W2-C4)», con dos reglas ficticias de Store Sys y todas las reglas ajenas comparadas antes y después de cada paso.
 
 **PENDIENTE, nunca PASS:** el acceso real desde otra PC de la LAN, Tailscale, el Escritorio remoto del grupo IT, los puertos reales de Store Sys, el perfil de red del equipo y Windows 11 Pro.
+
+## C9‑A: coordinación de operaciones
+
+Plan: `docs/WINDOWS_W2C_PLAN.md`, C9‑A. No toca `ALLOW_CONNECTIONS`, la propiedad ni los roles de PostgreSQL, y no tiene `resume` (eso es C9‑B).
+
+- **Quién toma el bloqueo:** `maintenance open` y `close`, `services start`, `start --direct`, `stop` y `uninstall`, y el supervisor para decidir el arranque y para reiniciar PostgreSQL.
+- **`maintenance open` sin carrera:** comprueba y escribe con el bloqueo tomado, y crea `maintenance.json` en exclusiva, así que una segunda ventana nunca reemplaza a la primera.
+- **Arranque:** `services start` y `start --direct` se niegan con una ventana abierta, vencida o ilegible, con un registro inválido o con una operación incompleta o incierta (`safety.start_blockers`, los mismos motivos que `writes_resume_check`). `services stop` siempre se permite, con el bloqueo: detener solo acerca a un estado seguro.
+- **Protocolo sin interbloqueo:**
+  1. `services start` toma el bloqueo, hace la validación previa, escribe `start-request.json` con un valor nuevo y pide al SCM que arranque el Stack, que no espera al supervisor.
+  2. Suelta el bloqueo y recién entonces espera la respuesta del supervisor.
+  3. El supervisor toma el bloqueo (espera acotada), hace la validación que cuenta y lo mantiene hasta registrar su fase con ese valor.
+  4. `services start` acepta solo ese registro, o el del servicio vivo si el Stack ya estaba en marcha. `running` es PASS; `blocked`, `failed` o el tiempo máximo son FAIL.
+  5. Con el Stack en marcha y una solicitud todavía sin respuesta, un segundo `services start` se niega.
+- **Estado `blocked`:** con un estado inseguro, o sin conseguir el bloqueo, el supervisor arranca solo PostgreSQL (o nada, si no consiguió el bloqueo) y registra `blocked` con el motivo en `state\supervisor.json`. `services status` lo muestra. Reiniciar el Stack, reiniciar PostgreSQL o que venza la ventana no lo levanta.
+- **Reinicio de PostgreSQL:** el supervisor no lo reinicia si el bloqueo está ocupado o hay una ventana abierta.
+- **Trazabilidad del arranque:** `start-request.json`, `supervisor.json` y `logs\ops.log` (`services_start_requested`, `services_start_done`, `services_start_blocked`). El arranque no es una operación del registro de operaciones.
+
+Las pruebas C9A‑1 a C9A‑13 están en dos lugares:
+- `tests/test_c9a_coordination_units.py`, con procesos reales para el bloqueo y el supervisor real contra un SCM simulado. Corre también en Windows, en el job «Windows ops (W2-C)».
+- `services_tests/test_c9a_coordination.py`, con los servicios reales, en el job «Windows services (W2-C2)».
+
+**PENDIENTE, nunca PASS:** el reinicio real de Windows con un estado `blocked`, y Windows 11 Pro.
 
 ## Regla de logs para C2 a C13
 

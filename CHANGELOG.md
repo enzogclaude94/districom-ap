@@ -4,6 +4,14 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Added — Servidor: W2‑C9‑A, coordinación de operaciones (en revisión)
+- `districom_ops.oplock`: bloqueo exclusivo entre procesos (`state\operations.lock`). Lo libera el sistema operativo si el proceso muere, nunca vence, y quien no lo consigue falla nombrando al dueño.
+- `maintenance open` y `close` con el bloqueo, y la ventana creada en exclusiva: se corrige la carrera de dos aperturas simultáneas.
+- `services start`, `start --direct`, `stop` y `uninstall` toman el bloqueo. El arranque se niega con una ventana abierta, vencida o ilegible, un registro inválido o una operación incompleta o incierta.
+- **Protocolo de arranque sin interbloqueo:** `services start` suelta el bloqueo antes de esperar, y el supervisor decide con el bloqueo tomado hasta registrar su fase. Un segundo arranque simultáneo se niega.
+- **Supervisor:** fase `blocked` con su motivo (solo PostgreSQL, sin la app). No reinicia PostgreSQL con el bloqueo ocupado o una ventana abierta.
+- Pruebas C9A‑1 a C9A‑13 en unidades (también en Windows) y con servicios reales en el job «Windows services (W2-C2)». No se agrega ningún job.
+
 ### Changed — Servidor: propuesta W2‑C revisión 2
 - Nuevo `docs/WINDOWS_W2C_PLAN.md`, copia versionada de la propuesta en su revisión 2, con las decisiones de Enzo del 2026-11-11:
   - C9 se parte en C9‑A (coordinación de operaciones: bloqueo exclusivo, carrera de `maintenance open`, supervisor con estado `blocked`) y C9‑B (bloqueo reversible de escrituras);
