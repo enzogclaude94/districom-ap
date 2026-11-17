@@ -15,17 +15,26 @@ Invariants (Enzo, 2026-11-06, W2-C revision 1):
 * A closed (absent) window is necessary but **not sufficient** to re-enable writes: that decision belongs to
   ``districom_ops.safety.writes_resume_check``, which also requires a consistent operations record without
   incomplete or uncertain operations.
+* Opening and closing happen under the exclusive operations lock (C9-A, ``districom_ops.oplock``): the check
+  that no window is open and the writing of the new one can no longer interleave with another opening. The
+  window file is also created exclusively, so even without the lock a second window can never replace the first.
 """
 
 import json
+import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 
-from districom_backup.repo import fsync_dir, write_atomic
+from districom_backup.repo import fsync_dir
 
+from districom_ops.oplock import OperationLock
 from districom_ops.oplog import Event, Kind, OperationsLog
+
+LOCK_SECONDS = 10
 
 
 class WindowState(StrEnum):
@@ -98,21 +107,54 @@ class MaintenanceWindow:
         state = WindowState.OVERDUE if elapsed >= max_minutes else WindowState.OPEN
         return WindowStatus(state, window, max(elapsed, 0))
 
-    def open(self, kind: Kind, reason: str) -> str:
-        """Open a window owned by a new operation; returns the operation id."""
-        if self.path.exists():
-            current = self.status(max_minutes=10**9)
-            owner = current.window.operation_id if current.window else "unknown (unreadable file)"
-            raise MaintenanceError(f"a maintenance window is already open by {owner}")
-        op_id = self.oplog.start(kind, reason)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        data = {"operation_id": op_id, "kind": kind.value, "reason": reason, "opened_at": datetime.now(UTC).isoformat()}
-        write_atomic(self.path, json.dumps(data, ensure_ascii=False).encode("utf-8"))
-        self.oplog.step(op_id, "maintenance_window_opened")
-        return op_id
+    @contextmanager
+    def _locked(self, lock: OperationLock | None, operation: str) -> Iterator[None]:
+        """Under ``lock`` (an operation that already holds it) or under a lock taken for this call only."""
+        if lock is not None:
+            if not lock.held or lock.path.parent != self.path.parent:
+                raise MaintenanceError(f"{operation} needs the operations lock of this installation")
+            yield
+            return
+        with OperationLock(self.path.parent, operation).acquire(timeout=LOCK_SECONDS):
+            yield
 
-    def close(self, operation_id: str, end: Event = Event.COMPLETED, **detail: str) -> None:
+    def _create(self, data: dict[str, str]) -> None:
+        """Exclusive creation: never replaces a window, even if the lock were bypassed."""
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0))
+        except FileExistsError as exc:
+            raise MaintenanceError("a maintenance window appeared while opening this one") from exc
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(json.dumps(data, ensure_ascii=False).encode("utf-8"))
+            handle.flush()
+            os.fsync(handle.fileno())
+        fsync_dir(self.path.parent)
+
+    def open(self, kind: Kind, reason: str, lock: OperationLock | None = None) -> str:
+        """Open a window owned by a new operation; returns the operation id.
+
+        A crash in the middle of the creation leaves a partial file, which reads as UNREADABLE: an open window
+        with an unknown owner (fail-safe), never as no window."""
+        with self._locked(lock, "maintenance_open"):
+            if self.path.exists():
+                current = self.status(max_minutes=10**9)
+                owner = current.window.operation_id if current.window else "unknown (unreadable file)"
+                raise MaintenanceError(f"a maintenance window is already open by {owner}")
+            op_id = self.oplog.start(kind, reason)
+            now = datetime.now(UTC).isoformat()
+            self._create({"operation_id": op_id, "kind": kind.value, "reason": reason, "opened_at": now})
+            self.oplog.step(op_id, "maintenance_window_opened")
+            return op_id
+
+    def close(
+        self, operation_id: str, end: Event = Event.COMPLETED, lock: OperationLock | None = None, **detail: str
+    ) -> None:
         """Close the window of ``operation_id`` and end that operation. Any other id is refused."""
+        with self._locked(lock, "maintenance_close"):
+            self._close(operation_id, end, **detail)
+
+    def _close(self, operation_id: str, end: Event, **detail: str) -> None:
         try:
             window = self._read()
         except (ValueError, KeyError, TypeError) as exc:

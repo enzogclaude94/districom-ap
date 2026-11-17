@@ -151,7 +151,7 @@ def test_the_supervisor_records_the_request_and_its_phases(world: World, monkeyp
     stop = threading.Event()
     monkeypatch.setattr(services, "_record_phase", spy)
     monkeypatch.setattr(services, "check_disk", lambda install: backup_disk.DiskCheck(True, "ok", ""))
-    monkeypatch.setattr(services, "start_chain", lambda install: world.log.append("chain_ready"))
+    monkeypatch.setattr(services, "start_chain", lambda install, until=services.CADDY: world.log.append("chain_ready"))
     monkeypatch.setattr(services, "stop_chain", lambda install: None)
     assert services.supervise(world.install, stop, poll_seconds=0) == 0
     assert phases == ["starting", "running", "stopping", "stopped"]

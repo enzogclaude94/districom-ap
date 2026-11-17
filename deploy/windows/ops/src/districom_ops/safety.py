@@ -53,3 +53,13 @@ def writes_resume_check(window: MaintenanceWindow, max_minutes: int, now: dateti
         elif owner.end is not None:
             reasons.append(f"window owner {owner.id} already ended ({owner.end}) but the window is still there")
     return ResumeCheck(not reasons, tuple(reasons))
+
+
+def start_blockers(window: MaintenanceWindow, max_minutes: int, now: datetime | None = None) -> tuple[str, ...]:
+    """Why the application must not start now (C9-A): exactly the reasons writes could not resume.
+
+    ``services start``, ``services start --direct`` and the supervisor use this, so the application never comes
+    up with a maintenance window open, overdue or unreadable, an unreadable or invalid operations record, or an
+    operation incomplete or uncertain. An empty tuple means the start may go on."""
+    check = writes_resume_check(window, max_minutes, now)
+    return () if check.allowed else check.reasons
