@@ -418,7 +418,7 @@ Lo que estaba en `main` (`274ad4d`) antes de la revisión:
    El arranque no es una operación del registro de operaciones. Ese registro es para las operaciones que bloquean o mantienen (cierre, actualización, manual y `resume`). Si lo fuera, el supervisor encontraría el propio arranque como operación incompleta y nunca arrancaría.
    4. Pide al SCM que arranque el Stack, que no espera al supervisor, y **suelta el bloqueo**. Desde aquí espera la señal del supervisor sin tener el bloqueo.
 
-      *Precisión de la implementación de C9‑A (2026-11-17), en revisión de Enzo:* el pedido al SCM se hace con el bloqueo tomado. Si se hiciera después de soltarlo, otro `services start` podría reemplazar la solicitud en el medio. El SCM no espera al supervisor, así que nadie espera a otro proceso con el bloqueo tomado.
+      *Precisión de la implementación de C9‑A (2026-11-17), aprobada por Enzo el 2026-11-17:* el pedido al SCM se hace con el bloqueo tomado. Si se hiciera después de soltarlo, otro `services start` podría reemplazar la solicitud en el medio. El SCM no espera al supervisor, así que nadie espera a otro proceso con el bloqueo tomado.
    5. El supervisor toma el bloqueo, con un tiempo máximo. Si no lo consigue, registra `blocked` («bloqueo ocupado por …») y no arranca nada, ni siquiera PostgreSQL: la operación que tiene el bloqueo decide.
    6. Con el bloqueo tomado, el supervisor hace la **validación decisiva**: vuelve a comprobar todo, sin fiarse de la previa. Mantiene el bloqueo mientras arranca la cadena, y lo suelta recién después de registrar su fase: `running`, `failed` o `blocked`, con el valor del arranque.
    7. `services start` acepta solo el registro del supervisor con su valor: `running` es PASS, y `failed`, `blocked` o el tiempo máximo son FAIL. Deja el resultado en `logs\ops.log`.
@@ -438,11 +438,19 @@ Lo que estaba en `main` (`274ad4d`) antes de la revisión:
    - También se niega con una operación incompleta o incierta en el registro.
    - Con el Stack en marcha y una solicitud de arranque todavía sin respuesta, se niega: dos arranques nunca esperan el mismo arranque.
 
-   *Precisión de la implementación de C9‑A (2026-11-17), en revisión de Enzo:* `services stop` solo exige el bloqueo, no esos requisitos. Detener siempre acerca a un estado seguro, y negarlo dejaría al operador sin forma de detener una instalación en `blocked` con una operación incompleta.
+   *Precisión de la implementación de C9‑A (2026-11-17), aprobada por Enzo el 2026-11-17:* `services stop` solo exige el bloqueo, no esos requisitos. Detener siempre acerca a un estado seguro, y negarlo dejaría al operador sin forma de detener una instalación en `blocked` con una operación incompleta.
 
    **El supervisor:**
    - Toma el bloqueo para decidir y arrancar (pasos 5 y 6), no durante su vigilancia normal.
    - Para reiniciar PostgreSQL después de una caída, intenta tomar el bloqueo sin esperar. No lo reinicia si el bloqueo está ocupado o hay una ventana abierta: un cierre o una actualización pueden haberlo detenido a propósito.
+   - *Política conservadora de reinicio de PostgreSQL (Enzo, 2026-11-17):* el supervisor solo reinicia por sí mismo un PostgreSQL detenido si el bloqueo está libre **y** no hay ningún motivo de `start_blockers`, la misma comprobación que el arranque de la app. Lo retienen:
+     - una ventana abierta, vencida o ilegible;
+     - un registro de operaciones ilegible o con líneas inválidas;
+     - una operación incompleta o incierta, también **sin `maintenance.json`**, porque la ventana se borra antes de escribir el fin de su operación.
+
+     En ese estado PostgreSQL queda detenido. El supervisor sigue vigilando y deja una sola entrada `postgresql_not_restarted` por motivo. PostgreSQL vuelve recién cuando el registro se resuelve, o cuando un operador arranca de nuevo `DistriComStack`. En ese caso queda en `blocked`: PostgreSQL arriba y la app abajo.
+
+     **Se distingue del arranque del backend:** el supervisor nunca arranca el backend, el frontend ni Caddy con esos motivos. El único PostgreSQL que levanta con ellos es el del arranque del Stack, que siempre lo pide alguien (el arranque de Windows o un operador) y hace falta para recuperar. Un reinicio automático en medio de la vigilancia no lo pide nadie, y por eso no se hace.
    - Si encuentra cualquiera de estos estados:
      - una ventana abierta o vencida;
      - una operación incompleta o incierta;
@@ -473,7 +481,7 @@ Lo que estaba en `main` (`274ad4d`) antes de la revisión:
      - Si se mata `services start` después del paso 4, el supervisor sigue solo: valida y registra su fase. Nadie queda esperando, y `services status` muestra la fase.
      - Si se mata el supervisor con el bloqueo tomado, el bloqueo queda libre y `services start` da FAIL por tiempo o porque el Stack se detuvo.
      - En ningún caso queda un PASS falso ni una espera sin fin.
-   - **C9A‑12:** con el bloqueo ocupado o una ventana abierta, el supervisor no reinicia un PostgreSQL detenido.
+   - **C9A‑12:** con el bloqueo ocupado, una ventana abierta, o sin ventana pero con una operación crítica incompleta o incierta, el supervisor sigue vigilando y no reinicia un PostgreSQL detenido. Al resolverse el registro, lo reinicia.
    - **C9A‑13 (arranque vigente):** un registro del supervisor con el valor de un arranque anterior nunca da PASS, incluso con el bloqueo y una ventana de por medio.
    - **C9A‑8:** ruff, formato, mypy estricto, y los logs sin secretos ni datos personales.
 5. **Riesgos:**

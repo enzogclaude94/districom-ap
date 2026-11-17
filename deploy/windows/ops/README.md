@@ -134,7 +134,7 @@ Plan: `docs/WINDOWS_W2C_PLAN.md`, C9‑A. No toca `ALLOW_CONNECTIONS`, la propie
   4. `services start` acepta solo ese registro, o el del servicio vivo si el Stack ya estaba en marcha. `running` es PASS; `blocked`, `failed` o el tiempo máximo son FAIL.
   5. Con el Stack en marcha y una solicitud todavía sin respuesta, un segundo `services start` se niega.
 - **Estado `blocked`:** con un estado inseguro, o sin conseguir el bloqueo, el supervisor arranca solo PostgreSQL (o nada, si no consiguió el bloqueo) y registra `blocked` con el motivo en `state\supervisor.json`. `services status` lo muestra. Reiniciar el Stack, reiniciar PostgreSQL o que venza la ventana no lo levanta.
-- **Reinicio de PostgreSQL:** el supervisor no lo reinicia si el bloqueo está ocupado o hay una ventana abierta.
+- **Reinicio de PostgreSQL (política conservadora, Enzo 2026-11-17):** el supervisor lo reinicia por sí mismo solo si el bloqueo está libre y no hay ningún motivo de `start_blockers`. Una ventana abierta, vencida o ilegible, un registro inválido o una operación incompleta o incierta lo retienen, aunque no exista `maintenance.json`. PostgreSQL queda detenido y se deja una entrada `postgresql_not_restarted` por motivo, hasta que se resuelva el registro o un operador vuelva a arrancar el Stack, que queda en `blocked`. Arrancar PostgreSQL en `blocked` al iniciar el Stack es otra cosa: lo pide alguien y no levanta la app.
 - **Trazabilidad del arranque:** `start-request.json`, `supervisor.json` y `logs\ops.log` (`services_start_requested`, `services_start_done`, `services_start_blocked`). El arranque no es una operación del registro de operaciones.
 
 Las pruebas C9A‑1 a C9A‑13 están en dos lugares:
