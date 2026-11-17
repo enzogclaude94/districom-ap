@@ -249,6 +249,7 @@ jobs:
       PG_VERSION: "17.6"
     steps:
       - run: git config --global core.autocrlf false
+        working-directory: ${{ github.workspace }}  # before the checkout, deploy/windows/ops does not exist yet
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
         with:
