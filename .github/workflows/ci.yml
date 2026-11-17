@@ -316,7 +316,7 @@ jobs:
       - name: Stage the release under C:\DistriCom
         working-directory: deploy/windows/ops
         run: uv run python services_tests/stage_release.py "${{ github.workspace }}" "$env:DISTRICOM_C2_ROOT" "$env:DISTRICOM_C2_RELEASE" "${{ env.PYTHON_VERSION }}"
-      - name: C2-1 to C2-7
+      - name: C2-1 to C2-7, C9A (coordination of operations)
         working-directory: deploy/windows/ops
         run: uv run pytest services_tests -v -p no:cacheprovider
       - name: W2-C2 results

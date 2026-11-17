@@ -19,8 +19,23 @@ CRITERIA: dict[str, str] = {
     "C1-1": "Estructura de carpetas idempotente y configuración que rechaza variables faltantes o inseguras sin mostrar valores",
     "C1-2": "Ventana de mantenimiento con operación dueña y registro de operaciones: el vencimiento alerta sin cerrar la ventana ni habilitar escrituras; registros inválidos o inciertos y ventana ausente con operación incompleta bloquean la reactivación",
     "C1-3": "Logs sin secretos ni datos personales",
+    "C9A-1": "Bloqueo exclusivo entre procesos reales; la segunda operación falla y nombra la primera; esperas acotadas",
+    "C9A-2": "Un dueño muerto libera el bloqueo y el estado persistente (ventana, registro) queda idéntico",
+    "C9A-3": "Carrera de maintenance open reproducida sin el arreglo; con el arreglo nunca hay dos ventanas",
+    "C9A-4": "services start y --direct se niegan con ventana abierta, vencida o ilegible y con operación incompleta o incierta",
+    "C9A-5": "Arranque con estado inseguro: PostgreSQL arriba, app abajo, fase blocked con motivo; services start da FAIL",
+    "C9A-6": "Reiniciar el Stack, reiniciar PostgreSQL o vencer la ventana no sacan de blocked",
+    "C9A-7": "Dos services start simultáneos: uno arranca y el otro falla al instante, sin confirmación equivocada",
+    "C9A-9": "Sin interbloqueo entre services start y el supervisor",
+    "C9A-10": "Sin hueco: una ventana solo entra antes de la decisión del supervisor, y entonces la fase es blocked",
+    "C9A-11": "Procesos matados durante el arranque: sin PASS falso, sin espera sin fin, bloqueo liberado",
+    "C9A-12": "PostgreSQL no se reinicia con el bloqueo ocupado o una ventana abierta",
+    "C9A-13": "Un registro antiguo del supervisor nunca da PASS",
 }
-OUTSIDE_PYTEST = {"C1-4": "Calidad: ruff, ruff format y mypy estricto (pasos del job de CI)"}
+OUTSIDE_PYTEST = {
+    "C1-4": "Calidad: ruff, ruff format y mypy estricto (pasos del job de CI)",
+    "C9A-8": "Calidad de C9-A: ruff, formato, mypy estricto (pasos del job de CI); logs sin secretos (C1-3)",
+}
 PENDING = {
     "ACL": "Permisos NTFS de config\\ y state\\ para las cuentas de servicio (C3)",
     "WIN11": "Windows 11 Pro: los runners de GitHub Actions son Windows Server",
@@ -64,7 +79,7 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     }
     (out_dir / "w2c1-results.json").write_text(json.dumps(results, indent=2, ensure_ascii=False), encoding="utf-8")
     lines = [
-        "# W2-C1: base operativa",
+        "# W2-C1: base operativa y W2-C9-A: coordinación de operaciones (unidades)",
         "",
         f"- Plataforma: {results['platform']} · Python {results['python']}",
         "",
