@@ -246,6 +246,7 @@ jobs:
       DISTRICOM_OPS_RESULTS: ${{ github.workspace }}/deploy/windows/ops/test-results
       DISTRICOM_C9B_RESULTS: ${{ github.workspace }}/deploy/windows/ops/test-results
       DISTRICOM_C9M_SUITE: "1"
+      DISTRICOM_C9B_WORK: ${{ runner.temp }}/c9b
       PG_VERSION: "17.6"
     steps:
       - run: git config --global core.autocrlf false

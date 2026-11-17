@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from db_tests.cluster import APP_PASSWORD, APP_USER, DATABASE, OPS_DIR, Cluster
+from db_tests.cluster import APP_PASSWORD, APP_USER, DATABASE, OPS_DIR, Cluster, workdir
 from db_tests.conftest import metrics
 
 BACKEND = Path(os.environ.get("DISTRICOM_BACKEND_DIR", OPS_DIR.parents[2] / "backend"))
@@ -28,7 +28,7 @@ pytestmark = pytest.mark.timeout(3600)
 def cluster(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Cluster]:
     if not PYTHON.exists():
         pytest.fail(f"the backend environment is missing ({PYTHON}): run uv sync in backend")
-    c = Cluster(tmp_path_factory.mktemp("c9m"))
+    c = Cluster(workdir(tmp_path_factory, "c9m"))
     metrics["PostgreSQL"] = f"PostgreSQL {c.version()}"
     yield c
     c.stop()

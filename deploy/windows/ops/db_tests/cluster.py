@@ -14,9 +14,12 @@ import textwrap
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import IO, Any
+from typing import IO, TYPE_CHECKING, Any
 
 from districom_ops import database
+
+if TYPE_CHECKING:
+    import pytest
 from districom_ops.config import load_config, load_services_config
 from districom_ops.install import Install
 from districom_ops.layout import Layout
@@ -38,6 +41,17 @@ class LabInstall(Install):
 
     def pg_bin(self, tool: str) -> Path:
         return self.pg_bin_dir / f"{tool}{EXE}"
+
+
+def workdir(factory: "pytest.TempPathFactory", name: str) -> Path:
+    """A fresh folder for a cluster. On Windows, ``initdb`` runs with a restricted token (the Administrators group
+    deny-only) and cannot walk pytest's private temporary folders (created owner-only): ``DISTRICOM_C9B_WORK``
+    (CI: under ``RUNNER_TEMP``) gives an ordinary folder instead."""
+    root = os.environ.get("DISTRICOM_C9B_WORK")
+    if not root:
+        return factory.mktemp(name)
+    Path(root).mkdir(parents=True, exist_ok=True)
+    return Path(tempfile.mkdtemp(prefix=f"{name}-", dir=root))
 
 
 def free_port() -> int:

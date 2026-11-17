@@ -24,6 +24,7 @@ from db_tests.cluster import (
     fabricated_evidence,
     make_install,
     values,
+    workdir,
 )
 from db_tests.conftest import metrics
 from districom_ops import database, services, write_block
@@ -38,7 +39,7 @@ pytestmark = pytest.mark.timeout(600)
 
 @pytest.fixture(scope="module")
 def cluster(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Cluster]:
-    c = Cluster(tmp_path_factory.mktemp("c9b"))
+    c = Cluster(workdir(tmp_path_factory, "c9b"))
     metrics["PostgreSQL"] = f"PostgreSQL {c.version()}"
     metrics["database init con el modelo de C9-B (s)"] = c.init_seconds
     c.app("CREATE TABLE c9_probe (id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, who text NOT NULL);")
