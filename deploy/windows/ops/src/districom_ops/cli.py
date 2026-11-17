@@ -12,7 +12,18 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from districom_ops import artifacts, backup_disk, database, firewall, integrity, ntfs, permissions, services
+from districom_ops import (
+    acl,
+    artifacts,
+    backup_disk,
+    database,
+    firewall,
+    integrity,
+    ntfs,
+    permissions,
+    services,
+    write_block,
+)
 from districom_ops.config import ConfigError, OpsConfig, parse_env, read_config, read_services_config
 from districom_ops.install import Install
 from districom_ops.layout import Layout, LayoutError
@@ -40,7 +51,7 @@ def _parser() -> argparse.ArgumentParser:
 
     m = sub.add_parser("maintenance", help="maintenance window").add_subparsers(dest="action", required=True)
     p = m.add_parser("open")
-    p.add_argument("--kind", choices=[k.value for k in Kind], required=True)
+    p.add_argument("--kind", choices=[k.value for k in Kind if k is not Kind.RESUME], required=True)
     p.add_argument("--reason", required=True)
     p = m.add_parser("close")
     p.add_argument("--operation", required=True)
@@ -54,6 +65,13 @@ def _parser() -> argparse.ArgumentParser:
         "resume-check",
         help="read only: would it be safe to re-enable writes? (window, operations record; C9 acts on it)",
     )
+
+    p = sub.add_parser(
+        "resume",
+        help="administrator: re-enable the application's writes after a write block (C9-B), audited",
+    )
+    p.add_argument("--operation", required=True, help="the operation that owns the write block")
+    p.add_argument("--reason", required=True)
 
     # W2-C2: native services
     r = sub.add_parser("runtime", help="pinned runtimes").add_subparsers(dest="action", required=True)
@@ -129,7 +147,9 @@ def _run(args: argparse.Namespace) -> int:
         log.info("config_ok", extra={"root": str(layout.root), "host": config.host})
         return 0
 
-    if args.command in ("runtime", "backup-disk", "database", "services", "permissions", "integrity", "firewall"):
+    if args.command in (
+        "runtime", "backup-disk", "database", "services", "permissions", "integrity", "firewall", "resume"
+    ):  # fmt: skip
         return _services(args, config)
 
     oplog = OperationsLog(layout.state / "operations.jsonl")
@@ -169,6 +189,32 @@ def _run(args: argparse.Namespace) -> int:
     return 1 if status.alert else 0
 
 
+def _account() -> str:
+    """Who runs a manual resume, for the audit: the Windows SID (no name, no other personal data)."""
+    if sys.platform == "win32":
+        return acl.current_user_sid()
+    return f"uid:{os.getuid()}"
+
+
+def _is_admin() -> bool:
+    if sys.platform != "win32":
+        return os.getuid() == 0
+    import ctypes
+
+    return bool(ctypes.windll.shell32.IsUserAnAdmin())
+
+
+def _resume(args: argparse.Namespace, install: Install) -> int:
+    if not _is_admin():
+        log.error("refused", extra={"reason": "resume needs an administrator (Remote Desktop, elevated)"})
+        return 2
+    with services.operations_lock(install, "resume").acquire(timeout=services.LOCK_SECONDS) as lock:
+        result = write_block.resume(install, lock, args.reason, target=args.operation, account=_account())
+    log.info("resume_done", extra={"operation": result.operation, "resumed": result.resumed, "detail": result.detail})
+    _print({"operation": result.operation, "resumed": result.resumed})
+    return 0
+
+
 def _print(data: object) -> None:
     sys.stdout.write(json.dumps(data, ensure_ascii=False, default=str) + "\n")
 
@@ -202,6 +248,8 @@ def _services(args: argparse.Namespace, config: OpsConfig) -> int:
         check = services.check_disk(install)
         (log.info if check.ok else log.error)("backup_disk_check", extra={"code": check.code, "detail": check.detail})
         return 0 if check.ok else 1
+    if args.command == "resume":
+        return _resume(args, install)
     if args.command == "database":
         changed = database.init(install)
         log.info("database_init", extra={"changed": changed})
@@ -297,6 +345,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         ntfs.NtfsError,
         firewall.FirewallError,
         LockBusy,
+        write_block.WriteBlockError,
     ) as exc:
         log.error("refused", extra={"reason": str(exc)})
         return 2

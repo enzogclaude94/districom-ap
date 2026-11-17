@@ -55,7 +55,17 @@ from typing import Literal
 
 from districom_backup.repo import write_atomic
 
-from districom_ops import artifacts, backup_disk, database, firewall, integrity, ntfs, permissions, winservice
+from districom_ops import (
+    artifacts,
+    backup_disk,
+    database,
+    firewall,
+    integrity,
+    ntfs,
+    permissions,
+    winservice,
+    write_block,
+)
 from districom_ops.install import Install
 from districom_ops.maintenance import MaintenanceWindow
 from districom_ops.oplock import LockBusy, OperationLock
@@ -628,9 +638,10 @@ def _window(install: Install) -> MaintenanceWindow:
     return MaintenanceWindow(install.layout.state, OperationsLog(install.layout.state / "operations.jsonl"))
 
 
-def blockers(install: Install) -> tuple[str, ...]:
-    """Why the application must not start now (``safety.start_blockers``); empty when it may."""
-    return start_blockers(_window(install), install.ops.maintenance_max_minutes)
+def blockers(install: Install, candidate_ok: bool = False) -> tuple[str, ...]:
+    """Why the application must not start now (``safety.start_blockers``); empty when it may. ``candidate_ok``:
+    a write block journal in ``closed_complete`` is left to the supervisor, which may recover it (C9-B)."""
+    return start_blockers(_window(install), install.ops.maintenance_max_minutes, candidate_ok=candidate_ok)
 
 
 def _locked(install: Install, operation: str) -> OperationLock:
@@ -693,7 +704,9 @@ def start_stack(install: Install, poll_seconds: float = 1, timeout: float | None
     If the stack is already running there is no new start: the record must be the one of the live service
     (its WinSW process id), never one left by an earlier run."""
     with _locked(install, "services_start"):
-        _refuse_if_blocked("services start", blockers(install))  # the early check; the supervisor's counts
+        # The early check; the supervisor's counts. A closed_complete journal goes on: only the supervisor may
+        # recover it (with its evidence), and it answers blocked otherwise.
+        _refuse_if_blocked("services start", blockers(install, candidate_ok=True))
         current = winservice.status(STACK)
         if current.state is State.RUNNING:
             pending = _pending_request(install)
@@ -758,14 +771,35 @@ def status_report(install: Install) -> dict[str, object]:
     disk = check_disk(install)
     record = supervisor_state(install) or {}
     supervisor = {"phase": record.get("phase"), "reason": record.get("reason"), "request": record.get("request")}
-    return {"services": services, "backup_disk": {"ok": disk.ok, "code": disk.code}, "supervisor": supervisor}
+    try:
+        journal = write_block.read_journal(install.layout.state)
+        block = {"state": journal.state.value, "operation": journal.owner, "step": journal.step}
+    except write_block.JournalError as exc:
+        block = {"state": "unreadable", "reason": str(exc)}
+    return {"services": services, "backup_disk": {"ok": disk.ok, "code": disk.code}, "supervisor": supervisor,
+            "write_block": block}  # fmt: skip
 
 
 # --- supervisor (the DistriComStack service) -------------------------------------------------------------------
 
 
+def _automatic_resume(install: Install, lock: OperationLock) -> tuple[str, ...]:
+    """The automatic recovery of a ``closed_complete`` journal (C9-B), with the supervisor's lock: the evidence
+    with PostgreSQL still stopped, then PostgreSQL alone, then ``write_block.resume``. The reasons left: empty
+    only when writes were resumed and nothing else stands in the way."""
+    try:
+        write_block.resume(
+            install, lock, "recuperación automática tras un cierre completo", automatic=True,
+            account="DistriComStack", start_postgresql=lambda: start_chain(install, until=PG),
+        )  # fmt: skip
+    except (write_block.WriteBlockError, ServicesError, ServiceError) as exc:
+        log.critical("automatic_resume_failed", extra={"reason": str(exc)})
+        return (f"automatic recovery refused: {exc}", *blockers(install))
+    return blockers(install)
+
+
 def _decide_and_start(
-    install: Install, run: dict[str, object], stop: threading.Event, poll_seconds: float
+    install: Install, run: dict[str, object], stop: threading.Event, poll_seconds: float, lock: OperationLock
 ) -> int | None:
     """Holding the lock: the check that counts, the disk, then the chain or PostgreSQL alone. ``None`` = watch."""
     deadline = time.monotonic() + install.services.backup_disk_wait_seconds
@@ -779,6 +813,8 @@ def _decide_and_start(
         stop.wait(poll_seconds)
         disk = check_disk(install)
     reasons = blockers(install)  # the check that counts: with the lock held, nothing can begin until the phase
+    if reasons and blockers(install, candidate_ok=True) == ():  # only a closed_complete journal: try to recover
+        reasons = _automatic_resume(install, lock)
     try:
         start_chain(install, until=PG if reasons else CADDY)
     except (ServicesError, ServiceError) as exc:
@@ -903,7 +939,7 @@ def supervise(install: Install, stop: threading.Event | None = None, poll_second
         _record_phase(install, run, "blocked", str(exc))
     else:
         try:
-            code = _decide_and_start(install, run, stop, poll_seconds)
+            code = _decide_and_start(install, run, stop, poll_seconds, lock)
         finally:
             lock.release()
         if code is not None:
