@@ -680,6 +680,16 @@ Lo que estaba en `main` (`274ad4d`) antes de la revisión:
      - Windows 11 Pro;
      - el cierre completo, que no se valida antes de C10 y C11.
 
+   **Precisiones de la implementación (C9‑B, 2026-11-17, a revisar por Enzo):**
+   - **Membresías de `districom_ops`:** `pg_signal_backend`, para terminar las sesiones de la app, y además `pg_read_all_stats`, para ver en `pg_stat_activity` el estado de las transacciones de otros roles (sin ella, `xact_start` de la app llega vacío y el paso 4 no se podría comprobar).
+   - **El schema `public` pasa a la app** (`ALTER SCHEMA public OWNER TO` la app), porque en PostgreSQL 15 o posterior el dueño de `public` es el dueño de la base. Con eso las migraciones crean sus tablas como antes. `citext` y `btree_gist` son extensiones de confianza: alcanza con `CREATE` sobre la base. **El contrato de migraciones no cambia** (mismo rol, mismos comandos); C9‑M lo verifica.
+   - **Una sesión de superusuario abierta en `districom`** hace fallar el paso 6 y se revierte todo: `districom_ops` no puede terminarla, y una sesión que no se puede cortar es una incertidumbre.
+   - **Credencial operativa:** se usa `OPS_DATABASE_URL`, que ya existía en `config\districom.env`, en lugar de un `config\ops-db.secret` nuevo. Por C3, ese archivo lo leen solo el Stack y los administradores (el backend lee `config\backend\`), así que la protección es la misma con una regla menos. Si Enzo prefiere el archivo separado, es un cambio chico.
+   - **Regla nueva de C3:** el Stack lee `pgdata\global\pg_control`, para que la recuperación automática ejecute `pg_controldata` con PostgreSQL detenido.
+   - **Recuperación automática:** solo desde `closed_complete` y antes de arrancar PostgreSQL, con la evidencia verificada contra `pg_controldata` (estado «shut down», LSN del checkpoint, timeline) y las copias de `repo1` y `repo2` (existencia y SHA‑256). Un `resuming` interrumpido, o un PostgreSQL arrancado después del cierre (otro checkpoint), deja la app bloqueada hasta un `resume` manual.
+   - **`resume` manual:** solo un administrador, con la operación dueña y un motivo; queda auditado con la cuenta. No pide evidencia: es una decisión del administrador. Primero se termina la operación dueña (`maintenance close --reverted`, o la operación que corresponda) y después se ejecuta `resume`. La app sigue detenida hasta `services stop` y `services start`.
+   - **Clústeres creados antes de C9‑B** conservan el modelo anterior; no se migran (no hay datos reales en Windows).
+
 ### C10. Verificación del WAL al apagar (requisito 2)
 
 1. **Objetivo:** certificar que después del LSN registrado no hubo escrituras de datos y que el apagado fue limpio, sin depender solo de `pg_controldata`.

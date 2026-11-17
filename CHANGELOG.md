@@ -4,6 +4,14 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Added — Servidor: W2‑C9‑B, bloqueo reversible de escrituras (en revisión)
+- **Modelo de roles de PostgreSQL** en `database init`: `districom_ops` (sin superusuario) es dueño de la base, miembro de `pg_signal_backend` y `pg_read_all_stats`; la app conserva `CONNECT`, `CREATE` y `TEMPORARY`, es dueña de `public` y de lo que crea, no es miembro de ningún rol y `pg_hba.conf` la rechaza en `postgres` y `template1`. Sin revocaciones globales. Las migraciones no cambian.
+- `districom_ops.write_block`: bloqueo en seis pasos (`ALLOW_CONNECTIONS false`, espera acotada de las transacciones, `pg_terminate_backend`, comprobación), reversión segura y diario `state\write-block.json` escrito en forma atómica antes de cada paso, con una máquina de estados cerrada.
+- `districom-ops resume`: manual (administrador, operación dueña y motivo) o automático por el supervisor, solo desde `closed_complete` con la evidencia verificada con PostgreSQL detenido. Reconcilia los `resume` interrumpidos y, ante cualquier falla, deja la base bloqueada.
+- **Excepción de `writes_resume_check`:** solo para el `resume` que tiene el bloqueo real (`LockContext`, verificado contra el sistema operativo y el registro del dueño).
+- El supervisor y `services start` respetan el diario; PostgreSQL no se reinicia con un bloqueo de escrituras sin resolver. Regla nueva de C3: el Stack lee `pgdata\global\pg_control`.
+- Pruebas: unidades (máquina de estados, contexto C9‑X1..X6, supervisor con SCM simulado), `db_tests` contra PostgreSQL 17.6 real (C9‑1..9, H1, M, la suite completa del backend, R y X7 con procesos matados en cada paso) y `services_tests` con los servicios reales. Sin jobs nuevos: «Windows ops (W2-C)» instala los binarios oficiales de PostgreSQL.
+
 ### Added — Servidor: W2‑C9‑A, coordinación de operaciones (en revisión)
 - `districom_ops.oplock`: bloqueo exclusivo entre procesos (`state\operations.lock`). Lo libera el sistema operativo si el proceso muere, nunca vence, y quien no lo consigue falla nombrando al dueño.
 - `maintenance open` y `close` con el bloqueo, y la ventana creada en exclusiva: se corrige la carrera de dos aperturas simultáneas.

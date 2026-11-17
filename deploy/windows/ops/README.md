@@ -1,4 +1,4 @@
-# W2-C: operación de DistriCom en Windows (C1 base operativa, C2 servicios, C3 permisos, C4 firewall, C9‑A coordinación)
+# W2-C: operación de DistriCom en Windows (C1 base operativa, C2 servicios, C3 permisos, C4 firewall, C9‑A coordinación, C9‑B bloqueo de escrituras)
 
 Primera subetapa de W2‑C (ADR 016, en estado **Propuesto**; plan en `docs/WINDOWS_DEPLOYMENT.md` y propuesta W2‑C revisión 1). Son las piezas que usan las subetapas siguientes. Esta carpeta **no** instala servicios, no toca el firewall ni bloquea escrituras: eso es C2 a C13.
 
@@ -142,6 +142,23 @@ Las pruebas C9A‑1 a C9A‑13 están en dos lugares:
 - `services_tests/test_c9a_coordination.py`, con los servicios reales, en el job «Windows services (W2-C2)».
 
 **PENDIENTE, nunca PASS:** el reinicio real de Windows con un estado `blocked`, y Windows 11 Pro.
+
+## C9‑B: bloqueo reversible de escrituras
+
+Plan: `docs/WINDOWS_W2C_PLAN.md`, C9‑B, con sus precisiones de implementación.
+
+- **Roles** (`database init`): `districom_ops` (el de `OPS_DATABASE_URL`, sin superusuario) es dueño de la base. La app conserva `CONNECT`, `CREATE` y `TEMPORARY`, es dueña de `public` y de lo que crea, no es miembro de ningún rol y `pg_hba.conf` la rechaza fuera de su base. No puede revertir `ALLOW_CONNECTIONS false`.
+- **Bloqueo** (`write_block.block`, con el bloqueo de C9‑A y la operación dueña): enganches de Caddy (C5) y tareas (C6) registrados como «no aplica todavía», `ALLOW_CONNECTIONS false` desde `postgres`, espera acotada de las transacciones (si vence, se revierte), `pg_terminate_backend` y comprobación de la marca y de las sesiones. Cualquier falla revierte.
+- **Diario** `state\write-block.json`: `none`, `blocking`, `blocked`, `closed_complete`, `reverting`, `resuming`, con transiciones cerradas. Se escribe antes de cada paso; uno ilegible o desconocido bloquea.
+- **`districom-ops resume --operation <id> --reason <texto>`:** solo un administrador; antes se termina la operación dueña. Después, `services stop` y `services start`.
+- **Recuperación automática:** el supervisor, solo desde `closed_complete`, verifica la evidencia con PostgreSQL detenido (`pg_controldata` y las copias de `repo1` y `repo2`), arranca PostgreSQL y reanuda. Si algo no coincide, queda `blocked` con el motivo.
+
+Pruebas:
+- `tests/test_c9b_units.py`: máquina de estados, contexto (C9‑X1 a X6), supervisor con SCM simulado.
+- `db_tests/`: PostgreSQL real (`DISTRICOM_PG_BIN`, PostgreSQL 17.6 en CI) en clústeres descartables hechos por `database.init`. C9‑1 a C9‑9, H1, M (migraciones como la app y, con `DISTRICOM_C9M_SUITE=1`, la suite completa del backend), R y X7, con procesos matados en cada paso del diario. Resultados en `DISTRICOM_C9B_RESULTS`.
+- `services_tests/test_c9b_write_block.py`: con los servicios reales, en el job «Windows services (W2-C2)».
+
+**PENDIENTE, nunca PASS:** la LAN con usuarios reales, el reinicio real de Windows a mitad de un cierre, Windows 11 Pro y el cierre real de jornada (C10 y C11; en CI la evidencia es fabricada).
 
 ## Regla de logs para C2 a C13
 
