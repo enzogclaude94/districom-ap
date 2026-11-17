@@ -114,9 +114,7 @@ def _mappings(
     )
     decider_ids = {r.decided_by for r in rows if r.decided_by is not None}
     deciders = (
-        dict(db.execute(select(User.id, User.full_name).where(User.id.in_(decider_ids))).all())
-        if decider_ids
-        else {}
+        dict(db.execute(select(User.id, User.full_name).where(User.id.in_(decider_ids))).all()) if decider_ids else {}
     )
     full = has_module_access(user, "commercial", "operator")
     entities: dict[str, dict[int, targets.Target]] = {}
