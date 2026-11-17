@@ -232,34 +232,53 @@ jobs:
 
   windows-ops:
     # W2-C1 (ADR 016, proposed): operational base on Windows (layout, configuration, logs, operations record,
-    # maintenance window). Standard library only; no PostgreSQL needed yet. Isolated from every other job.
+    # maintenance window), standard library only. W2-C9-B: the write block on a real PostgreSQL 17 (official
+    # binaries; each test module makes its own disposable cluster with database.init) and the migrations and the
+    # whole backend suite against the C9-B model (C9-M). Isolated from every other job.
     name: Windows ops (W2-C)
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 90
     defaults:
       run:
         shell: pwsh
         working-directory: deploy/windows/ops
     env:
       DISTRICOM_OPS_RESULTS: ${{ github.workspace }}/deploy/windows/ops/test-results
+      DISTRICOM_C9B_RESULTS: ${{ github.workspace }}/deploy/windows/ops/test-results
+      DISTRICOM_C9M_SUITE: "1"
+      PG_VERSION: "17.6"
     steps:
+      - run: git config --global core.autocrlf false
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
-          cache-dependency-glob: deploy/windows/ops/uv.lock
+          cache-dependency-glob: |
+            deploy/windows/ops/uv.lock
+            backend/uv.lock
       - run: uv python install ${{ env.PYTHON_VERSION }}
+      - uses: ./.github/actions/windows-postgres
+        with:
+          version: ${{ env.PG_VERSION }}
+          binaries-only: "true"
       - run: uv sync --frozen
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run mypy
       - run: uv run pytest -v
-      - name: W2-C1 results
+      - name: Backend environment (C9-M)
+        working-directory: backend
+        run: uv sync --frozen
+      - name: C9-1 to C9-9, C9-H1, C9-M, C9-R, C9-X7 (PostgreSQL ${{ env.PG_VERSION }})
+        run: uv run pytest db_tests -v -p no:cacheprovider
+      - name: W2-C1 and W2-C9-B results
         if: always()
         run: |
-          if (Test-Path test-results\w2c1-results.md) {
-            Get-Content test-results\w2c1-results.md >> $env:GITHUB_STEP_SUMMARY
-            Get-Content test-results\w2c1-results.md
+          foreach ($name in @("w2c1-results.md", "w2c9b-results.md")) {
+            if (Test-Path "test-results\$name") {
+              Get-Content "test-results\$name" >> $env:GITHUB_STEP_SUMMARY
+              Get-Content "test-results\$name"
+            }
           }
 
   windows-services:
@@ -316,7 +335,7 @@ jobs:
       - name: Stage the release under C:\DistriCom
         working-directory: deploy/windows/ops
         run: uv run python services_tests/stage_release.py "${{ github.workspace }}" "$env:DISTRICOM_C2_ROOT" "$env:DISTRICOM_C2_RELEASE" "${{ env.PYTHON_VERSION }}"
-      - name: C2-1 to C2-7, C9A (coordination of operations)
+      - name: C2-1 to C2-7, C9A (coordination of operations), C9-B (write block with the real services)
         working-directory: deploy/windows/ops
         run: uv run pytest services_tests -v -p no:cacheprovider
       - name: W2-C2 results
