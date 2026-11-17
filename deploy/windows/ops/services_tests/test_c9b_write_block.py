@@ -29,7 +29,8 @@ pytestmark = pytest.mark.timeout(1500)
 
 @pytest.fixture(scope="module", autouse=True)
 def running() -> Iterator[None]:
-    attach(DISKS / "backup1.vhdx")
+    if not disk_root().exists():  # test_c9a_coordination leaves backup1 attached
+        attach(DISKS / "backup1.vhdx")
     cli("services", "install", "--release", RELEASE)
     cli("services", "start")
     yield
