@@ -1,6 +1,7 @@
 """Inteligencia Comercial: commercial analytics over AXUM and STORE SYS (ROADMAP.md)."""
 
 from app.modules.commercial.api import router
+from app.modules.commercial.identities.resolvers import RESOLVERS
 from app.modules.commercial.imports.customers import TYPE_KEY as CUSTOMERS
 from app.modules.commercial.imports.customers import CustomersAdapter
 from app.modules.commercial.imports.documents import TYPE_KEY as DOCUMENTS
@@ -61,4 +62,5 @@ MODULE = ModuleSpec(
         QualityCodeSpec("commercial.axum_salesperson.unmapped", "warning", "Preventista AXUM sin vincular"),
         QualityCodeSpec("commercial.no_purchase.reason_unmapped", "warning", "Motivo de no compra sin categoría"),
     ),
+    mapping_resolvers=RESOLVERS,
 )

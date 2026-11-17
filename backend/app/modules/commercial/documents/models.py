@@ -40,6 +40,11 @@ class Document(IdMixin, TimestampMixin, Base):
     customer_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("customers.id", ondelete="RESTRICT"))
     source_customer_code: Mapped[str | None] = mapped_column(String(40))
     source_customer_name: Mapped[str | None] = mapped_column(String(200))
+    # The STORE SYS customer mapping the code was resolved through (F1.5): a later decision on it re-resolves
+    # `customer_id`. NULL when the code is not a customer code or had no mapping when the document was imported.
+    customer_mapping_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("external_entity_mappings.id", ondelete="RESTRICT"), index=True
+    )
     net_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2))  # `netosa` as is: unsigned in the source
     total_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2))  # `total` as is: signed in the source
     discount_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2))

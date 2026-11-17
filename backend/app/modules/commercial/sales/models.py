@@ -35,7 +35,7 @@ class SaleLine(IdMixin, TimestampMixin, Base):
     source_customer_code: Mapped[str] = mapped_column(String(40))
     source_customer_name: Mapped[str | None] = mapped_column(String(200))
     customer_mapping_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("external_entity_mappings.id", ondelete="RESTRICT")
+        BigInteger, ForeignKey("external_entity_mappings.id", ondelete="RESTRICT"), index=True
     )
     product_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey(f"{SCHEMA}.products.id", ondelete="RESTRICT"))
     source_product_code: Mapped[str] = mapped_column(String(40))
@@ -49,7 +49,7 @@ class SaleLine(IdMixin, TimestampMixin, Base):
     salesperson_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("employees.id", ondelete="RESTRICT"))
     source_seller: Mapped[str | None] = mapped_column(String(200))
     seller_mapping_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("external_entity_mappings.id", ondelete="RESTRICT")
+        BigInteger, ForeignKey("external_entity_mappings.id", ondelete="RESTRICT"), index=True
     )
     zone_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey(f"{SCHEMA}.zones.id", ondelete="RESTRICT"))
     source_zone: Mapped[str | None] = mapped_column(String(120))
