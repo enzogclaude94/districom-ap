@@ -96,9 +96,7 @@ def _targets_out(found: dict[int, targets.Target], ids: list[int]) -> list[LinkT
     return [LinkTargetOut.model_validate(found[i].__dict__) for i in ids if i in found]
 
 
-def _mappings(
-    db: Session, rows: Sequence[ExternalEntityMapping], user: User, *, detail: bool = False
-) -> list[MappingOut]:
+def _mappings(db: Session, rows: Sequence[ExternalEntityMapping], user: User) -> list[MappingOut]:
     """The queue's projection: business label, first and last import, facts, linked entity and candidates."""
     codes = mappings.source_codes(db)
     keys = {r.id: (r.entity_type, codes[r.source_system_id], r.namespace) for r in rows}
@@ -123,7 +121,7 @@ def _mappings(
             i
             for r in rows
             if r.entity_type == entity_type
-            for i in ([r.entity_id] if r.entity_id else []) + (list(r.candidates) if detail else [])
+            for i in ([r.entity_id] if r.entity_id else []) + list(r.candidates)
         ]
         entities[entity_type] = targets.describe(db, entity_type, ids, full=full)
     result = []
@@ -153,7 +151,7 @@ def _mappings(
                 last_seen_at=jobs.get(r.last_seen_job_id) if r.last_seen_job_id else None,
                 decided_by_name=deciders.get(r.decided_by) if r.decided_by else None,
                 entity=next(iter(_targets_out(found, [r.entity_id])), None) if r.entity_id else None,
-                candidate_entities=_targets_out(found, list(r.candidates)) if detail else [],
+                candidate_entities=_targets_out(found, list(r.candidates)),
                 facts=[
                     FactCountOut(kind=f.kind, label=f.label, total=f.total, linked=f.linked)
                     for f in facts.get(r.id, [])
@@ -166,7 +164,7 @@ def _mappings(
 def _decided(db: Session, decision: mappings.Decision, user: User) -> MappingOut:
     """Commit at the endpoint boundary (the service never commits) and answer with what changed."""
     db.commit()
-    out = _mappings(db, [decision.mapping], user, detail=True)[0]
+    out = _mappings(db, [decision.mapping], user)[0]
     out.resolution = ResolutionOut(
         facts_updated=decision.resolution.updated, issues_closed=decision.resolution.issues_closed
     )
@@ -247,7 +245,7 @@ def batch_confirm(db: DbSession, user: Operator, body: BatchConfirmIn) -> BatchC
 
 @router.get("/mappings/{mapping_id}", response_model=MappingOut, summary="Vínculo")
 def get_mapping(db: DbSession, user: Viewer, mapping_id: int) -> MappingOut:
-    return _mappings(db, [mappings.get(db, mapping_id)], user, detail=True)[0]
+    return _mappings(db, [mappings.get(db, mapping_id)], user)[0]
 
 
 @router.get("/mappings/{mapping_id}/impact", response_model=MappingImpactOut, summary="Qué cambiaría una decisión")
