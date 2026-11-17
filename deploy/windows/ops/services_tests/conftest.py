@@ -25,14 +25,15 @@ CRITERIA: dict[str, str] = {
     "C2-7": "Desinstalación sin servicios ni procesos huérfanos; los datos quedan",
     "C9A-1": "Bloqueo exclusivo entre procesos reales; la segunda operación falla y nombra la primera; esperas acotadas",
     "C9A-2": "Un dueño muerto libera el bloqueo y el estado persistente (ventana, registro) queda idéntico",
+    "C9A-3": "Dos procesos reales abren mantenimiento a la vez: uno solo lo consigue y el otro no toca nada",
     "C9A-4": "services start y --direct se niegan con ventana abierta, vencida o ilegible y con operación incompleta o incierta",
     "C9A-5": "Arranque con estado inseguro: PostgreSQL arriba, app abajo, fase blocked con motivo; services start da FAIL",
     "C9A-6": "Reiniciar el Stack, reiniciar PostgreSQL o vencer la ventana no sacan de blocked",
     "C9A-7": "Dos services start simultáneos: uno arranca y el otro falla al instante, sin confirmación equivocada",
     "C9A-9": "Sin interbloqueo entre services start y el supervisor",
-    "C9A-10": "Sin hueco: una ventana solo entra antes de la decisión del supervisor, y entonces la fase es blocked",
+    "C9A-10": "Sin hueco: mantenimiento rechazado mientras el supervisor decide y arranca; si entra antes, la fase es blocked",
     "C9A-11": "Procesos matados durante el arranque: sin PASS falso, sin espera sin fin, bloqueo liberado",
-    "C9A-12": "PostgreSQL no se reinicia con el bloqueo ocupado o una ventana abierta",
+    "C9A-12": "PostgreSQL no se reinicia con el bloqueo ocupado, una ventana abierta o una operación incompleta o incierta",
     "C9A-13": "Un registro antiguo del supervisor nunca da PASS",
 }
 PENDING = {
