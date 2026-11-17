@@ -18,6 +18,7 @@ from districom_ops.install import Install
 from districom_ops.layout import Layout, LayoutError
 from districom_ops.logs import REDACTOR, setup_logging
 from districom_ops.maintenance import MaintenanceError, MaintenanceWindow
+from districom_ops.oplock import LockBusy
 from districom_ops.oplog import Event, Kind, OperationError, OperationsLog
 from districom_ops.safety import writes_resume_check
 from districom_ops.winservice import ServiceError
@@ -240,16 +241,17 @@ def _services(args: argparse.Namespace, config: OpsConfig) -> int:
         _print({"changes": services.install_services(install)})
         return 0
     if args.action == "uninstall":
-        _print({"removed": services.uninstall_services(install)})
+        with services.operations_lock(install, "services_uninstall").acquire(timeout=services.LOCK_SECONDS):
+            _print({"removed": services.uninstall_services(install)})
         return 0
     if args.action == "start":
         if args.direct:
-            services.start_chain(install, args.until)
+            services.start_direct(install, args.until)
         else:
             services.start_stack(install)
         return 0
     if args.action == "stop":
-        services.stop_all(install)
+        services.stop_services(install)
         return 0
     if args.action == "status":
         _print(services.status_report(install))
@@ -294,6 +296,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         permissions.PermissionsError,
         ntfs.NtfsError,
         firewall.FirewallError,
+        LockBusy,
     ) as exc:
         log.error("refused", extra={"reason": str(exc)})
         return 2
