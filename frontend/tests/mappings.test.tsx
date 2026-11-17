@@ -57,7 +57,16 @@ const mapping = (overrides: Partial<Mapping> = {}): Mapping => ({
   decided_by_name: null,
   entity: null,
   candidate_entities: [],
-  facts: [{ kind: "commercial.no_purchase_events", label: "eventos de no compra", total: 655, linked: 0 }],
+  facts: [
+    {
+      kind: "commercial.no_purchase_events",
+      label: "eventos de no compra",
+      total: 1310,
+      linked: 0,
+      current: 655,
+      current_linked: 0,
+    },
+  ],
   ...overrides,
 });
 
@@ -101,7 +110,7 @@ describe("Mapeos queue", () => {
     renderWithQuery(<MappingList />);
     expect(await screen.findByRole("link", { name: "01" })).toHaveAttribute("href", "/comercial/datos/mapeos/11");
     expect(screen.getByRole("cell", { name: "Preventista AXUM" })).toBeInTheDocument();
-    expect(screen.getByText("655 eventos de no compra")).toBeInTheDocument();
+    expect(screen.getByText("655 eventos de no compra (y 655 reemplazados en el historial)")).toBeInTheDocument();
     expect(screen.queryByText(/employee/)).not.toBeInTheDocument();
     const cards = screen.getByLabelText("Resumen por estado");
     expect(within(cards).getByRole("button", { name: /Pendientes\s*3/ })).toHaveAttribute("aria-pressed", "true");
@@ -154,7 +163,9 @@ describe("Mapeos queue", () => {
     expect(within(dialog).getByText("655 eventos de no compra históricos quedarán asociados.")).toBeInTheDocument();
     expect(calls(api, "POST", "/commercial/mappings/batch-confirm")).toHaveLength(0);
     await user.click(within(dialog).getByRole("button", { name: "Confirmar 1 vínculo" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Se confirmaron 1 vínculos. 655 datos históricos");
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Se confirmó 1 vínculo. 655 datos históricos quedaron asociados.",
+    );
     expect(sent).toEqual({ items: [{ mapping_id: 21, entity_id: 7 }] });
   });
 
@@ -195,15 +206,21 @@ describe("Mapeo detail", () => {
             {
               kind: "commercial.no_purchase_events",
               label: "eventos de no compra",
-              total: 655,
+              total: 1310,
               linked: 0,
+              current: 655,
+              current_linked: 0,
               on_target: 0,
-              changes_on_link: 655,
+              changes_on_link: 1310,
               changes_on_unlink: 0,
+              current_changes_on_link: 655,
+              current_changes_on_unlink: 0,
             },
           ],
-          on_link: 655,
+          on_link: 1310,
           on_unlink: 0,
+          current_on_link: 655,
+          current_on_unlink: 0,
         }),
       "POST /commercial/mappings/11/confirm": (init) => {
         sent = bodyOf(init);
@@ -217,13 +234,15 @@ describe("Mapeo detail", () => {
     const user = userEvent.setup();
     renderWithQuery(<MappingDetailView mappingId={11} />);
     expect(await screen.findByRole("heading", { name: "Preventista AXUM 01" })).toBeInTheDocument();
-    expect(screen.getByText("655 eventos de no compra")).toBeInTheDocument();
+    expect(screen.getByText("655 eventos de no compra (y 655 reemplazados en el historial)")).toBeInTheDocument();
     expect(screen.getByText("Pendiente")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Vincular" }));
     await user.click(screen.getByRole("button", { name: "Buscar" }));
     await user.click(await screen.findByRole("button", { name: "Elegir" }));
     expect(
-      await screen.findByText("655 eventos de no compra históricos quedarán asociados a este preventista."),
+      await screen.findByText(
+        "655 eventos de no compra históricos quedarán asociados a este preventista. También se actualizan 655 registros reemplazados del historial.",
+      ),
     ).toBeInTheDocument();
     expect(String(calls(api, "GET", "/commercial/mappings/11/impact")[0][0])).toContain("entity_id=7");
     await user.click(screen.getByRole("button", { name: "Confirmar vínculo" }));
@@ -281,7 +300,16 @@ describe("Mapeo detail", () => {
         jsonResponse(200, mapping({ status: "confirmed", entity_id: 7, entity: ana, method: "manual" })),
       "GET /commercial/mappings/11/targets": () => jsonResponse(200, { items: [ana, bruno] }),
       "GET /commercial/mappings/11/impact": () =>
-        jsonResponse(200, { mapping_id: 11, status: "confirmed", entity_id: 8, facts: [], on_link: 0, on_unlink: 0 }),
+        jsonResponse(200, {
+          mapping_id: 11,
+          status: "confirmed",
+          entity_id: 8,
+          facts: [],
+          on_link: 0,
+          on_unlink: 0,
+          current_on_link: 0,
+          current_on_unlink: 0,
+        }),
       "POST /commercial/mappings/11/reassign": (init) => {
         sent = bodyOf(init);
         return jsonResponse(200, mapping({ status: "confirmed", entity_id: 8, entity: bruno }));

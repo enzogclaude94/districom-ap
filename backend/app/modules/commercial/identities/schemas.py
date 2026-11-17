@@ -43,8 +43,10 @@ class FactCountOut(BaseModel):
 
     kind: str
     label: str
-    total: int
+    total: int  # every row, superseded or voided history included
     linked: int
+    current: int = 0  # the current rows (not superseded nor voided)
+    current_linked: int = 0
 
 
 class ResolutionOut(BaseModel):
@@ -113,8 +115,10 @@ class MappingSummaryOut(BaseModel):
 
 class MappingImpactFactOut(FactCountOut):
     on_target: int
-    changes_on_link: int  # rows a confirm or reassign to `entity_id` writes
-    changes_on_unlink: int  # rows an exclude writes
+    changes_on_link: int  # rows a confirm or reassign to `entity_id` writes (history included)
+    changes_on_unlink: int  # rows an exclude writes (history included)
+    current_changes_on_link: int  # of them, current rows
+    current_changes_on_unlink: int
 
 
 class MappingImpactOut(BaseModel):
@@ -126,6 +130,8 @@ class MappingImpactOut(BaseModel):
     facts: list[MappingImpactFactOut]
     on_link: int
     on_unlink: int
+    current_on_link: int
+    current_on_unlink: int
 
 
 class MappingLinkIn(BaseModel):

@@ -153,7 +153,14 @@ def _mappings(db: Session, rows: Sequence[ExternalEntityMapping], user: User) ->
                 entity=next(iter(_targets_out(found, [r.entity_id])), None) if r.entity_id else None,
                 candidate_entities=_targets_out(found, list(r.candidates)),
                 facts=[
-                    FactCountOut(kind=f.kind, label=f.label, total=f.total, linked=f.linked)
+                    FactCountOut(
+                        kind=f.kind,
+                        label=f.label,
+                        total=f.total,
+                        linked=f.linked,
+                        current=f.current,
+                        current_linked=f.current_linked,
+                    )
                     for f in facts.get(r.id, [])
                 ],
             )
@@ -263,6 +270,10 @@ def mapping_impact(
             on_target=c.on_target,
             changes_on_link=c.changes_on_link(),
             changes_on_unlink=c.changes_on_unlink(),
+            current=c.current,
+            current_linked=c.current_linked,
+            current_changes_on_link=c.current_changes_on_link(),
+            current_changes_on_unlink=c.current_changes_on_unlink(),
         )
         for c in counts
     ]
@@ -273,6 +284,8 @@ def mapping_impact(
         facts=facts,
         on_link=sum(f.changes_on_link for f in facts),
         on_unlink=sum(f.changes_on_unlink for f in facts),
+        current_on_link=sum(f.current_changes_on_link for f in facts),
+        current_on_unlink=sum(f.current_changes_on_unlink for f in facts),
     )
 
 

@@ -14,7 +14,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, cast
 
-from sqlalchemy import CursorResult, func, literal, select, update
+from sqlalchemy import ColumnElement, CursorResult, and_, func, literal, select, update
 from sqlalchemy.orm import InstrumentedAttribute, Session
 
 from app.platform.mappings.models import ExternalEntityMapping
@@ -31,6 +31,9 @@ class FactLink:
     label: str  # plural business noun shown to users, e.g. «eventos de no compra»
     entity_column: InstrumentedAttribute[Any]
     mapping_column: InstrumentedAttribute[Any]
+    # Which rows are current (not superseded nor voided). Every row is re-resolved, history included, so it never
+    # contradicts its mapping; the current ones are what the screen counts first. None: every row is current.
+    current: ColumnElement[bool] | None = None
 
 
 # Closes the quality issues whose condition the decision removed; returns how many it closed. It runs after the
@@ -59,6 +62,9 @@ class FactCount:
     total: int  # rows that took their identity from the mapping
     linked: int  # of them, with an entity today
     on_target: int  # of them, already pointing to the requested entity (0 without one)
+    current: int  # of `total`, the current ones (the rest is superseded or voided history)
+    current_linked: int
+    current_on_target: int
 
     def changes_on_link(self) -> int:
         """Rows a confirm or reassign to the target would write."""
@@ -67,6 +73,12 @@ class FactCount:
     def changes_on_unlink(self) -> int:
         """Rows an exclude would write (back to no entity)."""
         return self.linked
+
+    def current_changes_on_link(self) -> int:
+        return self.current - self.current_on_target
+
+    def current_changes_on_unlink(self) -> int:
+        return self.current_linked
 
 
 @dataclass
@@ -110,15 +122,25 @@ def _facts(key: KindKey) -> list[FactLink]:
     return [fact for spec in registry.specs(key) for fact in spec.facts]
 
 
+def _measures(fact: FactLink, target_entity_id: int | None) -> list[Any]:
+    current = fact.current if fact.current is not None else literal(True)
+    on_target = fact.entity_column == target_entity_id if target_entity_id else literal(False)
+    return [
+        func.count(),
+        func.count(fact.entity_column),
+        func.count().filter(on_target),
+        func.count().filter(current),
+        func.count(fact.entity_column).filter(current),
+        func.count().filter(and_(current, on_target)),
+    ]
+
+
 def count(db: Session, key: KindKey, mapping_id: int, target_entity_id: int | None = None) -> list[FactCount]:
     """How many facts each link holds for this mapping: what a decision would change, before taking it."""
     result = []
     for fact in _facts(key):
-        on_target = func.count().filter(fact.entity_column == target_entity_id) if target_entity_id else literal(0)
-        total, linked, already = db.execute(
-            select(func.count(), func.count(fact.entity_column), on_target).where(fact.mapping_column == mapping_id)
-        ).one()
-        result.append(FactCount(fact.kind, fact.label, int(total), int(linked), int(already or 0)))
+        row = db.execute(select(*_measures(fact, target_entity_id)).where(fact.mapping_column == mapping_id)).one()
+        result.append(FactCount(fact.kind, fact.label, *(int(v or 0) for v in row)))
     return result
 
 
@@ -130,14 +152,14 @@ def totals(db: Session, mapping_ids_by_key: Mapping[KindKey, Sequence[int]]) -> 
             continue
         for fact in _facts(key):
             rows = db.execute(
-                select(fact.mapping_column, func.count(), func.count(fact.entity_column))
+                select(fact.mapping_column, *_measures(fact, None))
                 .where(fact.mapping_column.in_(ids))
                 .group_by(fact.mapping_column)
             ).all()
-            counted = {int(mapping_id): (int(total), int(linked)) for mapping_id, total, linked in rows}
+            counted = {int(r[0]): tuple(int(v or 0) for v in r[1:]) for r in rows}
             for mapping_id in ids:
-                total, linked = counted.get(mapping_id, (0, 0))
-                found.setdefault(mapping_id, []).append(FactCount(fact.kind, fact.label, total, linked, 0))
+                values = counted.get(mapping_id, (0, 0, 0, 0, 0, 0))
+                found.setdefault(mapping_id, []).append(FactCount(fact.kind, fact.label, *values))
     return found
 
 

@@ -91,6 +91,10 @@ DOCUMENTS = "commercial.documents"
 NO_PURCHASE_EVENTS = "commercial.no_purchase_events"
 SELLER_ASSIGNMENTS = "commercial.customer_salesperson_assignments"
 
+# Superseded lines and events are history: re-resolved too, counted apart.
+ACTIVE_LINE = SaleLine.status == "ACTIVE"
+ACTIVE_EVENT = NoPurchaseEvent.status == "ACTIVE"
+
 RESOLVERS = (
     MappingResolverSpec(
         "customer",
@@ -98,7 +102,7 @@ RESOLVERS = (
         "customer",
         "Cliente STORE SYS",
         facts=(
-            FactLink(SALE_LINES, "líneas de venta", SaleLine.customer_id, SaleLine.customer_mapping_id),
+            FactLink(SALE_LINES, "líneas de venta", SaleLine.customer_id, SaleLine.customer_mapping_id, ACTIVE_LINE),
             FactLink(DOCUMENTS, "comprobantes", Document.customer_id, Document.customer_mapping_id),
         ),
         close_issues=_store_sys_customer_issues,
@@ -114,6 +118,7 @@ RESOLVERS = (
                 "eventos de no compra",
                 NoPurchaseEvent.customer_id,
                 NoPurchaseEvent.customer_mapping_id,
+                ACTIVE_EVENT,
             ),
         ),
         close_issues=_axum_customer_issues,
@@ -129,8 +134,9 @@ RESOLVERS = (
                 "asignaciones de cartera",
                 CustomerSalespersonAssignment.salesperson_id,
                 CustomerSalespersonAssignment.seller_mapping_id,
+                CustomerSalespersonAssignment.voided_by_job_id.is_(None),
             ),
-            FactLink(SALE_LINES, "líneas de venta", SaleLine.salesperson_id, SaleLine.seller_mapping_id),
+            FactLink(SALE_LINES, "líneas de venta", SaleLine.salesperson_id, SaleLine.seller_mapping_id, ACTIVE_LINE),
         ),
         close_issues=_store_sys_seller_issues,
     ),
@@ -145,6 +151,7 @@ RESOLVERS = (
                 "eventos de no compra",
                 NoPurchaseEvent.salesperson_id,
                 NoPurchaseEvent.salesperson_mapping_id,
+                ACTIVE_EVENT,
             ),
         ),
         close_issues=_axum_salesperson_issues,

@@ -15,8 +15,12 @@ export interface FactCount {
   kind: string;
   /** Plural business noun: «eventos de no compra». */
   label: string;
+  /** Every row, superseded or voided history included (all of them follow the decision). */
   total: number;
   linked: number;
+  /** The current rows: what the screen counts first. */
+  current: number;
+  current_linked: number;
 }
 
 /** A customer or employee as Mapeos shows it: never CUIT, phone nor address. A viewer gets only the name. */
@@ -68,6 +72,8 @@ export interface MappingImpactFact extends FactCount {
   on_target: number;
   changes_on_link: number;
   changes_on_unlink: number;
+  current_changes_on_link: number;
+  current_changes_on_unlink: number;
 }
 
 export interface MappingImpact {
@@ -77,6 +83,8 @@ export interface MappingImpact {
   facts: MappingImpactFact[];
   on_link: number;
   on_unlink: number;
+  current_on_link: number;
+  current_on_unlink: number;
 }
 
 export interface BatchResult {

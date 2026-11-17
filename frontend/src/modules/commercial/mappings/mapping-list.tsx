@@ -29,6 +29,7 @@ import {
 import { formatDateTime } from "@/lib/format";
 
 import {
+  appearsIn,
   factsSentence,
   KINDS,
   kindLabel,
@@ -45,6 +46,8 @@ import {
 const PAGE_SIZE = 25;
 const selectClass =
   "flex h-9 w-full rounded-md border border-border bg-surface px-3 text-sm focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none";
+
+const written = (result: BatchResult) => Object.values(result.facts_updated).reduce((a, b) => a + b, 0);
 
 /** A mapping that a batch can confirm: open, with exactly one proposed candidate (never chosen for the person). */
 function proposal(mapping: Mapping) {
@@ -81,7 +84,7 @@ function BatchReview({
       selected
         .flatMap((m) => m.facts)
         .reduce<Record<string, { label: string; count: number }>>((acc, f) => {
-          acc[f.label] = { label: f.label, count: (acc[f.label]?.count ?? 0) + f.total - f.linked };
+          acc[f.label] = { label: f.label, count: (acc[f.label]?.count ?? 0) + f.current - f.current_linked };
           return acc;
         }, {}),
     ),
@@ -288,9 +291,8 @@ export function MappingList() {
         <CardContent>
           {done && (
             <p role="status" className="mb-3 rounded-md bg-success-soft p-3 text-sm text-success">
-              Se confirmaron {n(done.confirmed)} vínculos.{" "}
-              {Object.values(done.facts_updated).reduce((a, b) => a + b, 0) > 0 &&
-                `${n(Object.values(done.facts_updated).reduce((a, b) => a + b, 0))} datos históricos quedaron asociados.`}
+              {done.confirmed === 1 ? "Se confirmó 1 vínculo." : `Se confirmaron ${n(done.confirmed)} vínculos.`}
+              {written(done) > 0 && ` ${n(written(done))} datos históricos quedaron asociados.`}
             </p>
           )}
           {canDecide && picked.size > 0 && (
@@ -380,9 +382,7 @@ export function MappingList() {
                             ))}
                         </TableCell>
                         <TableCell data-label="Aparece en" className="tabular-nums">
-                          {totalFacts(m) > 0
-                            ? factsSentence(m.facts.map((f) => ({ label: f.label, count: f.total })))
-                            : "—"}
+                          {totalFacts(m) > 0 ? appearsIn(m) : "—"}
                         </TableCell>
                         <TableCell data-label="Última importación" className="tabular-nums">
                           {m.last_seen_at ? formatDateTime(m.last_seen_at) : "—"}

@@ -104,6 +104,21 @@ export function totalFacts(mapping: Mapping) {
   return mapping.facts.reduce((sum, f) => sum + f.total, 0);
 }
 
+/** Where the code appears: current rows first, the superseded history apart. */
+export function appearsIn(mapping: Mapping) {
+  const current = factsSentence(mapping.facts.map((f) => ({ label: f.label, count: f.current })));
+  const history = mapping.facts.reduce((sum, f) => sum + f.total - f.current, 0);
+  if (!current && !history) return null;
+  const tail = history ? ` (y ${n(history)} reemplazados en el historial)` : "";
+  return `${current ?? "ningún dato vigente"}${tail}`;
+}
+
+/** Superseded or voided rows a decision also updates, so the history never contradicts the mapping. */
+export function historyNote(count: number) {
+  if (!count) return "";
+  return ` También se actualizan ${n(count)} ${count === 1 ? "registro reemplazado" : "registros reemplazados"} del historial.`;
+}
+
 export const METHOD_LABELS: Record<string, string> = {
   created_from_master: "Creado desde el maestro",
   exact_external_id: "Mismo código",

@@ -123,7 +123,14 @@ def test_summary_filters_search_order_and_pagination(sign_in, grant, data: dict[
     assert first["first_seen_at"] is not None
     assert first["last_seen_at"] is not None
     assert first["facts"] == [
-        {"kind": "commercial.no_purchase_events", "label": "eventos de no compra", "total": 2, "linked": 0}
+        {
+            "kind": "commercial.no_purchase_events",
+            "label": "eventos de no compra",
+            "total": 2,
+            "linked": 0,
+            "current": 2,
+            "current_linked": 0,
+        }
     ]
 
     # Open ones before the rest, whatever the id order.
@@ -143,7 +150,7 @@ def test_detail_and_impact_come_from_the_backend(sign_in, grant, data: dict[str,
     detail = client.get(f"{API}/mappings/{data['01']}").json()
     assert (detail["status"], detail["external_id"], detail["external_label"]) == ("pending", "01", "Vendedor 01")
     impact = client.get(f"{API}/mappings/{data['01']}/impact?entity_id={data['ana']}").json()
-    assert (impact["on_link"], impact["on_unlink"]) == (2, 0)
+    assert (impact["on_link"], impact["on_unlink"], impact["current_on_link"]) == (2, 0, 2)
     assert impact["facts"][0]["label"] == "eventos de no compra"
     assert client.get(f"{API}/mappings/{data['40']}/impact").json()["on_link"] == 0
     assert client.get(f"{API}/mappings/999999").status_code == 404

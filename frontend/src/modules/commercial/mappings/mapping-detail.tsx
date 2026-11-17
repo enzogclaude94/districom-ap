@@ -19,7 +19,9 @@ import { mappingsApi, mappingsQueryKey, type LinkTarget, type Mapping } from "@/
 import { formatDateTime } from "@/lib/format";
 
 import {
+  appearsIn,
   factsSentence,
+  historyNote,
   kindLabel,
   METHOD_LABELS,
   n,
@@ -81,12 +83,14 @@ function LinkImpact({ mapping, target }: { mapping: Mapping; target: LinkTarget 
   });
   if (impact.isPending) return <Skeleton className="h-5 w-72" />;
   if (impact.isError) return <ErrorState error={impact.error} onRetry={() => void impact.refetch()} />;
-  const sentence = factsSentence(impact.data.facts.map((f) => ({ label: f.label, count: f.changes_on_link })));
+  const sentence = factsSentence(impact.data.facts.map((f) => ({ label: f.label, count: f.current_changes_on_link })));
+  const history = impact.data.on_link - impact.data.current_on_link;
   return (
     <p className="text-sm" role="status">
       {sentence
         ? `${sentence} históricos quedarán asociados a ${subjectOf(mapping)}.`
-        : "Todavía no hay datos cargados con este código: los próximos que lleguen quedarán asociados."}
+        : "Todavía no hay datos vigentes con este código: los próximos que lleguen quedarán asociados."}
+      {historyNote(history)}
     </p>
   );
 }
@@ -192,7 +196,7 @@ export function MappingDetailView({ mappingId }: { mappingId: number }) {
   const m = mapping.data;
   const open = OPEN.includes(m.status);
   const total = totalFacts(m);
-  const appears = factsSentence(m.facts.map((f) => ({ label: f.label, count: f.total })));
+  const appears = appearsIn(m);
   // Who may do what (the backend checks it again).
   const canLink =
     (isOperator && (open || m.status === "rejected")) ||

@@ -262,6 +262,29 @@ def test_axum_salespeople_01_02_and_40(db: Session, operator: User) -> None:
     assert open_issues(db, "commercial.axum_salesperson.unmapped") == {f"mapping:{two.id}"}
 
 
+def test_superseded_history_is_re_resolved_and_counted_apart(db: Session, operator: User) -> None:
+    run(db, operator, axum_report(), NO_PURCHASE)
+    one = mapping_of(db, "employee", "AXUM", "salesperson", "01")
+    old = events(db)[0]
+    db.execute(
+        text(
+            "UPDATE commercial.no_purchase_events SET status = 'SUPERSEDED', superseded_by_job_id = import_job_id "
+            "WHERE id = :id"
+        ),
+        {"id": old.id},
+    )
+    db.commit()
+    ana = person(db, "Ana")
+    [impact] = resolvers.count(db, mappings.kind_key(db, one), one.id, ana.id)
+    assert (impact.total, impact.current, impact.changes_on_link(), impact.current_changes_on_link()) == (2, 1, 2, 1)
+
+    decision = mappings.confirm(db, operator, one.id, ana.id, reason=None, is_admin=False)
+    db.commit()
+    assert decision.resolution.updated == {"commercial.no_purchase_events": 2}  # history never contradicts its mapping
+    db.expire_all()
+    assert db.get_one(NoPurchaseEvent, old.id).salesperson_id == ana.id
+
+
 # --- reassign, exclude, reject ---------------------------------------------------------------------------------------
 
 
