@@ -507,6 +507,39 @@ def test_postgresql_is_not_restarted_while_the_lock_is_held_or_a_window_is_open(
     assert scm.pg_starts == starts + 1
 
 
+@pytest.mark.criterion("C9A-12")
+@pytest.mark.parametrize("unsafe", ["incomplete", "uncertain"])
+def test_postgresql_is_not_restarted_after_an_operation_that_may_have_stopped_it_on_purpose(
+    scm: SCM, unsafe: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """No ``maintenance.json``, the lock free, the supervisor still watching, PostgreSQL stopped, and the record
+    shows a critical operation without end (it may have stopped PostgreSQL itself and died) or one that cannot be
+    reconstructed: the supervisor must leave PostgreSQL stopped until the record is resolved (Enzo 2026-11-17)."""
+    start(scm)
+    starts = scm.pg_starts
+    w = window(scm)
+    assert not w.path.exists()
+    if unsafe == "incomplete":
+        op_id = w.oplog.start(Kind.DAY_CLOSE, "cierre cortado")
+    else:
+        with w.oplog.path.open("a", encoding="utf-8") as f:
+            f.write('{"no": "válido"}\n')
+    caplog.set_level("WARNING", logger=services.log.name)
+    scm.states[services.PG] = State.STOPPED
+    time.sleep(0.3)  # about thirty polls of the supervisor
+    assert scm.states[services.PG] is State.STOPPED, "restarted with an operation that may have stopped it"
+    assert scm.pg_starts == starts
+    assert phase_is(scm, "running"), "the supervisor kept watching"
+    held = [r for r in caplog.records if r.getMessage() == "postgresql_not_restarted"]
+    assert len(held) == 1, "logged once per cause, not every poll"
+    assert ("has no end" if unsafe == "incomplete" else "invalid line") in str(held[0].__dict__["reason"])
+    if unsafe == "uncertain":
+        return  # an uncertain record is resolved by an operator (C9-B), never by the supervisor
+    w.oplog.finish(op_id, Event.COMPLETED)
+    wait(lambda: scm.states[services.PG] is State.RUNNING)  # resolved, nothing in the way: an unexpected stop
+    assert scm.pg_starts == starts + 1
+
+
 @pytest.mark.criterion("C9A-13")
 def test_an_old_supervisor_record_never_passes_even_around_the_lock(scm: SCM) -> None:
     services._write_json(scm.install.layout.state / START_REQUEST, {"nonce": "viejo"})

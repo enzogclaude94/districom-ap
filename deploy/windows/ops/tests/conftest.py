@@ -27,9 +27,9 @@ CRITERIA: dict[str, str] = {
     "C9A-6": "Reiniciar el Stack, reiniciar PostgreSQL o vencer la ventana no sacan de blocked",
     "C9A-7": "Dos services start simultáneos: uno arranca y el otro falla al instante, sin confirmación equivocada",
     "C9A-9": "Sin interbloqueo entre services start y el supervisor",
-    "C9A-10": "Sin hueco: una ventana solo entra antes de la decisión del supervisor, y entonces la fase es blocked",
+    "C9A-10": "Sin hueco: mantenimiento rechazado mientras el supervisor decide y arranca; si entra antes, la fase es blocked",
     "C9A-11": "Procesos matados durante el arranque: sin PASS falso, sin espera sin fin, bloqueo liberado",
-    "C9A-12": "PostgreSQL no se reinicia con el bloqueo ocupado o una ventana abierta",
+    "C9A-12": "PostgreSQL no se reinicia con el bloqueo ocupado, una ventana abierta o una operación incompleta o incierta",
     "C9A-13": "Un registro antiguo del supervisor nunca da PASS",
 }
 OUTSIDE_PYTEST = {

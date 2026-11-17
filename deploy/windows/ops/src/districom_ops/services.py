@@ -57,7 +57,7 @@ from districom_backup.repo import write_atomic
 
 from districom_ops import artifacts, backup_disk, database, firewall, integrity, ntfs, permissions, winservice
 from districom_ops.install import Install
-from districom_ops.maintenance import MaintenanceWindow, WindowState
+from districom_ops.maintenance import MaintenanceWindow
 from districom_ops.oplock import LockBusy, OperationLock
 from districom_ops.oplog import OperationsLog
 from districom_ops.safety import start_blockers
@@ -796,16 +796,23 @@ def _decide_and_start(
 
 
 def _pg_restart_allowed(install: Install) -> tuple[OperationLock | None, str]:
-    """The lock for a PostgreSQL restart, or why not: held by an operation, or a maintenance window open."""
+    """The lock for an automatic PostgreSQL restart, or why not (Enzo 2026-11-17, conservative policy).
+
+    The supervisor restarts PostgreSQL by itself only when nothing says the stop could have been deliberate: the
+    lock is free **and** ``blockers`` is empty, the same check as a start of the application. So a maintenance
+    window open, overdue or unreadable, an unreadable or invalid operations record, or an operation incomplete
+    or uncertain all hold the restart back, also when ``maintenance.json`` is missing (the window is removed
+    before its operation's end is written). Only an operator brings PostgreSQL back then, by a new start of
+    ``DistriComStack``, which leaves the application down while the reasons stand (``blocked``)."""
     lock = operations_lock(install, "supervisor_postgresql_restart")
     try:
         lock.acquire(timeout=0)
     except LockBusy as exc:
         return None, str(exc)
-    state = _window(install).status(install.ops.maintenance_max_minutes).state
-    if state is not WindowState.CLOSED:
+    reasons = blockers(install)
+    if reasons:
         lock.release()
-        return None, f"maintenance window {state.value.lower()}"
+        return None, "; ".join(reasons)
     return lock, ""
 
 
@@ -862,8 +869,11 @@ def supervise(install: Install, stop: threading.Event | None = None, poll_second
 
     Waits up to ``BACKUP_DISK_WAIT_SECONDS`` for the disk (it may mount after the services start), then watches
     PostgreSQL: after an unexpected stop it re-checks the disk and restarts it, at most ``PG_RESTARTS`` times an
-    hour, and **never** while the lock is held by an operation or a maintenance window is open (a day close or an
-    update may have stopped it on purpose). A disk lost while running is a critical log entry; PostgreSQL keeps
+    hour, and **never** while the lock is held or ``blockers`` is not empty: a window open, overdue or unreadable,
+    or an operation incomplete or uncertain (a day close or an update may have stopped it on purpose,
+    ``_pg_restart_allowed``). Starting PostgreSQL in ``blocked`` at the start of the stack is different: it
+    follows a start of ``DistriComStack`` (Windows' boot or an operator), keeps the application down, and is what
+    lets a recovery connect. A disk lost while running is a critical log entry; PostgreSQL keeps
     running (ADR 013) and the monitor (C8) alerts. On Ctrl+C (service stop) the chain stops in reverse order."""
     stop = stop or threading.Event()
 
