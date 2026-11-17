@@ -280,7 +280,14 @@ Enzo los fijó el 2026-11-05 al cerrar W2‑A. Se suman a los dos requisitos del
   - **D3:** `ALLOW_CONNECTIONS false` con diario de estado;
   - **D4:** Caddy compilado con `xcaddy`;
   - **D5:** subetapas secuenciales, cada una con su PR, su CI y aprobación expresa antes del merge.
-- **Orden:** C1 → C2 → C3 → C4 → C9 → C6 → C10 → C7 → C8 → C5 → C11 → C12 → C13. C11, C12 y C13 exigen C7 validada.
+- **Revisión 2** (Enzo, 2026-11-11): `docs/WINDOWS_W2C_PLAN.md`. C9 se parte en **C9‑A**, coordinación de operaciones, y **C9‑B**, bloqueo reversible de escrituras. Las decisiones de C9:
+  - `districom_ops` es dueño de la base, sin ser superusuario;
+  - el restablecimiento automático ocurre solo tras un cierre completo y verificablemente seguro;
+  - C9‑A y C9‑B van en PR separados.
+- **Orden:** C1 → C2 → C3 → C4 → C9‑A → C9‑B → C6 → C10 → C7 → C8 → C5 → C11 → C12 → C13.
+  - C11, C12 y C13 exigen C7 validada.
+  - C11 y C12 exigen también el modo mantenimiento de C5 (C5‑3).
+  - C6 respeta el bloqueo de C9‑A.
 - **C1, base operativa** (`deploy/windows/ops/`, README; job de CI «Windows ops (W2-C)»). **DONE**: PR #79, merge `98a201b`, aprobada por Enzo el 2026-11-09.
   - Carpetas de la instalación.
   - Configuración que rechaza variables faltantes o inseguras sin mostrar valores.

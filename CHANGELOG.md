@@ -4,6 +4,18 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Changed — Servidor: propuesta W2‑C revisión 2
+- Nuevo `docs/WINDOWS_W2C_PLAN.md`, copia versionada de la propuesta en su revisión 2, con las decisiones de Enzo del 2026-11-11:
+  - C9 se parte en C9‑A (coordinación de operaciones: bloqueo exclusivo, carrera de `maintenance open`, supervisor con estado `blocked`) y C9‑B (bloqueo reversible de escrituras);
+  - C9‑B incluye la máquina de estados del diario, el restablecimiento automático solo tras un cierre completo y `resume` auditado;
+  - C9‑B incluye también el nuevo modelo de roles: `districom_ops` es dueño de la base y la app pierde el acceso a otras bases, sin revocaciones globales.
+- C6 respeta el bloqueo de C9‑A. C11 y C12 dependen también del modo mantenimiento de C5. Toda operación nueva toma el bloqueo exclusivo.
+- Precisiones de Enzo del 2026-11-16:
+  - **Protocolo de arranque sin interbloqueo:** `services start` valida, escribe la solicitud y suelta el bloqueo antes de arrancar el Stack. El supervisor hace la validación decisiva con el bloqueo tomado y lo mantiene hasta registrar su fase.
+  - **Excepción de `writes_resume_check`:** solo para el `resume` dueño del bloqueo real, con las pruebas negativas C9‑X1 a C9‑X7.
+  - **`closed_complete`:** es solo candidato a recuperación automática; la app arranca recién después de reanudar y verificar las conexiones.
+- `ROADMAP.md` y `docs/WINDOWS_DEPLOYMENT.md §8.5`: el nuevo orden. La siguiente es C9‑A, autorizada recién después de mergear esta revisión.
+
 ### Added — F1.4: importador AXUM «Compró / No compró» (en revisión)
 - **Tipo `commercial.axum.no_purchase`** (`app/modules/commercial/imports/no_purchase.py`), en la pantalla Importaciones existente. Lee el export real de AXUM: XLSX con una hoja `Data`, encabezado con la columna A vacía, una fila `Vendedor: NN` por preventista y todas las celdas como texto (`docs/IMPORTS.md §3.6`).
   - Solo las filas con motivo crean un evento. Las filas `Si` quedan en el staging como `skipped`, con el mensaje «Compró: la fila queda trazable pero no genera un evento de no compra.». No se modelan ni se infieren visitas.
