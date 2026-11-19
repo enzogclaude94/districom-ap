@@ -23,7 +23,18 @@ from tests.modules.settlements.employee_movement_support import area_admin, inte
 __all__ = ["funded"]
 
 FINGERPRINT = "c" * 64
-LATER = date(2027, 6, 30)
+
+
+# Dates by their relation to the loans of `world` (given on `days_ago(2)`), resolved when used (`days.py`): no
+# concrete day is part of these rules, so none is fixed.
+def first_due() -> date:
+    """The first installment of the fixture's loans: after the loan, with room for a date between the two."""
+    return today() + timedelta(days=28)
+
+
+def later() -> date:
+    """A due date after every installment of the fixture's loans (3 monthly from `first_due`)."""
+    return first_due() + timedelta(days=210)
 
 
 @pytest.fixture
@@ -40,9 +51,9 @@ def world(
     admin = area_admin(user_as)
     beto = employee("Beto")
     registered(admin, "CONSUMPTION", beto, "1")
-    plain = given(admin, ana, funded["main_cash"], "3000", 3, on=days_ago(2), first_due_on=date(2026, 11, 30))
-    other = given(admin, ana, funded["main_cash"], "600", 3, on=days_ago(2), first_due_on=date(2026, 11, 30))
-    other = deferred(admin, installment(other, 2)["id"], [(LATER, "200")])
+    plain = given(admin, ana, funded["main_cash"], "3000", 3, on=days_ago(2), first_due_on=first_due())
+    other = given(admin, ana, funded["main_cash"], "600", 3, on=days_ago(2), first_due_on=first_due())
+    other = deferred(admin, installment(other, 2)["id"], [(later(), "200")])
     db.rollback()
     return {
         "loan": plain,
@@ -287,18 +298,18 @@ def test_checks_on_insert_of_an_installment(world: dict[str, Any], db: Session) 
     )
     assert "cannot become PAID" in refused or "ck_employee_loan_installments_status" in refused
     # Correlative and never reused.
-    assert "is not the next one" in _refused(db, lambda: _installment(db, other["id"], 7, "1", LATER, two) and None)
-    assert "is not the next one" in _refused(db, lambda: _installment(db, other["id"], 2, "1", LATER, two) and None)
+    assert "is not the next one" in _refused(db, lambda: _installment(db, other["id"], 7, "1", later(), two) and None)
+    assert "is not the next one" in _refused(db, lambda: _installment(db, other["id"], 2, "1", later(), two) and None)
     # After the loan is published, an installment only replaces a deferred one.
     assert "the initial schedule is written with the loan" in _refused(
-        db, lambda: _installment(db, lid, 4, "1", LATER) and None
+        db, lambda: _installment(db, lid, 4, "1", later()) and None
     )
     # Its origin is DEFERRED and of the same loan.
     assert "replaces a deferred installment of the same loan" in _refused(
-        db, lambda: _installment(db, lid, 4, "1", LATER, _inst_id(loan, 1)) and None
+        db, lambda: _installment(db, lid, 4, "1", later(), _inst_id(loan, 1)) and None
     )
     assert "replaces a deferred installment of the same loan" in _refused(
-        db, lambda: _installment(db, lid, 4, "1", LATER, two) and None
+        db, lambda: _installment(db, lid, 4, "1", later(), two) and None
     )
     # No cycles: the origin is always an earlier installment (never itself nor a later one).
     assert "ck_employee_loan_installments_deferred_from_earlier" in _refused(
@@ -309,7 +320,7 @@ def test_checks_on_insert_of_an_installment(world: dict[str, Any], db: Session) 
             "deferred_from_id, created_by) OVERRIDING SYSTEM VALUE VALUES (0, :l, 5, :d, 1, 'SCHEDULED', :p, "
             "(SELECT id FROM users ORDER BY id LIMIT 1))",
             l=other["id"],
-            d=LATER,
+            d=later(),
             p=two,
         ),
     )
@@ -322,7 +333,7 @@ def test_checks_on_insert_of_an_installment(world: dict[str, Any], db: Session) 
                 "DISABLE TRIGGER trg_employee_loan_installments_check"
             )
         )
-        _installment(db, lid, 1, "1", LATER)
+        _installment(db, lid, 1, "1", later())
 
     assert "uq_employee_loan_installments_loan_id_number" in _refused(db, _duplicate)
 
@@ -341,7 +352,7 @@ def test_deferring_is_exact(world: dict[str, Any], db: Session) -> None:
         def _write() -> None:
             db.execute(text(defer_sql), {"u": w["user"], "k": uuid4(), "f": FINGERPRINT, "i": i})
             for k, amount in enumerate(replacements):
-                _installment(db, loan["id"], 4 + k, amount, LATER, i)
+                _installment(db, loan["id"], 4 + k, amount, later(), i)
 
         return _write
 
@@ -372,7 +383,11 @@ def test_a_replacement_falls_after_the_deferred_installment_and_in_order(world: 
     replacements of one deferral go in order: written by hand, the insert or the commit fails."""
     w = world
     loan = w["loan"]
-    one = _inst_id(loan, 1)  # $1.000, due on 30/11/2026
+    one = _inst_id(loan, 1)  # $1.000
+    deferred_due = date.fromisoformat(installment(loan, 1)["due_on"])
+    day = timedelta(days=1)
+    # Every case below is on or after the loan's date, so only the rules under test can refuse it.
+    assert date.fromisoformat(loan["business_date"]) < deferred_due - day
     defer_sql = (
         "UPDATE settlements.employee_loan_installments SET status = 'DEFERRED', deferred_reason = 'x', "
         "deferred_by = :u, deferred_at = now(), deferral_request_id = :k, deferral_fingerprint = :f WHERE id = :i"
@@ -388,21 +403,21 @@ def test_a_replacement_falls_after_the_deferred_installment_and_in_order(world: 
 
     db.rollback()
     not_after = "not after the deferred installment"
-    assert not_after in _refused(db, _defer((date(2026, 11, 30), "1000")))
-    assert not_after in _refused(db, _defer((date(2026, 11, 15), "1000")))
-    assert not_after in _refused(db, _defer((date(2026, 12, 15), "400"), (date(2026, 11, 29), "600")))
+    assert not_after in _refused(db, _defer((deferred_due, "1000")))  # the same day
+    assert not_after in _refused(db, _defer((deferred_due - day, "1000")))  # earlier, still after the loan
+    # The second one is the earlier one.
+    assert not_after in _refused(db, _defer((deferred_due + 15 * day, "400"), (deferred_due - day, "600")))
     out_of_order = "are out of order"
-    assert out_of_order in _refused(db, _defer((date(2027, 1, 31), "400"), (date(2026, 12, 31), "600")))
-    _defer((date(2026, 12, 1), "400"), (date(2026, 12, 1), "600"))()
+    assert out_of_order in _refused(db, _defer((deferred_due + 62 * day, "400"), (deferred_due + 31 * day, "600")))
+    _defer((deferred_due + day, "400"), (deferred_due + day, "600"))()  # after it, both on the same day
     db.commit()
-    # A chain: #4 (01/12) is deferred against its own date, not #1's.
-    four = int(
-        db.execute(
-            text("SELECT id FROM settlements.employee_loan_installments WHERE loan_id = :l AND number = 4"),
-            {"l": loan["id"]},
-        ).scalar_one()
-    )
+    # A chain: #4 is deferred against its own date, not #1's.
+    four, four_due = db.execute(
+        text("SELECT id, due_on FROM settlements.employee_loan_installments WHERE loan_id = :l AND number = 4"),
+        {"l": loan["id"]},
+    ).one()
     db.rollback()
+    assert four_due == deferred_due + day
 
     def _defer_four(due_on: date) -> Callable[[], None]:
         def _write() -> None:
@@ -411,8 +426,8 @@ def test_a_replacement_falls_after_the_deferred_installment_and_in_order(world: 
 
         return _write
 
-    assert not_after in _refused(db, _defer_four(date(2026, 12, 1)))
-    _defer_four(date(2026, 12, 2))()
+    assert not_after in _refused(db, _defer_four(four_due))
+    _defer_four(four_due + day)()
     db.commit()
 
 
@@ -421,7 +436,7 @@ def test_installments_never_change_nor_go_away(world: dict[str, Any], db: Sessio
     w = world
     loan, other = w["loan"], w["deferred"]
     scheduled, deferred_ = _inst_id(loan, 1), _inst_id(other, 2)
-    for column, value in (("amount", "1"), ("due_on", f"'{LATER}'"), ("number", "9"), ("loan_id", str(other["id"]))):
+    for column, value in (("amount", "1"), ("due_on", f"'{later()}'"), ("number", "9"), ("loan_id", str(other["id"]))):
         assert "never change" in _refused(
             db,
             _sql(
@@ -459,7 +474,7 @@ def test_published_and_reversed_loans_never_change_nor_go_away(
         ("employee_id", str(w["beto"])),
         ("funding_account_id", str(w["bank"])),
         ("installment_count", "2"),
-        ("first_due_on", f"'{LATER}'"),
+        ("first_due_on", f"'{later()}'"),
         ("description", "'otra'"),
         ("reference", "'otra'"),
     ):
@@ -519,7 +534,7 @@ def test_reversals_are_exact(world: dict[str, Any], db: Session) -> None:
     _reversal(on_=on, cancel_installments=True)()
     db.commit()
     assert "is reversed" in _refused(
-        db, lambda: _installment(db, loan["id"], 4, "1", LATER, _inst_id(loan, 1)) and None
+        db, lambda: _installment(db, loan["id"], 4, "1", later(), _inst_id(loan, 1)) and None
     )
 
 
