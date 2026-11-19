@@ -39,6 +39,12 @@ Any state but ``none`` keeps the application down (``safety.start_blockers``: th
 no new process can pass for it). After an interruption only :func:`resume` resolves the state: manual (an
 administrator, with the operation and a reason, audited) from any state, or automatic (the supervisor) only
 from ``closed_complete`` with its evidence verified against the cluster. **Any doubt keeps writes blocked.**
+A reversal that cannot be verified puts the flag back to ``false`` if it can and leaves the journal in
+``reverting``: blocked, until a controlled ``resume`` (Enzo 2026-11-19).
+
+**What is read and logged.** ``districom_ops`` is member of ``pg_read_all_stats`` only to see ``xact_start`` and
+the backend type of the application's sessions in ``pg_stat_activity``; the block never reads ``query`` and logs
+only counts, steps and technical reasons (Enzo 2026-11-19, decision 1).
 
 Until C10 and C11 no real close reaches ``closed_complete``: :func:`complete` exists for them and the tests use
 fabricated journals and evidence only. No real day close is validated here.
@@ -340,16 +346,39 @@ def revert(install: Install, lock: OperationLock, owner: str) -> None:
         raise WriteBlockError(f"a write block in {journal.state.value} is not reverted; only resume leaves it")
     if journal.owner != owner or journal.owner_lock != lock.token:
         raise WriteBlockError("only the live owner reverts a write block; after an interruption use resume")
+    if journal.changed.get("revert_failed"):
+        raise WriteBlockError("a reversal that could not be verified is not retried; only resume leaves it")
     journal = _save(state, journal, State.REVERTING)
     db = Database(install)
-    if journal.changed.get("allow_connections_was") is True and not db.allows_connections():
-        db.set_allow_connections(True)
-    if journal.changed.get("allow_connections_was") is True and not db.allows_connections():
-        raise WriteBlockError("ALLOW_CONNECTIONS did not go back to true")
+    if journal.changed.get("allow_connections_was") is True:
+        try:
+            if not db.allows_connections():
+                db.set_allow_connections(True)
+            if not db.allows_connections():
+                raise WriteBlockError("ALLOW_CONNECTIONS did not go back to true")
+        except WriteBlockError as exc:
+            _revert_failed(install, db, journal, exc)
     # C6 and C5: tasks resumed and Caddy back to normal mode (hooks; nothing was changed yet).
     _save(state, journal, State.NONE)
     _record(install).step(owner, "write_block_reverted")
     log.warning("write_block_reverted", extra={"operation": owner})
+
+
+def _revert_failed(install: Install, db: Database, journal: Journal, exc: WriteBlockError) -> None:
+    """A reversal that cannot be verified (Enzo 2026-11-19, decision 3): back to the safe side. The flag goes to
+    ``false`` again if it can, the journal stays in ``reverting`` (the application stays down, the supervisor
+    records ``blocked``) and only a controlled ``resume`` leaves it. The reason is technical: no SQL, no values."""
+    owner = journal.owner or ""
+    with contextlib.suppress(WriteBlockError):
+        db.set_allow_connections(False)
+    _save(install.layout.state, journal, State.REVERTING, changed={**journal.changed, "revert_failed": True})
+    try:
+        flag = "false" if not db.allows_connections() else "true"
+    except WriteBlockError:
+        flag = "unknown"
+    log.critical("write_block_revert_failed", extra={"operation": owner, "reason": str(exc), "datallowconn": flag})
+    _record(install).step(owner, "write_block_revert_failed", reason=str(exc), datallowconn=flag)
+    raise WriteBlockError(f"the reversal could not be verified; writes stay blocked until a resume: {exc}") from exc
 
 
 def complete(install: Install, lock: OperationLock, owner: str, evidence: dict[str, Any]) -> None:
