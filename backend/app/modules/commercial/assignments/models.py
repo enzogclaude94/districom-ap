@@ -83,5 +83,5 @@ class CustomerSalespersonAssignment(IdMixin, TimestampMixin, _History, Base):
     source_seller_label: Mapped[str | None] = mapped_column(String(200))
     source_seller_key: Mapped[str | None] = mapped_column(String(200))
     seller_mapping_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("external_entity_mappings.id", ondelete="RESTRICT")
+        BigInteger, ForeignKey("external_entity_mappings.id", ondelete="RESTRICT"), index=True
     )

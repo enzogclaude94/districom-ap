@@ -9,6 +9,8 @@ from fastapi import APIRouter
 
 from app.platform.imports.registry import ImportTypeSpec
 from app.platform.imports.registry import registry as import_type_registry
+from app.platform.mappings.resolvers import MappingResolverSpec
+from app.platform.mappings.resolvers import registry as mapping_resolver_registry
 from app.platform.parties.functions import EmployeeFunctionSpec
 from app.platform.parties.functions import registry as function_registry
 from app.platform.quality.registry import QualityCodeSpec
@@ -45,6 +47,9 @@ class ModuleSpec:
     import_types: tuple[ImportTypeSpec, ...] = ()
     # Data quality codes the module raises; codes are `<key>.<entity>.<problem>`.
     quality_codes: tuple[QualityCodeSpec, ...] = ()
+    # How the module's facts follow a mapping decision (F1.5): which columns took their identity from a mapping and
+    # which issues the decision may close. The platform decides; it applies these without importing the module.
+    mapping_resolvers: tuple[MappingResolverSpec, ...] = ()
 
 
 _installed: dict[str, ModuleSpec] = {}
@@ -69,6 +74,8 @@ def install(module: ModuleSpec) -> None:
         import_type_registry.register(module.key, import_type)
     for code in module.quality_codes:
         quality_code_registry.register(code)
+    for resolver in module.mapping_resolvers:
+        mapping_resolver_registry.register(resolver)
 
 
 def installed_modules() -> list[ModuleSpec]:

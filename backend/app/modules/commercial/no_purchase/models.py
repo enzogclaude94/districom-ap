@@ -45,12 +45,12 @@ class NoPurchaseEvent(IdMixin, TimestampMixin, Base):
     source_customer_name: Mapped[str | None] = mapped_column(String(200))  # PII: never logged
     source_customer_address: Mapped[str | None] = mapped_column(String(300))  # PII: never logged
     customer_mapping_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("external_entity_mappings.id", ondelete="RESTRICT")
+        BigInteger, ForeignKey("external_entity_mappings.id", ondelete="RESTRICT"), index=True
     )
     salesperson_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("employees.id", ondelete="RESTRICT"))
     source_salesperson: Mapped[str] = mapped_column(String(40))  # the code of the «Vendedor: NN» group
     salesperson_mapping_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("external_entity_mappings.id", ondelete="RESTRICT")
+        BigInteger, ForeignKey("external_entity_mappings.id", ondelete="RESTRICT"), index=True
     )
     reason_source: Mapped[str] = mapped_column(String(200))  # «Compro?» as written, always kept
     reason_mapping_id: Mapped[int] = mapped_column(

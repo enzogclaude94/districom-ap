@@ -386,6 +386,7 @@ Un comprobante, **sin ítems** (la fuente no los trae).
 | business_date | date NOT NULL (`fechas`) |
 | issued_at | timestamptz NULL (`fechor`, trae hora) |
 | customer_id | FK `public.customers` NULL — NULL si `codcli = 0` o sin mapping |
+| customer_mapping_id | FK `external_entity_mappings` NULL — el mapping STORE SYS por el que se resolvió el código (aunque siga pendiente); una decisión sobre él re‑resuelve `customer_id` (F1.5, migración `0039`, con backfill) |
 | source_customer_code, source_customer_name | text |
 | net_amount | numeric(14,2) — `netosa` tal cual (sin signo en la fuente) |
 | total_amount | numeric(14,2) — `total` tal cual (con signo en la fuente) |
@@ -587,6 +588,7 @@ Diseñados desde las queries previstas; se revisan con `EXPLAIN ANALYZE` al impl
 | data_quality_issues | `UNIQUE (code, dedupe_key) WHERE status='open'`, `(status, code)` | pantalla de calidad |
 | documents | `UNIQUE (document_key)`, `(business_date)`, `(customer_id, business_date)`, `(document_type_id, business_date)` | KPIs futuros por período, cliente y tipo |
 | sale_lines | `(business_date) WHERE status='ACTIVE'`, `(customer_id, business_date)`, `(product_id, business_date)`, `(import_job_id)` | reemplazo por período, futuras métricas |
+| documents, sale_lines, no_purchase_events, customer_salesperson_assignments | `(*_mapping_id)` de cada columna de mapping (0039) | re‑resolución de una decisión de mapping (`docs/IMPORTS.md §6.4`) |
 | assignments | GiST `(customer_id, daterange)` | atribución histórica |
 | product_prices / zone_visit_days | GiST de la exclusión | vigencia |
 

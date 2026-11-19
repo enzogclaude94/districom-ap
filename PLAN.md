@@ -1,6 +1,6 @@
 # PLAN — DistriCom · Plataforma de Inteligencia Comercial
 
-> Estado del documento: **v0.5 — Fase 0 DONE; plataforma modular DONE; Fase 1 de Comercial IN_PROGRESS (F1.0–F1.3 aprobados y mergeados, F1.4 en revisión)**
+> Estado del documento: **v0.5 — Fase 0 DONE; plataforma modular DONE; Fase 1 de Comercial IN_PROGRESS (F1.0–F1.4 aprobados y mergeados, F1.5 en revisión)**
 > Última actualización: 2026-10-30 (secciones de Comercial; las de Rendiciones las mantiene su hilo)
 > Fuente de requisitos: prompt maestro adjunto por Enzo (`message.md`, 165 secciones).
 
@@ -271,8 +271,9 @@ Estado: **IN_PROGRESS.** Diseño F1.0 aprobado por Enzo el 2026-10-30 con las de
 | F1.2 maestros, configuración y mappings | Aprobada y mergeada (PR #71, 2026-11-05) |
 | F1.3a importadores STORE SYS (backend) | DONE (PR #73, 2026-11-06): clientes, artículos, comprobantes y ventas (por `codigo` y `cod_cliente` exactos) cerrados contra exports reales; identidad semántica de imports |
 | F1.3b pantalla mínima de Importaciones | DONE (PR #78, 2026-11-10): subir, revisar, confirmar, descartar, decisión de admin e historial; confirm de 7414 líneas en 4,7 s |
-| F1.4 importador AXUM «Compró / No compró» | En revisión: 1271 no compras del export real (las 1490 `Si` quedan solo en el staging), cliente por código y nombre con regla auditada (ADR 018), preventistas pendientes, reimport con decisión de admin |
-| F1.5 – F1.8 | Pendientes de aprobación sucesiva |
+| F1.4 importador AXUM «Compró / No compró» | DONE (PR #85, 2026-11-16): 1271 no compras del export real (las 1490 `Si` quedan solo en el staging), cliente por código y nombre con regla auditada (ADR 018), preventistas pendientes, reimport con decisión de admin |
+| F1.5 revisión manual de mappings | En revisión: pantalla Datos › Mapeos, re‑resolución de hechos por registro del módulo, confirmación en lote atómica, impacto contado por el backend (`docs/IMPORTS.md §6.4`) |
+| F1.6 – F1.8 | Pendientes de aprobación sucesiva |
 
 **Confirmaciones de ADR 014 §3:** Enzo respondió S1–S8 el 2026-11-01; ninguna afecta F1.1b y se vuelcan en los documentos de F1.2/F1.3, que las aplican. Lista original:
 - S1 días de visita de las zonas `RUTA 03` y `RUTA 05` (MISA) · S2 `LUVI` = Lumivi y `MAJU` = Majusa → antes de sembrar reglas (F1.2).
