@@ -246,7 +246,6 @@ jobs:
       DISTRICOM_OPS_RESULTS: ${{ github.workspace }}/deploy/windows/ops/test-results
       DISTRICOM_C9B_RESULTS: ${{ github.workspace }}/deploy/windows/ops/test-results
       DISTRICOM_C9M_SUITE: "1"
-      DISTRICOM_C9B_WORK: ${{ runner.temp }}/c9b
       PG_VERSION: "17.6"
     steps:
       - run: git config --global core.autocrlf false
@@ -272,6 +271,8 @@ jobs:
         working-directory: backend
         run: uv sync --frozen
       - name: C9-1 to C9-9, C9-H1, C9-M, C9-R, C9-X7 (PostgreSQL ${{ env.PG_VERSION }})
+        env:
+          DISTRICOM_C9B_WORK: ${{ runner.temp }}/c9b  # the runner context exists only at step level
         run: uv run pytest db_tests -v -p no:cacheprovider
       - name: W2-C1 and W2-C9-B results
         if: always()
