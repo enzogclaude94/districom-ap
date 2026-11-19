@@ -316,9 +316,12 @@ class DocumentsAdapter:
                 details={"document_type_id": document_type.id},
             )
         customer_id = None
+        customer_mapping_id = None
         code = record["customer_code"]
         if code is not None and links_customer(document_type):
             resolution = mappings.resolve(db, customer_key(code))
+            # Kept even while unresolved: deciding that mapping later completes this document (F1.5).
+            customer_mapping_id = resolution.mapping_id
             if resolution.resolved:
                 customer_id = resolution.entity_id
             else:
@@ -341,6 +344,7 @@ class DocumentsAdapter:
             business_date=date.fromisoformat(record["business_date"]),
             issued_at=datetime.fromisoformat(record["issued_at"]) if record["issued_at"] else None,
             customer_id=customer_id,
+            customer_mapping_id=customer_mapping_id,
             source_customer_code=code,
             source_customer_name=record["customer_name"],
             net_amount=Decimal(record["net"]),

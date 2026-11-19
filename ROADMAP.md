@@ -22,7 +22,7 @@ DistriCom es una plataforma modular (ADR 006). Este roadmap tiene tres carriles:
 | Fase | Nombre | Estado | Depende de |
 |---|---|---|---|
 | 0 | Fundación y arquitectura | **DONE** (aprobada y mergeada el 2026-10-02, PR #1) | — |
-| 1 | Importación y maestros | **IN_PROGRESS** (F1.0–F1.3 DONE; F1.4 importador AXUM en revisión) | 0 · PL‑1 · PL‑2a |
+| 1 | Importación y maestros | **IN_PROGRESS** (F1.0–F1.4 DONE; F1.5 revisión de mappings en revisión) | 0 · PL‑1 · PL‑2a |
 | 2 | Dashboard general | PLANNED | 1 |
 | 3 | Rutas y preventistas | PLANNED | 2 |
 | 4 | Cliente 360° y estados | PLANNED | 1 (puede ir en paralelo con 3) |
@@ -88,8 +88,8 @@ Cada etapa termina con un informe y la aprobación de Enzo. Despliegue, red, bac
 | F1.1b | Infraestructura de plataforma: archivos, jobs, lectores CSV/XLSX/XLS, staging, pipeline con lock y transacción, issues base, API y CLI | **DONE** (PR #69, aprobado y mergeado 2026-11-03; migración 0033) | F1.1a |
 | F1.2 | Maestros y configuración + núcleo de mappings: `customers`, `external_entity_mappings`, schema `commercial`, zonas, listas, categorías, tipos de comprobante, motivos, productos, familias, precios, seed controlado | **DONE** (PR #71, aprobado y mergeado 2026-11-05; migraciones 0034–0035; MISA sin definir) | F1.1b |
 | F1.3 | Importadores STORE SYS (clientes, artículos, comprobantes, ventas) + pantalla Importaciones | DONE (F1.3a PR #73, mergeado 2026-11-06, migraciones 0036–0037; F1.3b PR #78, mergeado 2026-11-10) | F1.2 |
-| F1.4 | Importador AXUM «Compró / No compró» (solo motivos de no compra, cliente por código con regla auditada, ocurrencias, reimport con decisión de admin; ADR 018, migración 0038) | IN_PROGRESS (en revisión) | F1.3 · export real (recibido 2026-11-11) |
-| F1.5 | Revisión manual de mappings (ambiguos, confirmación en lote, reasignación con motivo, re‑resolución) + pantalla Mapeos | PLANNED | F1.4 |
+| F1.4 | Importador AXUM «Compró / No compró» (solo motivos de no compra, cliente por código con regla auditada, ocurrencias, reimport con decisión de admin; ADR 018, migración 0038) | DONE (PR #85, 2026-11-16) | F1.3 · export real (recibido 2026-11-11) |
+| F1.5 | Revisión manual de mappings (ambiguos, confirmación en lote, reasignación con motivo, re‑resolución) + pantalla Mapeos (`docs/IMPORTS.md §6.4`, migración 0039) | IN_PROGRESS (en revisión) | F1.4 |
 | F1.6 | Calidad de datos completa + pantalla Calidad | PLANNED | F1.5 |
 | F1.7 | UI mínima de maestros (clientes, productos, zonas, vendedores, listas) | PLANNED | F1.6 |
 | F1.8 | Hardening: reproceso, recuperación, performance con volumen realista, generador de demo por pipeline con seed fijo, documentación e informe de fase | PLANNED | F1.7 |

@@ -13,6 +13,27 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 - El supervisor y `services start` respetan el diario; PostgreSQL no se reinicia con un bloqueo de escrituras sin resolver. Regla nueva de C3: el Stack lee `pgdata\global\pg_control`.
 - Pruebas: unidades (máquina de estados, contexto C9‑X1..X6, supervisor con SCM simulado), `db_tests` contra PostgreSQL 17.6 real (C9‑1..9, H1, M, la suite completa del backend, R y X7 con procesos matados en cada paso) y `services_tests` con los servicios reales. Sin jobs nuevos: «Windows ops (W2-C)» instala los binarios oficiales de PostgreSQL.
 
+### Added — F1.5: revisión manual de mappings y re‑resolución (en revisión)
+- **Pantalla Comercial › Datos › Mapeos** (`/comercial/datos/mapeos`). Datos muestra solo Importaciones y Mapeos (sale el ítem «Calidad», que era un marcador de fase).
+  - **Cola:** tarjetas por estado, filtros (estado, sistema, tipo de código), búsqueda por código o nombre y primero los abiertos más antiguos, en palabras de negocio («Preventista AXUM», «Vendedor STORE SYS», «Cliente AXUM», «Cliente STORE SYS»).
+  - **Detalle:** origen, candidatos (nunca preseleccionados), última decisión y el impacto de cada decisión contado por el backend, por ejemplo «655 eventos de no compra históricos quedarán asociados a este preventista.».
+  - **Búsqueda de la entidad:** clientes por nombre, razón social o código STORE SYS, con zona; empleados activos, primero los preventistas. Nunca CUIT, teléfono ni dirección, y nunca crea entidades.
+- **Re‑resolución** (`docs/IMPORTS.md §6.4`):
+  - nuevo `ModuleSpec.mapping_resolvers` y registro de plataforma (`app/platform/mappings/resolvers.py`); la plataforma decide y el módulo declara qué columnas siguen al mapping y qué issues cierra;
+  - Comercial registra los cuatro tipos;
+  - toda decisión completa, mueve (reasignar) o desvincula (excluir) solo los hechos de ese mapping, por su id y nunca por nombre;
+  - cierra los issues cuya condición desapareció.
+- **Decisiones sin `commit`:** el endpoint hace el commit. `confirm`, `reassign`, `reject` y `exclude` devuelven `Decision(mapping, resolution)` y aceptan `expected_status`, que responde 409 `mapping_changed` si otra pestaña decidió antes. La re‑resolución corre dentro del bloqueo de fila.
+- **Lote:** `POST /api/v1/commercial/mappings/batch-confirm` (operator, hasta 200). Es todo o nada, con el `mapping_id` del primer fallo; la pantalla solo confirma candidatos propuestos después de revisarlos.
+- **API nueva** (aditiva): `GET /mappings/summary`, `q` y orden en `GET /mappings`, `GET /mappings/{id}/impact`, `GET /mappings/{id}/targets`. `MappingOut` suma tipo en palabras de negocio, primera y última importación, quién decidió, entidad, candidatos, hechos (vigentes e historial) y `resolution`.
+- **Migración 0039** `commercial: mapping links for re-resolution`: `documents.customer_mapping_id` (con backfill desde el mapping STORE SYS del mismo código, solo para los tipos cuyo `codcli` es cliente) e índices sobre las columnas `*_mapping_id`. El importador de comprobantes la completa desde ahora.
+- **Adopción por identidad externa exacta** (D2, Enzo 2026‑11‑17): una venta o un comprobante importado antes que el maestro que crea su cliente ya no queda pendiente para siempre.
+  - Nuevo `OrphanAdoption` opcional en `FactLink`: columna del código fuente, normalización del namespace y filtro de filas elegibles. Comercial lo declara para `customer/STORE_SYS/customer` en `sale_lines` y `documents` (solo tipos cuyo `codcli` es cliente).
+  - Corre cuando `observe` crea el mapping (el maestro con `created_from_master`, sin reimportar la venta) y en cada decisión, en la misma transacción: primero el `*_mapping_id`, después la re‑resolución normal (la entidad solo si está `confirmed`), y el issue `commercial.customer.unresolved_code` se cierra solo si no quedan hechos de ese código sin mapping.
+  - Solo el mismo tipo, sistema, namespace y código exacto normalizado; nunca por nombre, etiqueta, CUIT, similitud, otro sistema u otro namespace. El historial `SUPERSEDED` se adopta igual.
+  - La migración 0039 suma dos índices parciales por el código de las filas sin mapping y aplica la regla a los datos existentes.
+- **Auditoría:** `platform.mapping.facts_resolved` por decisión (con `facts_adopted`), `platform.mapping.orphans_adopted` cuando un import crea un mapping que adopta hechos y `platform.mapping.batch_confirmed` por lote. Solo llevan ids y conteos.
+
 ### Added — Servidor: W2‑C9‑A, coordinación de operaciones (en revisión)
 - `districom_ops.oplock`: bloqueo exclusivo entre procesos (`state\operations.lock`). Lo libera el sistema operativo si el proceso muere, nunca vence, y quien no lo consigue falla nombrando al dueño.
 - `maintenance open` y `close` con el bloqueo, y la ventana creada en exclusiva: se corrige la carrera de dos aperturas simultáneas.
@@ -33,7 +54,7 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
   - **`closed_complete`:** es solo candidato a recuperación automática; la app arranca recién después de reanudar y verificar las conexiones.
 - `ROADMAP.md` y `docs/WINDOWS_DEPLOYMENT.md §8.5`: el nuevo orden. La siguiente es C9‑A, autorizada recién después de mergear esta revisión.
 
-### Added — F1.4: importador AXUM «Compró / No compró» (en revisión)
+### Added — F1.4: importador AXUM «Compró / No compró» (DONE, PR #85)
 - **Tipo `commercial.axum.no_purchase`** (`app/modules/commercial/imports/no_purchase.py`), en la pantalla Importaciones existente. Lee el export real de AXUM: XLSX con una hoja `Data`, encabezado con la columna A vacía, una fila `Vendedor: NN` por preventista y todas las celdas como texto (`docs/IMPORTS.md §3.6`).
   - Solo las filas con motivo crean un evento. Las filas `Si` quedan en el staging como `skipped`, con el mensaje «Compró: la fila queda trazable pero no genera un evento de no compra.». No se modelan ni se infieren visitas.
   - Fecha de negocio = día de `Fecha y Hora Subida`; las horas de subida, inicio y fin y la duración se guardan tal cual, sin combinarlas. Un inicio posterior a la subida es un aviso y no cambia el día.

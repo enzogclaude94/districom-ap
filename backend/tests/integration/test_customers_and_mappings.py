@@ -180,9 +180,9 @@ def test_manual_confirm_reject_exclude_reassign_and_their_rules(db: Session, adm
     pseudo = mappings.observe(db, name_of("VARIOS"), label="VARIOS", job_id=job)
     db.commit()
 
-    rejected = mappings.reject(db, operator, pending.id, reason=None)
+    rejected = mappings.reject(db, operator, pending.id, reason=None).mapping
     assert (rejected.status, rejected.entity_id) == ("rejected", None)
-    confirmed = mappings.confirm(db, operator, pending.id, rosa.id, reason=None, is_admin=False)
+    confirmed = mappings.confirm(db, operator, pending.id, rosa.id, reason=None, is_admin=False).mapping
     assert (confirmed.status, confirmed.entity_id, confirmed.method) == ("confirmed", rosa.id, "manual")
     assert confirmed.decided_by == operator.id
     assert confirmed.decided_at is not None
@@ -192,7 +192,7 @@ def test_manual_confirm_reject_exclude_reassign_and_their_rules(db: Session, adm
     with pytest.raises(AppError) as exc:
         mappings.reassign(db, admin, pending.id, sol.id, reason=None)
     assert exc.value.code == "reason_required"
-    moved = mappings.reassign(db, admin, pending.id, sol.id, reason="Era el kiosco de enfrente")
+    moved = mappings.reassign(db, admin, pending.id, sol.id, reason="Era el kiosco de enfrente").mapping
     assert moved.entity_id == sol.id
     with pytest.raises(AppError) as exc:
         mappings.exclude(db, operator, pending.id, reason="no", is_admin=False)
@@ -201,7 +201,7 @@ def test_manual_confirm_reject_exclude_reassign_and_their_rules(db: Session, adm
     with pytest.raises(AppError) as exc:
         mappings.exclude(db, operator, pseudo.id, reason=None, is_admin=False)
     assert exc.value.code == "reason_required"
-    excluded = mappings.exclude(db, operator, pseudo.id, reason="Pseudo cliente de mostrador", is_admin=False)
+    excluded = mappings.exclude(db, operator, pseudo.id, reason="Pseudo cliente de mostrador", is_admin=False).mapping
     assert (excluded.status, excluded.entity_id) == ("excluded", None)
     with pytest.raises(AppError) as exc:
         mappings.confirm(db, operator, pseudo.id, rosa.id, reason="x", is_admin=False)

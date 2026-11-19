@@ -307,6 +307,7 @@ class CustomersAdapter:
                 job_id=context.job_id,
                 entity_id=customer.id,
                 method="created_from_master",
+                user_id=context.user_id,
             )
             outcome = "inserted"
         elif resolution.resolved and resolution.entity_id is not None:

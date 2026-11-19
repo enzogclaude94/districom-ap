@@ -655,3 +655,158 @@ def test_no_purchase_events_migration_goes_down_and_up_and_refuses_to_drop_data(
             conn.execute(text("DELETE FROM commercial.no_purchase_reason_mappings"))
             conn.execute(text("TRUNCATE import_jobs, import_files, users CASCADE"))
         engine.dispose()
+
+
+def _document_columns(url: str) -> set[str]:
+    engine = create_engine(url)
+    try:
+        with engine.connect() as conn:
+            return set(
+                conn.execute(
+                    text(
+                        "SELECT column_name FROM information_schema.columns "
+                        "WHERE table_schema = 'commercial' AND table_name = 'documents'"
+                    )
+                ).scalars()
+            )
+    finally:
+        engine.dispose()
+
+
+def test_mapping_links_migration_backfills_documents_and_goes_down_and_up() -> None:
+    """F1.5: 0039 links each document to the STORE SYS customer mapping of its keyed code, only when the type's
+    codcli is a customer code; sale lines stored without a mapping are adopted by the mapping of their exact keyed
+    code (D2); facts of a confirmed mapping get its customer; down drops only the link and the indexes."""
+    cfg = alembic_config()
+    url = cfg.get_main_option("sqlalchemy.url")
+    assert url
+
+    command.upgrade(cfg, "head")
+    command.downgrade(cfg, "0038")
+    assert "customer_mapping_id" not in _document_columns(url)
+    engine = create_engine(url)
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO commercial.document_types (source_name, source_name_key, document_class, sign, "
+                    "commercial_universe) VALUES ('FACTURA A', 'FACTURA A', 'INVOICE', 1, true), "
+                    "('VALE PERSONAL V', 'VALE PERSONAL V', 'EMPLOYEE_VOUCHER', 0, false)"
+                )
+            )
+            conn.execute(text("INSERT INTO users (email, full_name, role) VALUES ('m@districom.test', 'M', 'admin')"))
+            conn.execute(
+                text(
+                    "INSERT INTO import_files (original_filename, storage_key, size_bytes, sha256, uploaded_by) "
+                    "SELECT 'f.xls', 'k', 1, repeat('a', 64), id FROM users"
+                )
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO import_jobs (status, file_id, created_by) "
+                    "SELECT 'completed', f.id, f.uploaded_by FROM import_files f"
+                )
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO external_entity_mappings (entity_type, source_system_id, namespace, external_id, "
+                    "status, candidates) SELECT 'customer', id, 'customer', '12', 'pending', '[]'::jsonb "
+                    "FROM source_systems WHERE code = 'STORE_SYS'"
+                )
+            )
+            for number, type_name, code in (
+                ("1", "FACTURA A", " 12 "),
+                ("2", "VALE PERSONAL V", "12"),
+                ("3", "FACTURA A", "99"),
+            ):
+                conn.execute(
+                    text(
+                        "INSERT INTO commercial.documents (document_type_id, source_type_name, point_of_sale, number, "
+                        "document_key, business_date, net_amount, total_amount, discount_amount, import_job_id, "
+                        "source_row_hash, source_customer_code) SELECT t.id, t.source_name, '0003', "
+                        "CAST(:number AS text), t.source_name || '|0003|' || CAST(:number AS text), '2026-10-23', "
+                        "100, 121, 0, j.id, '\\x00', :code "
+                        "FROM commercial.document_types t, import_jobs j WHERE t.source_name = :type_name"
+                    ),
+                    {"number": number, "type_name": type_name, "code": code},
+                )
+            conn.execute(text("INSERT INTO customers (display_name, display_name_key) VALUES ('X', 'X')"))
+            conn.execute(
+                text(
+                    "INSERT INTO external_entity_mappings (entity_type, source_system_id, namespace, external_id, "
+                    "status, method, entity_id, candidates) SELECT 'customer', s.id, 'customer', '13', 'confirmed', "
+                    "'created_from_master', c.id, '[]'::jsonb FROM source_systems s, customers c "
+                    "WHERE s.code = 'STORE_SYS'"
+                )
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO commercial.documents (document_type_id, source_type_name, point_of_sale, number, "
+                    "document_key, business_date, net_amount, total_amount, discount_amount, import_job_id, "
+                    "source_row_hash, source_customer_code) SELECT t.id, t.source_name, '0003', '4', "
+                    "'FACTURA A|0003|4', '2026-10-23', 100, 121, 0, j.id, '\\x00', '13' "
+                    "FROM commercial.document_types t, import_jobs j WHERE t.source_name = 'FACTURA A'"
+                )
+            )
+            for occurrence, code in ((1, " 12 "), (2, "13"), (3, "99")):
+                conn.execute(
+                    text(
+                        "INSERT INTO commercial.sale_lines (business_date, source_customer_code, source_product_code, "
+                        "quantity, import_job_id, occurrence) SELECT '2026-10-23', :code, 'P', 1, id, :occurrence "
+                        "FROM import_jobs"
+                    ),
+                    {"code": code, "occurrence": occurrence},
+                )
+        command.upgrade(cfg, "0039")
+        with engine.connect() as conn:
+            linked = dict(
+                conn.execute(
+                    text(
+                        "SELECT d.number, m.external_id FROM commercial.documents d "
+                        "LEFT JOIN external_entity_mappings m ON m.id = d.customer_mapping_id"
+                    )
+                ).all()
+            )
+        assert linked == {"1": "12", "2": None, "3": None, "4": "13"}
+        with engine.connect() as conn:
+            facts = conn.execute(
+                text(
+                    "SELECT 'line ' || l.source_customer_code, m.external_id, l.customer_id IS NOT NULL "
+                    "FROM commercial.sale_lines l LEFT JOIN external_entity_mappings m ON m.id = l.customer_mapping_id "
+                    "UNION ALL SELECT 'document ' || d.number, NULL, d.customer_id IS NOT NULL "
+                    "FROM commercial.documents d ORDER BY 1"
+                )
+            ).all()
+        assert [tuple(row) for row in facts] == [
+            ("document 1", None, False),  # pending mapping: no customer
+            ("document 2", None, False),
+            ("document 3", None, False),
+            ("document 4", None, True),  # confirmed mapping: its customer
+            ("line  12 ", "12", False),
+            ("line 13", "13", True),
+            ("line 99", None, False),
+        ]
+        command.downgrade(cfg, "0038")
+        assert "customer_mapping_id" not in _document_columns(url)
+        command.upgrade(cfg, "head")
+        assert _commercial_tables(url) == COMMERCIAL_TABLES
+    finally:
+        command.upgrade(cfg, "head")
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE commercial.documents DISABLE TRIGGER trg_documents_no_delete"))
+            conn.execute(text("DELETE FROM commercial.documents"))
+            conn.execute(text("TRUNCATE commercial.sale_lines"))
+            conn.execute(text("ALTER TABLE commercial.documents ENABLE TRIGGER trg_documents_no_delete"))
+            conn.execute(text("ALTER TABLE commercial.document_types DISABLE TRIGGER trg_document_types_no_delete"))
+            conn.execute(text("DELETE FROM commercial.document_types"))
+            conn.execute(text("ALTER TABLE commercial.document_types ENABLE TRIGGER trg_document_types_no_delete"))
+            conn.execute(
+                text("ALTER TABLE external_entity_mappings DISABLE TRIGGER trg_external_entity_mappings_no_delete")
+            )
+            conn.execute(text("DELETE FROM external_entity_mappings"))
+            conn.execute(
+                text("ALTER TABLE external_entity_mappings ENABLE TRIGGER trg_external_entity_mappings_no_delete")
+            )
+            conn.execute(text("TRUNCATE import_jobs, import_files, users CASCADE"))
+            conn.execute(text("TRUNCATE customers CASCADE"))
+        engine.dispose()

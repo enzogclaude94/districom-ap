@@ -27,6 +27,12 @@ class SaleLine(IdMixin, TimestampMixin, Base):
         Index("ix_sale_lines_active_business_date", "business_date", postgresql_where=text("status = 'ACTIVE'")),
         Index("ix_sale_lines_customer_id_business_date", "customer_id", "business_date"),
         Index("ix_sale_lines_product_id_business_date", "product_id", "business_date"),
+        # Lines stored before their code had a mapping, by the keyed code their mapping will adopt them by (D2).
+        Index(
+            "ix_sale_lines_orphan_customer_code",
+            text(r"regexp_replace(btrim(source_customer_code), '\s+', ' ', 'g')"),
+            postgresql_where=text("customer_mapping_id IS NULL"),
+        ),
         {"schema": SCHEMA},
     )
 
@@ -35,7 +41,7 @@ class SaleLine(IdMixin, TimestampMixin, Base):
     source_customer_code: Mapped[str] = mapped_column(String(40))
     source_customer_name: Mapped[str | None] = mapped_column(String(200))
     customer_mapping_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("external_entity_mappings.id", ondelete="RESTRICT")
+        BigInteger, ForeignKey("external_entity_mappings.id", ondelete="RESTRICT"), index=True
     )
     product_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey(f"{SCHEMA}.products.id", ondelete="RESTRICT"))
     source_product_code: Mapped[str] = mapped_column(String(40))
@@ -49,7 +55,7 @@ class SaleLine(IdMixin, TimestampMixin, Base):
     salesperson_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("employees.id", ondelete="RESTRICT"))
     source_seller: Mapped[str | None] = mapped_column(String(200))
     seller_mapping_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("external_entity_mappings.id", ondelete="RESTRICT")
+        BigInteger, ForeignKey("external_entity_mappings.id", ondelete="RESTRICT"), index=True
     )
     zone_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey(f"{SCHEMA}.zones.id", ondelete="RESTRICT"))
     source_zone: Mapped[str | None] = mapped_column(String(120))
