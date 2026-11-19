@@ -46,8 +46,8 @@ class LabInstall(Install):
 
 def workdir(factory: "pytest.TempPathFactory", name: str) -> Path:
     """A fresh folder for a cluster. On Windows, ``initdb`` runs with a restricted token (the Administrators group
-    deny-only) and cannot walk pytest's private temporary folders (created owner-only, like ``mkdtemp``): ``DISTRICOM_C9B_WORK``
-    (CI: under ``RUNNER_TEMP``) gives an ordinary folder instead."""
+    deny-only) and cannot walk pytest's private temporary folders (created owner-only, like ``mkdtemp``):
+    ``DISTRICOM_C9B_WORK`` (CI: under ``RUNNER_TEMP``) gives an ordinary folder instead."""
     root = os.environ.get("DISTRICOM_C9B_WORK")
     if not root:
         return factory.mktemp(name)
