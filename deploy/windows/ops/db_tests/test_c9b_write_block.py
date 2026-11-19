@@ -17,6 +17,7 @@ from db_tests.cluster import (
     APP_PASSWORD,
     APP_USER,
     DATABASE,
+    OPS_PASSWORD,
     OPS_USER,
     Cluster,
     Session,
@@ -230,20 +231,187 @@ def test_every_role_is_cut_and_kept_out_and_the_reversal_puts_everything_back(cl
         cluster.superuser("DROP ROLE c9_public; DROP ROLE c9_tester;")
 
 
+SENTINEL = "c9-texto-que-no-debe-registrarse-7f3a"
+
+
+def logged_text(cluster: Cluster, caplog: pytest.LogCaptureFixture) -> str:
+    """Everything the block left in writing: the log records (with their fields) and the operations record."""
+    records = [json.dumps({k: str(v) for k, v in vars(r).items()}) for r in caplog.records]
+    return "\n".join(records) + (state(cluster) / "operations.jsonl").read_text("utf-8")
+
+
 @pytest.mark.criterion("C9-1")
-def test_a_superuser_session_makes_the_block_revert_never_forced(cluster: Cluster) -> None:
-    session = Session(cluster, "postgres", database.superuser_password(cluster.install))
+@pytest.mark.criterion("C9-D3")
+def test_a_superuser_session_makes_the_block_revert_never_forced(
+    cluster: Cluster, caplog: pytest.LogCaptureFixture
+) -> None:
+    password = database.superuser_password(cluster.install)
+    session = Session(cluster, "postgres", password)
     try:
+        assert session.run(f"SELECT '{SENTINEL}';")
+        before = snapshot(cluster)
         lock, owner = opened(cluster)
         with pytest.raises(WriteBlockError, match="superuser"):
             write_block.block(cluster.install, lock, owner, wait_seconds=5)
+        # Reverted and verified on PostgreSQL itself: the flag, the roles, the members, pg_hba, the rows.
         assert journal(cluster).state is State.NONE
         assert cluster.allows()
+        assert snapshot(cluster) == before
+        assert cluster.app("SELECT 1;") == ["1"]
         assert session.run("SELECT 1;"), "the superuser session was ended"
+        steps = oplog(cluster).read().operations[owner].events
+        failed = [e for e in steps if e.get("step") == "write_block_failed"]
+        assert failed
+        assert "superuser" in failed[0]["reason"]
+        assert any(e.get("step") == "write_block_reverted" for e in steps)
+        text = logged_text(cluster, caplog)
+        assert "write_block_failed" in text
+        for secret in (SENTINEL, password, APP_PASSWORD, OPS_PASSWORD, "SELECT", "ALTER DATABASE"):
+            assert secret not in text, f"the record or the log holds {secret[:8]}…"
         window(cluster).close(owner, Event.REVERTED, lock)
         lock.release()
     finally:
         session.close()
+
+
+@pytest.mark.criterion("C9-D3")
+@pytest.mark.parametrize("failure", ["set_true", "verify"])
+def test_a_reversal_that_cannot_be_verified_stays_blocked_until_a_controlled_resume(
+    cluster: Cluster, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    """A superuser session makes the block fail; then the reversal itself fails: ALTER … true refused
+    (``set_true``) or the check after it unreadable (``verify``, the flag already true)."""
+    session = Session(cluster, "postgres", database.superuser_password(cluster.install))
+    real_set = write_block.Database.set_allow_connections
+    real_allows = write_block.Database.allows_connections
+    calls = {"after_true": 0}
+
+    def set_allow(self: write_block.Database, allowed: bool) -> None:
+        if allowed and failure == "set_true":
+            raise WriteBlockError("operations connection failed: injected")
+        real_set(self, allowed)
+        if allowed:
+            calls["after_true"] = 1
+
+    def allows(self: write_block.Database) -> bool:
+        if failure == "verify" and calls["after_true"] == 1:
+            calls["after_true"] = 2
+            raise WriteBlockError("pg_database could not be read: injected")
+        return real_allows(self)
+
+    try:
+        lock, owner = opened(cluster)
+        monkeypatch.setattr(write_block.Database, "set_allow_connections", set_allow)
+        monkeypatch.setattr(write_block.Database, "allows_connections", allows)
+        with pytest.raises(WriteBlockError, match="could not be verified"):
+            write_block.block(cluster.install, lock, owner, wait_seconds=5)
+        monkeypatch.undo()
+        assert journal(cluster).state is State.REVERTING  # blocked: only a resume leaves it
+        assert not cluster.allows(), "an unverified reversal left connections enabled"
+        with pytest.raises(QueryError) as caught:
+            cluster.app("SELECT 1;")
+        assert caught.value.code == "not_accepting"
+        assert write_block.journal_blocker(state(cluster)) is not None
+        with pytest.raises(WriteBlockError, match="only resume"):
+            write_block.revert(cluster.install, lock, owner)  # not even the live owner retries it
+        assert not cluster.allows()
+        events = oplog(cluster).read().operations[owner].events
+        record = [e for e in events if e.get("step") == "write_block_revert_failed"]
+        assert record
+        assert record[0]["datallowconn"] == "false"
+        assert any(r.getMessage() == "write_block_revert_failed" and r.levelname == "CRITICAL" for r in caplog.records)
+        window(cluster).close(owner, Event.REVERTED, lock)
+        lock.release()
+        session.close()
+        close_and_resume(cluster, owner)  # the controlled recovery
+        assert journal(cluster).state is State.NONE
+    finally:
+        session.close()
+
+
+# --- C9-D1: pg_read_all_stats only for districom_ops -------------------------------------------------------------
+
+
+@pytest.mark.criterion("C9-D1")
+def test_only_the_operations_role_sees_the_transactions_of_other_roles(cluster: Cluster) -> None:
+    cluster.superuser("CREATE ROLE c9_nostats LOGIN PASSWORD 'Fict1cia-nst-4Kp8Wq2Ze';")
+    app = Session(cluster, APP_USER, APP_PASSWORD)
+    superuser = Session(cluster, "postgres", database.superuser_password(cluster.install))
+    try:
+        assert app.run(f"BEGIN; INSERT INTO c9_probe (who) VALUES ('{SENTINEL}');")
+        assert superuser.run("BEGIN; SELECT 1;")
+        in_xact = (f"SELECT count(*) FROM pg_stat_activity WHERE datname = '{DATABASE}' "
+                   f"AND usename = '{APP_USER}' AND xact_start IS NOT NULL;")  # fmt: skip
+        # Positive: districom_ops, through pg_read_all_stats, sees the application's open transaction.
+        assert cluster.ops(in_xact) == ["1"]
+        assert write_block.Database(cluster.install).in_transaction() == 2
+        # Negative: the same query by a role without the membership sees nothing on this PostgreSQL version.
+        no_stats = database.query(cluster.install, in_xact, role="c9_nostats", password="Fict1cia-nst-4Kp8Wq2Ze",
+                                  dbname="postgres")  # fmt: skip
+        assert no_stats == ["0"], "without pg_read_all_stats another role's transaction is visible"
+        # The application role is not a member and does not see the superuser's session.
+        assert cluster.superuser(f"SELECT pg_has_role('{APP_USER}', 'pg_read_all_stats', 'MEMBER');") == ["f"]
+        assert cluster.superuser(f"SELECT pg_has_role('{OPS_USER}', 'pg_read_all_stats', 'MEMBER');") == ["t"]
+        hidden = cluster.app("SELECT count(*) FROM pg_stat_activity a JOIN pg_roles r ON r.oid = a.usesysid "
+                             "WHERE r.rolsuper AND a.xact_start IS NOT NULL;")  # fmt: skip
+        assert hidden == ["0"]
+        with pytest.raises(QueryError):
+            cluster.app(f'GRANT pg_read_all_stats TO "{APP_USER}";')
+        with pytest.raises(QueryError):
+            cluster.app(f'GRANT "{OPS_USER}" TO "{APP_USER}";')
+        assert cluster.superuser(f"SELECT pg_has_role('{APP_USER}', 'pg_read_all_stats', 'MEMBER');") == ["f"]
+    finally:
+        app.close()
+        superuser.close()
+        cluster.superuser("DROP ROLE c9_nostats;")
+        cluster.app("DELETE FROM c9_probe;")
+
+
+@pytest.mark.criterion("C9-D1")
+def test_the_block_never_records_the_text_of_the_sessions(cluster: Cluster, caplog: pytest.LogCaptureFixture) -> None:
+    session = Session(cluster, APP_USER, APP_PASSWORD)
+    try:
+        assert session.run(f"SELECT '{SENTINEL}';")  # the session's last query holds the text
+        lock, owner = opened(cluster)
+        caplog.set_level("DEBUG", logger="districom_ops")
+        write_block.block(cluster.install, lock, owner, wait_seconds=10)
+        write_block.revert(cluster.install, lock, owner)
+        window(cluster).close(owner, Event.REVERTED, lock)
+        lock.release()
+        text = logged_text(cluster, caplog)
+        assert "writes_blocked" in text
+        for secret in (SENTINEL, APP_PASSWORD, OPS_PASSWORD, "pg_stat_activity", "SELECT"):
+            assert secret not in text, secret[:8]
+    finally:
+        session.close()
+
+
+# --- C9-D2: the public schema belongs to the application ----------------------------------------------------------
+
+
+@pytest.mark.criterion("C9-D2")
+def test_the_application_owns_public_and_what_it_creates_but_not_the_database(cluster: Cluster) -> None:
+    assert cluster.superuser(f"SELECT datdba::regrole::text FROM pg_database WHERE datname = '{DATABASE}';") == [
+        OPS_USER
+    ]
+    assert cluster.superuser("SELECT nspowner::regrole::text FROM pg_namespace WHERE nspname = 'public';",
+                             dbname=DATABASE) == [APP_USER]  # fmt: skip
+    # Positive: it creates, changes and drops in public and in a schema of its own, and owns them.
+    cluster.app("CREATE SCHEMA c9_own; CREATE TABLE c9_own.t (id int); CREATE TABLE public.c9_t (id int);"
+                "ALTER TABLE public.c9_t ADD COLUMN v text; INSERT INTO c9_own.t VALUES (1);")  # fmt: skip
+    owners = cluster.superuser("SELECT DISTINCT relowner::regrole::text FROM pg_class "
+                               "WHERE relname IN ('t', 'c9_t');", dbname=DATABASE)  # fmt: skip
+    assert owners == [APP_USER]
+    cluster.app("DROP SCHEMA c9_own CASCADE; DROP TABLE public.c9_t;")
+    # Negative: the database itself stays districom_ops'.
+    for sql in (f'ALTER DATABASE "{DATABASE}" OWNER TO "{APP_USER}";',
+                f'ALTER DATABASE "{DATABASE}" WITH ALLOW_CONNECTIONS true;',
+                f'ALTER DATABASE "{DATABASE}" WITH ALLOW_CONNECTIONS false;',
+                f'SET ROLE "{OPS_USER}";',
+                f'SET SESSION AUTHORIZATION "{OPS_USER}";'):  # fmt: skip
+        with pytest.raises(QueryError):
+            cluster.app(sql)
+    assert cluster.allows()
 
 
 # --- C9-2 ------------------------------------------------------------------------------------------------------
