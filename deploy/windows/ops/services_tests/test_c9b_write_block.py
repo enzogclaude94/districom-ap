@@ -127,7 +127,9 @@ def test_the_installed_cluster_has_the_c9b_model_and_the_migrations_ran_on_it() 
 def test_the_block_cuts_the_running_backend_survives_a_restart_and_reverts() -> None:
     install = CTX.install()
     assert record()["phase"] == "running"
-    assert app_sessions() > 0, "the backend holds pooled sessions"
+    # A request through Caddy makes the backend open a connection, which its pool keeps: the session to cut.
+    wait_until(lambda: services.https_get(install, "/api/v1/health/ready")[0] == 200 and app_sessions() > 0, 60,
+               "the backend did not keep a pooled session")  # fmt: skip
     lock = OperationLock(STATE, "day_close").acquire(timeout=10)
     try:
         owner = window().open(Kind.DAY_CLOSE, "cierre de prueba", lock)
