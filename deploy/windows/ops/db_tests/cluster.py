@@ -12,6 +12,7 @@ import sys
 import tempfile
 import textwrap
 import time
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, Any
@@ -45,13 +46,15 @@ class LabInstall(Install):
 
 def workdir(factory: "pytest.TempPathFactory", name: str) -> Path:
     """A fresh folder for a cluster. On Windows, ``initdb`` runs with a restricted token (the Administrators group
-    deny-only) and cannot walk pytest's private temporary folders (created owner-only): ``DISTRICOM_C9B_WORK``
+    deny-only) and cannot walk pytest's private temporary folders (created owner-only, like ``mkdtemp``): ``DISTRICOM_C9B_WORK``
     (CI: under ``RUNNER_TEMP``) gives an ordinary folder instead."""
     root = os.environ.get("DISTRICOM_C9B_WORK")
     if not root:
         return factory.mktemp(name)
-    Path(root).mkdir(parents=True, exist_ok=True)
-    return Path(tempfile.mkdtemp(prefix=f"{name}-", dir=root))
+    # Not mkdtemp: since Python 3.13 its 0o700 is an owner-only ACL on Windows too, which initdb cannot walk.
+    folder = Path(root) / f"{name}-{uuid.uuid4().hex[:8]}"
+    folder.mkdir(parents=True)
+    return folder
 
 
 def free_port() -> int:
