@@ -149,6 +149,7 @@ Plan: `docs/WINDOWS_W2C_PLAN.md`, C9‑B, con sus precisiones de implementación
 
 - **Roles** (`database init`): `districom_ops` (el de `OPS_DATABASE_URL`, sin superusuario) es dueño de la base. La app conserva `CONNECT`, `CREATE` y `TEMPORARY`, es dueña de `public` y de lo que crea, no es miembro de ningún rol y `pg_hba.conf` la rechaza fuera de su base. No puede revertir `ALLOW_CONNECTIONS false`.
 - **Bloqueo** (`write_block.block`, con el bloqueo de C9‑A y la operación dueña): enganches de Caddy (C5) y tareas (C6) registrados como «no aplica todavía», `ALLOW_CONNECTIONS false` desde `postgres`, espera acotada de las transacciones (si vence, se revierte), `pg_terminate_backend` y comprobación de la marca y de las sesiones. Cualquier falla revierte.
+- **Reversión que no se verifica** (Enzo 2026-11-19): la marca vuelve a `false` si se puede, el diario queda en `reverting` con `revert_failed` y solo `resume` lo resuelve.
 - **Diario** `state\write-block.json`: `none`, `blocking`, `blocked`, `closed_complete`, `reverting`, `resuming`, con transiciones cerradas. Se escribe antes de cada paso; uno ilegible o desconocido bloquea.
 - **`districom-ops resume --operation <id> --reason <texto>`:** solo un administrador; antes se termina la operación dueña. Después, `services stop` y `services start`.
 - **Recuperación automática:** el supervisor, solo desde `closed_complete`, verifica la evidencia con PostgreSQL detenido (`pg_controldata` y las copias de `repo1` y `repo2`), arranca PostgreSQL y reanuda. Si algo no coincide, queda `blocked` con el motivo.
