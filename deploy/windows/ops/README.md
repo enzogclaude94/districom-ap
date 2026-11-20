@@ -152,7 +152,8 @@ Plan: `docs/WINDOWS_W2C_PLAN.md`, C9‑B, con sus precisiones de implementación
 - **Reversión que no se verifica** (Enzo 2026-11-19): la marca vuelve a `false` si se puede, el diario queda en `reverting` con `revert_failed` y solo `resume` lo resuelve.
 - **Diario** `state\write-block.json`: `none`, `blocking`, `blocked`, `closed_complete`, `reverting`, `resuming`, con transiciones cerradas. Se escribe antes de cada paso; uno ilegible o desconocido bloquea.
 - **`districom-ops resume --operation <id> --reason <texto>`:** solo un administrador; antes se termina la operación dueña. Después, `services stop` y `services start`.
-- **Recuperación automática:** el supervisor, solo desde `closed_complete`, verifica la evidencia con PostgreSQL detenido (`pg_controldata` y las copias de `repo1` y `repo2`), arranca PostgreSQL y reanuda. Si algo no coincide, queda `blocked` con el motivo.
+- **Recuperación automática:** el supervisor, solo desde `closed_complete`, verifica la evidencia con PostgreSQL detenido (`pg_controldata` y las copias de `repo1` y `repo2`), arranca PostgreSQL y reanuda. Si algo no coincide, queda `blocked` con el motivo. Un diario `resuming` con las conexiones habilitadas: la marca vuelve a `false` y queda `blocked` hasta un `resume`.
+- **Alcance de la evidencia de cierre** (Enzo 2026-11-20): C9‑B solo implementa la **verificación técnica de la evidencia que recibe** (checkpoint, timeline, estado del clúster y SHA‑256 de las copias). **C10 y C11** deberán producir evidencia auténtica del cierre. **C6 y C7** deberán garantizar el origen, la integridad y la recuperabilidad de los backups. **Los hashes de archivos no equivalen por sí solos a una restauración validada.** En CI la evidencia es fabricada.
 
 Pruebas:
 - `tests/test_c9b_units.py`: máquina de estados, contexto (C9‑X1 a X6), supervisor con SCM simulado.
