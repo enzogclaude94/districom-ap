@@ -792,9 +792,14 @@ def _automatic_resume(install: Install, lock: OperationLock) -> tuple[str, ...]:
             install, lock, "recuperación automática tras un cierre completo", automatic=True,
             account="DistriComStack", start_postgresql=lambda: start_chain(install, until=PG),
         )  # fmt: skip
-    except (write_block.WriteBlockError, ServicesError, ServiceError) as exc:
-        log.critical("automatic_resume_failed", extra={"reason": str(exc)})
-        return (f"automatic recovery refused: {exc}", *blockers(install))
+    except Exception as exc:  # any failure, persistence included, keeps the application down
+        reason = (
+            str(exc)
+            if isinstance(exc, write_block.WriteBlockError | ServicesError | ServiceError)
+            else (type(exc).__name__)
+        )
+        log.critical("automatic_resume_failed", extra={"reason": reason})
+        return (f"automatic recovery refused: {reason}", *blockers(install))
     return blockers(install)
 
 
@@ -823,6 +828,10 @@ def _decide_and_start(
         _record_phase(install, run, "failed", "a service did not start")
         return 4
     if reasons:
+        # A resume interrupted after ALLOW_CONNECTIONS true: the flag back to false, the rest for a resume.
+        secured = write_block.secure_interrupted_resume(install)
+        if secured is not None:
+            reasons = (*reasons, f"interrupted resume: {secured}")
         log.error("supervisor_blocked", extra={"reasons": list(reasons)})
         _record_phase(install, run, "blocked", "; ".join(reasons))
         return None

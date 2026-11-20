@@ -46,6 +46,10 @@ A reversal that cannot be verified puts the flag back to ``false`` if it can and
 the backend type of the application's sessions in ``pg_stat_activity``; the block never reads ``query`` and logs
 only counts, steps and technical reasons (Enzo 2026-11-19, decision 1).
 
+**Evidence (Enzo 2026-11-20).** C9-B only verifies, technically, the evidence it is given (checkpoint,
+timeline, cluster state, SHA-256 of the copies). C10/C11 must produce authentic evidence of the close, and C6/C7
+must guarantee the origin, integrity and recoverability of the backups: a file hash is not a validated restore.
+
 Until C10 and C11 no real close reaches ``closed_complete``: :func:`complete` exists for them and the tests use
 fabricated journals and evidence only. No real day close is validated here.
 """
@@ -106,6 +110,11 @@ TRANSITIONS: dict[State, set[State]] = {
 
 class WriteBlockError(Exception):
     """The block, its reversal or a resume did not happen. Writes stay as safe as they were (blocked, if they were)."""
+
+
+class ResumeUnrecordedError(WriteBlockError):
+    """Writes were resumed but neither the end of the operation nor the way back could be recorded: the operation
+    is left incomplete on purpose (the application stays down) for a new ``resume`` to reconcile."""
 
 
 class JournalError(WriteBlockError):
@@ -505,6 +514,76 @@ def _reconcile(install: Install, db: Database, own: str) -> None:
         log.warning("resume_reconciled", extra={"operation": op.id, **found})
 
 
+def _undo_resume(install: Install, db: Database, resuming: Journal, exc: Exception) -> None:
+    """A failure after ``resuming`` was written (Enzo 2026-11-20): back to blocked, as far as it can go, then
+    raise. In order: the journal goes back to ``resuming`` if the commit (``none``) was already written, the flag
+    to ``false``, and the journal to the state it came from. Whatever step fails leaves a state a new ``resume``
+    reconciles (``resuming`` with this operation, which stays incomplete or ends FAILED): never ``none`` with the
+    flag ``false``, never a COMPLETED operation. The original error is kept as the cause."""
+    state_dir = install.layout.state
+    undone: list[str] = []
+    try:
+        current = read_journal(state_dir)
+    except JournalError:
+        current = None
+    try:
+        if current is None or current.state is not State.RESUMING:
+            write_atomic(_path(state_dir), json.dumps(resuming.to_json(), ensure_ascii=False).encode("utf-8"))
+            undone.append("journal_back_to_resuming")
+    except OSError as write_error:
+        log.critical("resume_undo_failed", extra={"operation": resuming.resume, "reason": type(write_error).__name__})
+        raise ResumeUnrecordedError(
+            f"writes were resumed but the operation could not be recorded ({type(exc).__name__}); the journal could "
+            "not be put back either: the operation stays incomplete and the application stays down until a resume"
+        ) from exc
+    with contextlib.suppress(WriteBlockError):
+        db.set_allow_connections(False)
+    try:
+        flag_false = not db.allows_connections()
+    except WriteBlockError:
+        flag_false = False
+    if flag_false:
+        undone.append("allow_connections_false")
+        assert resuming.before is not None
+        try:
+            _save(state_dir, resuming, resuming.before, before=None, resume=None)
+            undone.append(f"journal_back_to_{resuming.before.value}")
+        except (OSError, WriteBlockError):
+            pass  # still ``resuming`` with the flag false: the next resume reconciles it
+    log.critical("resume_undone", extra={"operation": resuming.resume, "reason": type(exc).__name__,
+                                         "undone": undone})  # fmt: skip
+    detail = str(exc) if isinstance(exc, WriteBlockError) else type(exc).__name__
+    if not flag_false:
+        raise WriteBlockError(f"ALLOW_CONNECTIONS could not be put back to false after: {detail}") from exc
+    raise WriteBlockError(f"resume failed and was undone ({', '.join(undone)}): {detail}") from exc
+
+
+def secure_interrupted_resume(install: Install) -> str | None:
+    """For the supervisor, with its lock, once PostgreSQL runs and the application stays down: a journal left in
+    ``resuming`` may have left ``ALLOW_CONNECTIONS true``. Put it back to ``false`` (only ever towards blocked)
+    and change nothing else: the journal and the operations record stay for a controlled ``resume`` to
+    reconcile. Returns what was done, or None when the journal is not ``resuming``. Never raises."""
+    try:
+        journal = read_journal(install.layout.state)
+    except JournalError:
+        return None
+    if journal.state is not State.RESUMING:
+        return None
+    try:
+        db = Database(install)
+        if db.allows_connections():
+            db.set_allow_connections(False)
+            if db.allows_connections():
+                raise WriteBlockError("ALLOW_CONNECTIONS is still true")
+            outcome = "allow_connections_put_back_to_false"
+        else:
+            outcome = "allow_connections_already_false"
+    except WriteBlockError as exc:
+        outcome = f"allow_connections_unknown: {exc}"
+    log.critical("interrupted_resume_found", extra={"operation": journal.resume or "", "outcome": outcome})
+    return outcome
+
+
 @dataclass(frozen=True)
 class ResumeResult:
     operation: str
@@ -564,7 +643,10 @@ def resume(
             raise WriteBlockError("; ".join(check.reasons))
         oplog.step(op, "resume_check_passed")
         before = journal.state
-        journal = _save(state, journal, State.RESUMING, before=before, resume=op)
+        resuming = _save(state, journal, State.RESUMING, before=before, resume=op)
+        # From here to the end of the operation every failure, of PostgreSQL or of the persistence (journal,
+        # operations record, disk), goes through _undo_resume: never a completed operation before its journal is
+        # ``none``, never an error hidden, always something a new resume can reconcile.
         try:
             db.set_allow_connections(True)
             if not db.allows_connections():
@@ -574,18 +656,14 @@ def resume(
             db.sessions()  # pg_stat_activity answers
             oplog.step(op, "connections_verified")
             # C5: Caddy back to normal mode (hook; nothing to do yet).
-        except WriteBlockError:
-            with contextlib.suppress(WriteBlockError):  # what counts is the flag PostgreSQL reports, just below
-                db.set_allow_connections(False)
-            if db.allows_connections():
-                raise WriteBlockError("ALLOW_CONNECTIONS could not be put back to false") from None
-            _save(state, journal, before, before=None, resume=None)
-            raise
-        _save(state, journal, State.NONE, before=None, resume=None, evidence=None)
-        oplog.finish(op, Event.COMPLETED, result="writes_resumed")
+            _save(state, resuming, State.NONE, before=None, resume=None, evidence=None)  # the commit point
+            oplog.finish(op, Event.COMPLETED, result="writes_resumed")
+        except Exception as exc:  # any failure here is undone and raised, never swallowed
+            _undo_resume(install, db, resuming, exc)
         log.info("writes_resumed", extra={"operation": op, "automatic": automatic})
         return ResumeResult(op, True, "writes resumed")
     except WriteBlockError as exc:
         log.error("resume_failed", extra={"operation": op, "reason": str(exc)})
-        oplog.finish(op, Event.FAILED, reason=str(exc))
+        if not isinstance(exc, ResumeUnrecordedError):  # never ended FAILED: writes were resumed
+            oplog.finish(op, Event.FAILED, reason=str(exc))
         raise
