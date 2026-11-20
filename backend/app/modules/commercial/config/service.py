@@ -724,6 +724,14 @@ def set_reason_category(
         before,
         {"category_id": category_id, "reason": _clean(reason)},
     )
+    if category_id is not None:  # F1.6: the reason has a category now, its issue's condition is gone
+        resolve_open(
+            db,
+            "commercial.no_purchase.reason_unmapped",
+            f"reason:{row.id}",
+            user_id=actor.id,
+            note="Motivo con categoría",
+        )
     db.commit()
     db.refresh(row)
     return row
