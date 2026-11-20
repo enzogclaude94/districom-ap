@@ -239,6 +239,14 @@ class ProductsAdapter:
                 user_id=None,
                 note=f"Volvió a aparecer en el maestro del job {context.job_id}",
             )
+            # Applied once in this snapshot: the repetition that kept it out is gone (F1.6).
+            resolve_open(
+                db,
+                DUPLICATE_CODE,
+                f"product_code:{record['code']}",
+                user_id=None,
+                note=f"Código sin repetir en el maestro del job {context.job_id}",
+            )
             if price_list is not None and record["price"] is not None:
                 result = catalog.record_price(
                     db, product.id, price_list.id, Decimal(record["price"]), valid_from=snapshot, job_id=context.job_id

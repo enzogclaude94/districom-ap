@@ -4,7 +4,27 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
-### Added — F1.5: revisión manual de mappings y re‑resolución (en revisión)
+### Added — F1.6: calidad de datos completa y pantalla Calidad (en revisión)
+- **Pantalla Comercial › Datos › Calidad** (`/comercial/datos/calidad`). Datos queda con Importaciones, Mapeos y Calidad.
+  - **Cola:** tarjetas que cuentan problemas y ocurrencias por separado (errores, advertencias e informativos abiertos, resueltos, ignorados). Filtros del lado del servidor por estado, severidad, grupo de negocio, tipo, fechas, importación y palabras del tipo. Primero los errores y, dentro de cada severidad, el más antiguo.
+  - **Detalle:** qué pasó, a qué afecta, ocurrencias, primera y última vez, origen con enlace a la importación y cómo se corrige. Enlaza al mapping exacto o a la importación; no hay mini pantallas de edición, y zonas y categorías llegan con Maestros. Si está cerrado, quién, cuándo y con qué nota, o «se resolvió solo».
+  - El detalle de una importación enlaza a sus problemas en Calidad.
+- **API de plataforma** `/api/v1/quality` (aditiva): `codes`, `issues` (lista paginada), `issues/summary`, `issues/{id}`, `issues/{id}/ignore` (operator) y `issues/{id}/resolve` (admin).
+  - Nota obligatoria. La decisión bloquea la fila; una decisión vieja responde 409 `issue_not_open` con el estado actual.
+  - Auditoría `platform.quality.ignored` / `resolved`, sin nota, `dedupe_key` ni valores.
+  - `details` y `external_ref` nunca salen crudos: solo hechos permitidos y lo afectado en palabras de negocio.
+  - Sin borrado, sin lote y sin editar la severidad.
+- **Presentación por código:** `QualityCodeSpec` suma grupo, descripción, acción, cuándo se cierra y dónde se corrige. Los módulos registran `QualitySubjectSpec` para nombrar sus entidades. Comercial declara sus 19 códigos en `app/modules/commercial/quality.py`.
+- Ciclo de vida documentado código por código en `docs/IMPORTS.md §7.1`. Medido con 10.794 issues (página 14 ms, resumen 3 ms): sin índices nuevos ni migración.
+
+### Fixed — F1.6: issues que no se cerraban aunque su causa desapareciera
+- `commercial.no_purchase.reason_unmapped` se cierra cuando un admin le asigna una categoría al motivo.
+- `commercial.product.duplicate_code` se cierra cuando un maestro de artículos posterior trae el código una sola vez.
+
+### Fixed — Tests con fechas que vencían (PR #90, 2026-11-19)
+- `test_employee_loans_db_invariants.py` usaba fechas fijas que el calendario alcanzó y el CI de `main` falló sin cambios de código. Ahora deriva las fechas de las relaciones que el test verifica. Regla: una fecha fija solo cuando la fecha concreta es el requisito; si lo que importa es antes o después, una relación temporal.
+
+### Added — F1.5: revisión manual de mappings y re‑resolución (DONE, PR #88)
 - **Pantalla Comercial › Datos › Mapeos** (`/comercial/datos/mapeos`). Datos muestra solo Importaciones y Mapeos (sale el ítem «Calidad», que era un marcador de fase).
   - **Cola:** tarjetas por estado, filtros (estado, sistema, tipo de código), búsqueda por código o nombre y primero los abiertos más antiguos, en palabras de negocio («Preventista AXUM», «Vendedor STORE SYS», «Cliente AXUM», «Cliente STORE SYS»).
   - **Detalle:** origen, candidatos (nunca preseleccionados), última decisión y el impacto de cada decisión contado por el backend, por ejemplo «655 eventos de no compra históricos quedarán asociados a este preventista.».
