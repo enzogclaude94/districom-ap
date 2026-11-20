@@ -36,6 +36,7 @@ CRITERIA: dict[str, str] = {
     "C9-M": "Con el nuevo modelo: upgrade head desde vacío, downgrade base y upgrade head; la app es dueña de lo que crea",
     "C9-M-SUITE": "Con el nuevo modelo: la suite completa del backend pasa contra ese clúster",
     "C9-R": "Restablecimiento automático solo desde closed_complete con evidencia verificada; cualquier otra combinación queda bloqueada",
+    "C9-X8": "Fallas de persistencia después de ALLOW_CONNECTIONS true (diario, registro, fin de la operación) y supervisor con un diario resuming: nunca completed antes de tiempo, la marca vuelve a false y un resume reconcilia",
     "C9-X7": "Un resume matado en cada paso se reconcilia contra el diario y pg_database; la marca vuelve a false antes del resultado",
 }
 PENDING = {

@@ -663,6 +663,109 @@ def test_a_resume_killed_at_each_step_is_reconciled(cluster: Cluster, kill: str,
     assert cluster.allows()
 
 
+# --- C9-X8: persistence failures after ALLOW_CONNECTIONS true (Enzo 2026-11-20) --------------------------------
+
+PERSISTENCE = ["journal_none", "step_verified", "finish_completed", "finish_any", "finish_and_restore"]
+
+
+@pytest.mark.criterion("C9-X8")
+@pytest.mark.parametrize("failure", PERSISTENCE)
+def test_a_persistence_failure_after_connections_are_allowed_is_undone(
+    cluster: Cluster, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, failure: str
+) -> None:
+    """The disk refuses a write in the window after ALLOW_CONNECTIONS true: the commit of the journal
+    (``journal_none``), a step (``step_verified``), the end of the operation (``finish_completed``), every end
+    (``finish_any``), or the end and then the way back (``finish_and_restore``)."""
+    lock, owner = opened(cluster)
+    write_block.block(cluster.install, lock, owner, wait_seconds=10)
+    window(cluster).close(owner, Event.REVERTED, lock)
+    lock.release()
+    real_save, real_step, real_finish = write_block._save, OperationsLog.step, OperationsLog.finish
+    real_write = write_block.write_atomic  # type: ignore[attr-defined]
+    finish_failed = {"done": False}
+
+    def save(state_dir: Path, j: write_block.Journal, new: State, **changes: Any) -> write_block.Journal:
+        if failure == "journal_none" and new is State.NONE:
+            raise OSError("injected: the journal cannot be written")
+        return real_save(state_dir, j, new, **changes)
+
+    def step(self: OperationsLog, op_id: str, name: str, **detail: Any) -> None:
+        if failure == "step_verified" and name == "connections_verified":
+            raise OSError("injected: the record cannot be written")
+        real_step(self, op_id, name, **detail)
+
+    def finish(self: OperationsLog, op_id: str, event: Event, **detail: Any) -> None:
+        if (failure in ("finish_completed", "finish_and_restore") and event is Event.COMPLETED) or (
+            failure == "finish_any"
+        ):
+            finish_failed["done"] = True
+            raise OSError("injected: the end cannot be written")
+        real_finish(self, op_id, event, **detail)
+
+    def write(path: Path, data: bytes) -> None:
+        if failure == "finish_and_restore" and finish_failed["done"]:
+            raise OSError("injected: the journal cannot be put back")
+        real_write(path, data)
+
+    monkeypatch.setattr(write_block, "_save", save)
+    monkeypatch.setattr(OperationsLog, "step", step)
+    monkeypatch.setattr(OperationsLog, "finish", finish)
+    monkeypatch.setattr(write_block, "write_atomic", write)
+    with OperationLock(state(cluster), "resume").acquire() as resume_lock, pytest.raises((WriteBlockError, OSError)):
+        write_block.resume(cluster.install, resume_lock, "con falla de disco", target=owner, account="S-1-5-test")
+    monkeypatch.undo()
+    failed = next(op for op in oplog(cluster).read().operations.values() if op.kind is Kind.RESUME)
+    assert failed.end is not Event.COMPLETED, "a resume that failed was recorded as completed"
+    assert services.blockers(cluster.install), "nothing keeps the application down"
+    if failure == "finish_and_restore":
+        # Writes were resumed and nothing more could be recorded: the journal says none, the flag is true, and
+        # the operation stays incomplete on purpose, so the application stays down until a resume.
+        assert journal(cluster).state is State.NONE
+        assert cluster.allows()
+        assert failed.end is None
+        assert any(r.getMessage() == "resume_undo_failed" for r in caplog.records)
+    else:
+        assert not cluster.allows(), "ALLOW_CONNECTIONS stayed true after the failure"
+        assert journal(cluster).state in (State.BLOCKED, State.RESUMING)
+        if failure != "finish_any":
+            assert failed.end is Event.FAILED
+            assert journal(cluster).state is State.BLOCKED
+        assert any(r.getMessage() == "resume_undone" for r in caplog.records)
+    final = manual_resume(cluster, owner)  # the controlled reconciliation still works
+    assert journal(cluster).state is State.NONE
+    assert cluster.allows()
+    assert cluster.app("SELECT 1;") == ["1"]
+    assert oplog(cluster).read().incomplete() == []
+    assert final.operation != failed.id
+
+
+@pytest.mark.criterion("C9-X8")
+def test_the_supervisor_puts_the_flag_back_after_a_resume_interrupted_with_connections_allowed(
+    cluster: Cluster,
+) -> None:
+    """The process dies right after ALLOW_CONNECTIONS true; the supervisor then finds ``resuming`` with
+    PostgreSQL admitting connections."""
+    lock, owner = opened(cluster)
+    write_block.block(cluster.install, lock, owner, wait_seconds=10)
+    window(cluster).close(owner, Event.REVERTED, lock)
+    lock.release()
+    result = child(cluster, RESUME.format(owner=owner), kill_at="allow:true")
+    assert result.returncode == 9, result.stderr
+    assert cluster.allows()
+    assert journal(cluster).state is State.RESUMING
+    reasons = services.blockers(cluster.install)
+    assert any("resuming" in r for r in reasons), reasons
+    assert write_block.secure_interrupted_resume(cluster.install) == "allow_connections_put_back_to_false"
+    assert not cluster.allows()
+    assert journal(cluster).state is State.RESUMING, "the supervisor must leave the journal to a resume"
+    assert any(op.kind is Kind.RESUME for op in oplog(cluster).read().incomplete())
+    assert write_block.secure_interrupted_resume(cluster.install) == "allow_connections_already_false"
+    manual_resume(cluster, owner)
+    assert journal(cluster).state is State.NONE
+    assert cluster.allows()
+    assert write_block.secure_interrupted_resume(cluster.install) is None
+
+
 # --- C9-R: automatic recovery ---------------------------------------------------------------------------------------
 
 

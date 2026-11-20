@@ -268,6 +268,36 @@ def test_the_stack_reads_only_the_control_file_of_the_data(tmp_path: Path) -> No
     assert [sid for sid, _ in data.grants] == [winservice.service_sid(services.PG)]
 
 
+@pytest.mark.criterion("C9-H1")
+def test_the_operations_credential_reaches_neither_the_backend_nor_a_command_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Enzo 2026-11-20: OPS_DATABASE_URL stays in config\\districom.env (Stack and administrators, C3). The
+    backend does not get it, and the password never goes in arguments: psql gets it by its environment."""
+    install = make_install(tmp_path / "DistriCom")
+    ops_user, ops_password, _ = install.ops_database
+    assert ops_password
+    backend = services.backend_env(install)
+    assert "OPS_DATABASE_URL" not in backend
+    assert ops_password not in backend
+    assert ops_user not in backend
+    for name, spec in services.specs(install).items():
+        rendered = services.render(spec, install.root / "logs").decode("utf-8")
+        assert ops_password not in rendered, name
+    seen: list[Any] = []
+
+    def run(argv: list[str], **kw: Any) -> Any:
+        seen.append((argv, kw["env"]))
+        raise OSError("no psql here")
+
+    monkeypatch.setattr("districom_ops.database.subprocess.run", run)
+    with pytest.raises(WriteBlockError, match="unreachable"):
+        write_block.Database(install).allows_connections()
+    argv, env = seen[0]
+    assert all(ops_password not in arg for arg in argv)
+    assert env["PGPASSWORD"] == ops_password
+
+
 # --- the supervisor and services start with a journal (fake SCM, real supervisor) ----------------------------------
 
 
@@ -289,6 +319,46 @@ def test_a_block_not_lifted_refuses_services_start_and_blocks_the_supervisor(scm
         time.sleep(0.01)
     assert "write block" in phase(scm)["reason"]
     assert app_down(scm)
+
+
+@pytest.mark.criterion("C9-X8")
+def test_the_supervisor_with_a_resuming_journal_and_connections_allowed_secures_and_blocks(
+    scm: SCM,  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    journal = write_block.Journal(State.RESUMING, "day_close-1", "t", step=6, before=State.CLOSED_COMPLETE,
+                                  resume="resume-1")  # fmt: skip
+    path = scm.install.layout.state / write_block.JOURNAL_FILE
+    path.write_text(json.dumps(journal.to_json()), "utf-8")
+    flag: dict[str, Any] = {"allowed": True, "set_false": 0}
+
+    def allows(self: Any) -> bool:
+        return bool(flag["allowed"])
+
+    def set_allow(self: Any, allowed: bool) -> None:
+        assert not allowed, "the supervisor never enables connections"
+        assert scm.states[services.PG] is Service.RUNNING
+        flag["allowed"] = allowed
+        flag["set_false"] += 1
+
+    monkeypatch.setattr(write_block.Database, "allows_connections", allows)
+    monkeypatch.setattr(write_block.Database, "set_allow_connections", set_allow)
+    resumed: list[Any] = []
+    monkeypatch.setattr(write_block, "resume", lambda *a, **k: resumed.append(k))
+    with pytest.raises(services.ServicesError, match="write block"):
+        start(scm)  # services start refuses a resuming journal
+    winservice.start(services.STACK)  # a restart of the supervisor alone, as after Windows' boot
+    deadline = time.monotonic() + 5
+    while not phase_is(scm, "blocked"):
+        assert time.monotonic() < deadline
+        time.sleep(0.01)
+    record = phase(scm)
+    assert "write block resuming" in record["reason"]
+    assert "interrupted resume: allow_connections_put_back_to_false" in record["reason"]
+    assert flag == {"allowed": False, "set_false": 1}
+    assert app_down(scm), "backend, frontend or Caddy started with an unresolved journal"
+    assert resumed == [], "an automatic recovery from resuming"
+    assert write_block.read_journal(scm.install.layout.state) == journal, "the supervisor changed the journal"
 
 
 @pytest.mark.criterion("C9-R")
