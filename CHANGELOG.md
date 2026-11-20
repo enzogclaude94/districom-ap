@@ -35,7 +35,7 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
   - La migración 0039 suma dos índices parciales por el código de las filas sin mapping y aplica la regla a los datos existentes.
 - **Auditoría:** `platform.mapping.facts_resolved` por decisión (con `facts_adopted`), `platform.mapping.orphans_adopted` cuando un import crea un mapping que adopta hechos y `platform.mapping.batch_confirmed` por lote. Solo llevan ids y conteos.
 
-### Added — Servidor: W2‑C9‑A, coordinación de operaciones (en revisión)
+### Added — Servidor: W2‑C9‑A, coordinación de operaciones (PR #87, mergeado el 2026-11-17)
 - `districom_ops.oplock`: bloqueo exclusivo entre procesos (`state\operations.lock`). Lo libera el sistema operativo si el proceso muere, nunca vence, y quien no lo consigue falla nombrando al dueño.
 - `maintenance open` y `close` con el bloqueo, y la ventana creada en exclusiva: se corrige la carrera de dos aperturas simultáneas.
 - `services start`, `start --direct`, `stop` y `uninstall` toman el bloqueo. El arranque se niega con una ventana abierta, vencida o ilegible, un registro inválido o una operación incompleta o incierta.
