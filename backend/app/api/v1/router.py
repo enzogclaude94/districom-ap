@@ -10,6 +10,7 @@ from app.platform.imports import router as imports
 from app.platform.modules import install
 from app.platform.outlets import router as outlets
 from app.platform.parties import router as employees
+from app.platform.quality import router as quality
 from app.platform.settings import router as settings
 from app.platform.third_parties import router as third_parties
 from app.platform.users import router as users
@@ -27,6 +28,7 @@ api_router.include_router(vehicles.router)
 api_router.include_router(third_parties.router)
 api_router.include_router(outlets.router)
 api_router.include_router(imports.router)
+api_router.include_router(quality.router)
 
 for module in MODULES:
     install(module)
