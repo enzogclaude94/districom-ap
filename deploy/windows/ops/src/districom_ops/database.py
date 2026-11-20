@@ -3,7 +3,21 @@
 The cluster uses the production choices of ``docs/WINDOWS_DEPLOYMENT.md §2``: UTF-8, ICU ``es-AR``, data
 checksums, SCRAM, ``127.0.0.1`` only and the safe log settings of O7, with the log collector writing to
 ``<root>\\logs\\postgresql``. The superuser password is random and only stored in ``config\\postgres.secret``,
-readable by administrators. The application role owns only its own database.
+readable by administrators.
+
+**Roles (C9-B, D1 of C9, Enzo 2026-11-11):**
+
+* the operations role of ``OPS_DATABASE_URL`` (``districom_ops``): ``LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE``,
+  owner of the application database (so it can set ``ALLOW_CONNECTIONS``), member of ``pg_signal_backend`` (to end
+  the application's sessions) and ``pg_read_all_stats`` (to see whether they are in a transaction). Its password
+  is in ``config\\districom.env``, which only the stack and administrators read (C3), like ``DATABASE_URL``'s.
+* the application role of ``DATABASE_URL``: no longer the owner of its database. It keeps ``CONNECT``,
+  ``CREATE`` and ``TEMPORARY`` on it, owns the ``public`` schema and everything it creates, and is member of no
+  role. ``pg_hba.conf`` lets it reach only its database: any other one (``postgres``, ``template1``) is rejected.
+  The migrations keep their contract: they run as this role and create their schemas, tables and extensions.
+* ``postgres``: the superuser, for administrators.
+
+Nothing else is changed: no global revocation, no other role or database.
 """
 
 import logging
@@ -70,6 +84,47 @@ def _run(args: list[str], *, env: dict[str, str] | None = None, stdin: str | Non
     return process.returncode
 
 
+def hba(install: Install) -> str:
+    """First match wins: the application role reaches only its database, everything else is the initdb default."""
+    user, _, database, _ = install.database
+    return "\n".join(
+        [
+            "# Written by districom-ops (W2-C9-B). First match wins; no other role or database is restricted.",
+            f"host    {database}    {user}    127.0.0.1/32    scram-sha-256",
+            f"host    {database}    {user}    ::1/128         scram-sha-256",
+            f"host    all    {user}    all    reject",
+            f"local   all    {user}    reject",
+            "local   all            all                     scram-sha-256",
+            "host    all            all     127.0.0.1/32    scram-sha-256",
+            "host    all            all     ::1/128         scram-sha-256",
+            "local   replication    all                     scram-sha-256",
+            "host    replication    all     127.0.0.1/32    scram-sha-256",
+            "host    replication    all     ::1/128         scram-sha-256",
+            "",
+        ]
+    )
+
+
+def init_sql(install: Install) -> str:
+    user, password, database, _ = install.database
+    ops_user, ops_pw, _ = install.ops_database
+
+    def literal(text: str) -> str:
+        return "'" + text.replace("'", "''") + "'"
+
+    return (
+        f'CREATE ROLE "{ops_user}" LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION '
+        f"PASSWORD {literal(ops_pw)};\n"
+        f'GRANT pg_signal_backend, pg_read_all_stats TO "{ops_user}";\n'
+        f'CREATE ROLE "{user}" LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD {literal(password)};\n'
+        f'CREATE DATABASE "{database}" OWNER "{ops_user}";\n'
+        f'REVOKE ALL ON DATABASE "{database}" FROM PUBLIC;\n'
+        f'GRANT CONNECT, CREATE, TEMPORARY ON DATABASE "{database}" TO "{user}";\n'
+        f'\\connect "{database}"\n'
+        f'ALTER SCHEMA public OWNER TO "{user}";\n'
+    )
+
+
 def superuser_password(install: Install) -> str:
     try:
         return install.superuser_secret.read_text("utf-8").strip()
@@ -78,8 +133,9 @@ def superuser_password(install: Install) -> str:
 
 
 def init(install: Install) -> bool:
-    """Create the cluster and the application role and database. Returns False when the cluster already exists:
-    nothing is changed."""
+    """Create the cluster, the roles and the application database. Returns False when the cluster already exists:
+    nothing is changed (a cluster created before C9-B keeps its old model, without the operations role: the write
+    block then cannot connect, refuses to act, and a block or a recovery leaves the application blocked)."""
     data = install.pg_data
     install.postgres_logs.mkdir(parents=True, exist_ok=True)
     if (data / "PG_VERSION").exists():
@@ -88,9 +144,12 @@ def init(install: Install) -> bool:
         return False
     if data.exists() and any(data.iterdir()):
         raise DatabaseError("the PostgreSQL data folder is not empty and has no cluster; not touching it")
-    user, password, database, port = install.database
+    user, _, database, port = install.database
+    ops_user, ops_pw, ops_db = install.ops_database
     if not (IDENTIFIER.match(user) and IDENTIFIER.match(database)):
         raise DatabaseError("DATABASE_URL user and database must be lowercase identifiers")
+    if not (IDENTIFIER.match(ops_user) and ops_pw and ops_db == "postgres") or ops_user in (user, "postgres"):
+        raise DatabaseError("OPS_DATABASE_URL needs its own lowercase role, a password and the postgres database")
 
     superuser = secrets.token_urlsafe(32)
     install.superuser_secret.parent.mkdir(parents=True, exist_ok=True)
@@ -118,6 +177,7 @@ def init(install: Install) -> bool:
     if code != 0:
         raise DatabaseError(f"initdb failed ({code}); see logs\\postgresql\\init.log")
     (data / CONF).write_text(settings(install), encoding="utf-8")
+    (data / "pg_hba.conf").write_text(hba(install), encoding="utf-8")
     with (data / "postgresql.conf").open("a", encoding="utf-8") as handle:
         handle.write(f"\ninclude = '{CONF}'\n")
 
@@ -127,12 +187,7 @@ def init(install: Install) -> bool:
     if code != 0:
         raise DatabaseError(f"the temporary server did not start ({code}); see logs\\postgresql")
     try:
-        quoted = password.replace("'", "''")
-        sql = (
-            f"CREATE ROLE \"{user}\" LOGIN PASSWORD '{quoted}';\n"
-            f'CREATE DATABASE "{database}" OWNER "{user}";\n'
-            f'REVOKE ALL ON DATABASE "{database}" FROM PUBLIC;\n'
-        )
+        sql = init_sql(install)
         code = _run(
             [str(install.pg_bin("psql")), "-X", "-q", "-h", "127.0.0.1", "-p", str(port), "-U", "postgres",
              "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-f", "-"],
@@ -141,11 +196,11 @@ def init(install: Install) -> bool:
             out=output,
         )  # fmt: skip
         if code != 0:
-            raise DatabaseError(f"creating the application role and database failed ({code})")
+            raise DatabaseError(f"creating the roles and the application database failed ({code})")
     finally:
         _run([pg_ctl, "-D", str(data), "-m", "fast", "-w", "-t", "120", "stop"], out=output)
     # The service account gets its permissions from `services install`, once the service (and its SID) exists.
-    log.info("database_initialized", extra={"locale": "icu es-AR", "checksums": True})
+    log.info("database_initialized", extra={"locale": "icu es-AR", "checksums": True, "roles": "c9b"})
     return True
 
 
@@ -180,3 +235,57 @@ def app_connections(install: Install) -> int | None:
         return None
     text = result.stdout.decode("utf-8", "replace").strip()
     return int(text) if result.returncode == 0 and text.isdigit() else None
+
+
+class QueryError(DatabaseError):
+    """A query that did not run. ``code`` says why (``auth``, ``rejected``, ``unreachable``, ``not_accepting``,
+    ``sql``, ``timeout``); the message never carries values, only the role and the database."""
+
+    def __init__(self, code: str, role: str, dbname: str) -> None:
+        super().__init__(f"query as {role} on {dbname} failed: {code}")
+        self.code = code
+
+
+_ERRORS = (
+    ("password authentication failed", "auth"),
+    ("no pg_hba.conf entry", "rejected"),
+    ("pg_hba.conf rejects", "rejected"),
+    ("not currently accepting connections", "not_accepting"),
+    ("could not connect", "unreachable"),
+    ("connection refused", "unreachable"),
+    ("connection to server", "unreachable"),
+)
+
+
+def query(install: Install, sql: str, *, role: str, password: str, dbname: str, timeout: float = 60) -> list[str]:
+    """Run ``sql`` with psql and return the non-empty lines of its unaligned output (W2-C9-B). The statement goes
+    by stdin, never on the command line; the output is read only here and never logged."""
+    _, _, _, port = install.database
+    env = {
+        **os.environ,
+        "PGPASSWORD": password,
+        "PGCLIENTENCODING": "UTF8",
+        "PGCONNECT_TIMEOUT": "5",
+        "PGAPPNAME": "districom_ops",
+        "LC_MESSAGES": "C",
+        "LANG": "C",
+    }
+    try:
+        result = subprocess.run(  # noqa: S603
+            [str(install.pg_bin("psql")), "-X", "-A", "-t", "-q", "-v", "ON_ERROR_STOP=1", "-h", "127.0.0.1",
+             "-p", str(port), "-U", role, "-d", dbname, "-f", "-"],
+            input=sql.encode("utf-8"),
+            capture_output=True,
+            env=env,
+            timeout=timeout,
+            check=False,
+        )  # fmt: skip
+    except subprocess.TimeoutExpired:
+        raise QueryError("timeout", role, dbname) from None
+    except OSError:
+        raise QueryError("unreachable", role, dbname) from None
+    if result.returncode != 0:
+        text = result.stderr.decode("utf-8", "replace").lower()
+        code = next((c for needle, c in _ERRORS if needle in text), "sql")
+        raise QueryError(code, role, dbname)
+    return [line for line in result.stdout.decode("utf-8", "replace").splitlines() if line.strip()]
