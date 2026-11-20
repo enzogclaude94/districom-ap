@@ -22,7 +22,7 @@ ZONES = QualityGroup("zones", "Zonas", 40)
 DOCUMENTS = QualityGroup("documents", "Comprobantes", 50)
 AXUM = QualityGroup("axum", "AXUM", 60)
 
-MASTERS_LATER = "La edición llega con Maestros."
+MASTERS_LATER = "La edición completa llega en Maestros."
 
 QUALITY_CODES = (
     # --- Clientes
@@ -97,7 +97,7 @@ QUALITY_CODES = (
         "Producto sin categoría",
         group=PRODUCTS,
         description="El artículo no tiene categoría, así que queda fuera de los análisis.",
-        action=f"Asignale una categoría. {MASTERS_LATER}",
+        action="Asignale una categoría. La edición de categorías llega con Maestros (F1.7).",
         closes_when="Cuando el artículo recibe una categoría, a mano o por el mapeo de su rubro.",
     ),
     QualityCodeSpec(
