@@ -4,7 +4,8 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
-### Added — Servidor: W2‑C9‑B, bloqueo reversible de escrituras (en revisión)
+### Added — Servidor: W2‑C9‑B, bloqueo reversible de escrituras (PR #89, mergeado el 2026-11-24)
+- **Riesgo residual documentado (Enzo 2026-11-24):** con una falla de almacenamiento que impide registrar la reversión y volver a `ALLOW_CONNECTIONS false`, PostgreSQL puede seguir aceptando conexiones con la app detenida; queda pendiente de laboratorio y producción (red, credenciales y procedimiento de recuperación).
 - **Modelo de roles de PostgreSQL** en `database init`: `districom_ops` (sin superusuario) es dueño de la base, miembro de `pg_signal_backend` y `pg_read_all_stats`; la app conserva `CONNECT`, `CREATE` y `TEMPORARY`, es dueña de `public` y de lo que crea, no es miembro de ningún rol y `pg_hba.conf` la rechaza en `postgres` y `template1`. Sin revocaciones globales. Las migraciones no cambian.
 - `districom_ops.write_block`: bloqueo en seis pasos (`ALLOW_CONNECTIONS false`, espera acotada de las transacciones, `pg_terminate_backend`, comprobación), reversión segura y diario `state\write-block.json` escrito en forma atómica antes de cada paso, con una máquina de estados cerrada.
 - `districom-ops resume`: manual (administrador, operación dueña y motivo) o automático por el supervisor, solo desde `closed_complete` con la evidencia verificada con PostgreSQL detenido. Reconcilia los `resume` interrumpidos y, ante cualquier falla, deja la base bloqueada.
