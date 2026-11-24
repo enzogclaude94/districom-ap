@@ -108,14 +108,8 @@ QUALITY_CODES = (
         description="Las ventas traen un código de artículo que no está en el maestro. Esas líneas quedan sin "
         "artículo.",
         action="Revisá el artículo en STORE SYS e importá un maestro de artículos que lo incluya.",
-    ),
-    QualityCodeSpec(
-        "commercial.product.unmapped_category",
-        "warning",
-        "Rubro sin categoría canónica",
-        group=PRODUCTS,
-        description="Un rubro de STORE SYS no tiene una categoría canónica asignada.",
-        action=f"Asigná la categoría del rubro. {MASTERS_LATER}",
+        closes_when="Cuando un maestro de artículos posterior trae ese código. Las ventas ya cargadas siguen sin "
+        "artículo: eso lo cuenta «Ventas con artículo pendiente».",
     ),
     QualityCodeSpec(
         "commercial.product.duplicate_code",

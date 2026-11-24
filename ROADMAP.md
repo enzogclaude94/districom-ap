@@ -92,7 +92,7 @@ Cada etapa termina con un informe y la aprobación de Enzo. Despliegue, red, bac
 | F1.5 | Revisión manual de mappings (ambiguos, confirmación en lote, reasignación con motivo, re‑resolución) + pantalla Mapeos (`docs/IMPORTS.md §6.4`, migración 0039) | DONE (PR #88, mergeado 2026-11-19) | F1.4 |
 | F1.6 | Calidad de datos completa (auditoría del ciclo de vida de cada código, cierres automáticos que faltaban, decisiones manuales con nota y auditoría) + pantalla Calidad (`docs/IMPORTS.md §7.1`, sin migración) | IN_PROGRESS (en revisión) | F1.5 |
 | F1.7 | UI mínima de maestros (clientes, productos, zonas, vendedores, listas) | PLANNED | F1.6 |
-| F1.8 | Hardening: reproceso, recuperación, performance con volumen realista, generador de demo por pipeline con seed fijo, documentación e informe de fase | PLANNED | F1.7 |
+| F1.8 | Hardening: reproceso, recuperación, performance con volumen realista, generador de demo por pipeline con seed fijo, documentación e informe de fase; mejora UX pendiente de F1.6: deep‑link o filtro por `row_id` o número de fila desde Calidad hacia Importaciones | PLANNED | F1.7 |
 
 **Riesgo de rendimiento de F1.3b, medido y resuelto:** confirmar las 7414 líneas del export real de octubre tardaba 206 s por HTTP (escritura cuadrática de los resultados por fila en la plataforma). Con el `UPDATE` masivo tarda 4,7 s a través del proxy de Next.js, y subir y analizar 2,9 s. Sigue siendo un pedido síncrono, sin colas ni workers. Detalle en `docs/IMPORTS.md §8`.
 

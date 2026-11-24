@@ -14,12 +14,16 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
   - Auditoría `platform.quality.ignored` / `resolved`, sin nota, `dedupe_key` ni valores.
   - `details` y `external_ref` nunca salen crudos: solo hechos permitidos y lo afectado en palabras de negocio.
   - Sin borrado, sin lote y sin editar la severidad.
-- **Presentación por código:** `QualityCodeSpec` suma grupo, descripción, acción, cuándo se cierra y dónde se corrige. Los módulos registran `QualitySubjectSpec` para nombrar sus entidades. Comercial declara sus 19 códigos en `app/modules/commercial/quality.py`.
+- **Presentación por código:** `QualityCodeSpec` suma grupo, descripción, acción, cuándo se cierra y dónde se corrige. Los módulos registran `QualitySubjectSpec` para nombrar sus entidades. Comercial declara sus 18 códigos en `app/modules/commercial/quality.py`.
 - Ciclo de vida documentado código por código en `docs/IMPORTS.md §7.1`. Medido con 10.794 issues (página 14 ms, resumen 3 ms): sin índices nuevos ni migración.
 
 ### Fixed — F1.6: issues que no se cerraban aunque su causa desapareciera
 - `commercial.no_purchase.reason_unmapped` se cierra cuando un admin le asigna una categoría al motivo.
 - `commercial.product.duplicate_code` se cierra cuando un maestro de artículos posterior trae el código una sola vez.
+- `commercial.product.unknown` se cierra cuando un maestro de artículos posterior trae el código (D2). Las ventas ya cargadas no se re‑resuelven: siguen con `product_id` NULL y su `commercial.sale_line.product_pending` queda abierto.
+
+### Removed — F1.6
+- `commercial.product.unmapped_category` sale del registro (D1). Ninguna fuente actual trae rubro, así que nada podía emitirlo, y nunca hubo issues con ese código. Vuelve en la fase que incorpore rubro.
 
 ### Fixed — Tests con fechas que vencían (PR #90, 2026-11-19)
 - `test_employee_loans_db_invariants.py` usaba fechas fijas que el calendario alcanzó y el CI de `main` falló sin cambios de código. Ahora deriva las fechas de las relaciones que el test verifica. Regla: una fecha fija solo cuando la fecha concreta es el requisito; si lo que importa es antes o después, una relación temporal.
