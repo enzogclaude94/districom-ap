@@ -55,6 +55,24 @@ def describe(holder: dict[str, Any] | None) -> str:
     return f"{holder.get('operation')} by process {holder.get('pid')} since {holder.get('acquired_at')}"
 
 
+HOLDER_REMOVE_ATTEMPTS = 10
+HOLDER_REMOVE_DELAY = 0.05
+
+
+def _remove_holder(path: Path) -> None:
+    """Best effort: the holder record is only for messages. On Windows a reader that has it open at that moment
+    (another process asking who holds the lock) makes the delete fail with a sharing violation; retry briefly,
+    then leave it: the next owner overwrites it, and no decision is ever taken on it. Releasing the lock itself
+    never depends on this."""
+    for attempt in range(HOLDER_REMOVE_ATTEMPTS):
+        try:
+            path.unlink(missing_ok=True)
+            return
+        except PermissionError:
+            if attempt < HOLDER_REMOVE_ATTEMPTS - 1:
+                time.sleep(HOLDER_REMOVE_DELAY)
+
+
 def _try_lock(handle: IO[bytes]) -> bool:
     if sys.platform == "win32":
         import msvcrt
@@ -138,7 +156,7 @@ class OperationLock:
         try:
             holder = self.holder()
             if holder and holder.get("token") == self.token:
-                self.holder_path.unlink(missing_ok=True)
+                _remove_holder(self.holder_path)
         finally:
             try:
                 _unlock(handle)
