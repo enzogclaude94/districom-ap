@@ -473,7 +473,9 @@ def test_services_start_dying_after_starting_the_stack_leaves_the_supervisor_alo
     with pytest.raises(KeyboardInterrupt):
         start(scm)
     wait(lambda: phase_is(scm, "running"))
-    OperationLock(scm.install.layout.state, "after").acquire().release()  # nobody holds it
+    # The supervisor records «running» holding the lock and releases it right after (C9A-10): a bounded wait,
+    # never a leak. Without the wait the check raced that release (seen on Windows, PR #89).
+    OperationLock(scm.install.layout.state, "after").acquire(timeout=10).release()
 
 
 @pytest.mark.criterion("C9A-11")

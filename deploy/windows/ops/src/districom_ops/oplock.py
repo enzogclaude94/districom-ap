@@ -15,6 +15,9 @@ Rules:
   only for messages: no decision is ever taken on it (a dead process may have left it behind).
 * Releasing the lock, or a process dying, never changes the persistent state: the maintenance window, the
   operations record and (C9-B) the write block stay as they were. An interrupted operation stays incomplete.
+* **Recovery context (C9-B):** only :meth:`OperationLock.context` creates a :class:`LockContext`, from a lock this
+  process really holds, bound to one operation id. ``safety.writes_resume_check`` accepts it to skip that one
+  ``resume`` operation, and checks it again at the moment of use (:meth:`LockContext.verify`).
 """
 
 import json
@@ -31,6 +34,10 @@ from districom_backup.repo import write_atomic
 
 LOCK_FILE = "operations.lock"
 HOLDER_FILE = "operations.lock.json"
+
+
+class LockContextError(Exception):
+    """A recovery context that does not stand for a lock this process holds now."""
 
 
 class LockBusy(Exception):  # noqa: N818 - the name says what the caller meets
@@ -138,6 +145,30 @@ class OperationLock:
             finally:
                 handle.close()
 
+    def context(self, operation_id: str) -> "LockContext":
+        """The proof that this process holds the lock for ``operation_id`` (a ``resume``). The holder record names
+        the operation too, for messages."""
+        if self._handle is None:
+            raise LockContextError("a recovery context needs the operations lock held")
+        record = self.holder() or {}
+        if record.get("token") != self.token:
+            raise LockContextError("the holder record is not this lock's")
+        write_atomic(self.holder_path, json.dumps({**record, "operation_id": operation_id}).encode("utf-8"))
+        return LockContext(_KEY, self, operation_id)
+
+    def _really_held(self) -> bool:
+        """Ask the operating system, not this object: a second handle must be refused."""
+        if self._handle is None:
+            return False
+        probe = open(self.path, "a+b")  # noqa: SIM115
+        try:
+            if _try_lock(probe):
+                _unlock(probe)
+                return False
+            return True
+        finally:
+            probe.close()
+
     def __enter__(self) -> "OperationLock":
         if self._handle is None:
             self.acquire()
@@ -147,3 +178,30 @@ class OperationLock:
         self, kind: type[BaseException] | None, value: BaseException | None, traceback: TracebackType | None
     ) -> None:
         self.release()
+
+
+_KEY = object()
+
+
+class LockContext:
+    """Created only by :meth:`OperationLock.context`. Not a flag: :meth:`verify` checks, at the moment of use, that
+    the lock is still held by this very process (the operating system refuses a second handle) and still names
+    the same operation."""
+
+    def __init__(self, key: object, lock: OperationLock, operation_id: str) -> None:
+        if key is not _KEY or not isinstance(lock, OperationLock):
+            raise LockContextError("a recovery context is only created by OperationLock.context()")
+        self._lock = lock
+        self._pid = os.getpid()
+        self._token = lock.token
+        self.operation_id = operation_id
+
+    def verify(self) -> None:
+        lock = self._lock
+        if os.getpid() != self._pid:
+            raise LockContextError("the recovery context belongs to another process")
+        if not lock.held or lock.token != self._token or not lock._really_held():
+            raise LockContextError("the operations lock of the recovery context is no longer held")
+        record = lock.holder() or {}
+        if record.get("token") != self._token or record.get("operation_id") != self.operation_id:
+            raise LockContextError("the operations lock is not held for this operation")

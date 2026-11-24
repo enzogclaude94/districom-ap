@@ -4,6 +4,16 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Added — Servidor: W2‑C9‑B, bloqueo reversible de escrituras (en revisión)
+- **Modelo de roles de PostgreSQL** en `database init`: `districom_ops` (sin superusuario) es dueño de la base, miembro de `pg_signal_backend` y `pg_read_all_stats`; la app conserva `CONNECT`, `CREATE` y `TEMPORARY`, es dueña de `public` y de lo que crea, no es miembro de ningún rol y `pg_hba.conf` la rechaza en `postgres` y `template1`. Sin revocaciones globales. Las migraciones no cambian.
+- `districom_ops.write_block`: bloqueo en seis pasos (`ALLOW_CONNECTIONS false`, espera acotada de las transacciones, `pg_terminate_backend`, comprobación), reversión segura y diario `state\write-block.json` escrito en forma atómica antes de cada paso, con una máquina de estados cerrada.
+- `districom-ops resume`: manual (administrador, operación dueña y motivo) o automático por el supervisor, solo desde `closed_complete` con la evidencia verificada con PostgreSQL detenido. Reconcilia los `resume` interrumpidos y, ante cualquier falla, deja la base bloqueada.
+- **Excepción de `writes_resume_check`:** solo para el `resume` que tiene el bloqueo real (`LockContext`, verificado contra el sistema operativo y el registro del dueño).
+- **Decisiones de Enzo del 2026-11-19** (C9‑D1 a C9‑D3): `pg_read_all_stats` solo para `districom_ops` y sin registrar textos SQL; `public` de la app con la base de `districom_ops`; una sesión de superusuario hace fallar el bloqueo sin cortarla. Una reversión que no se puede verificar deja la marca en `false`, el diario en `reverting` con `revert_failed` y solo sale por `resume`.
+- **Revisión de Enzo del 2026-11-20:** `OPS_DATABASE_URL` en `districom.env` aprobado, con pruebas de que no llega al backend ni a los argumentos. `resume` deshace toda falla de persistencia posterior a `ALLOW_CONNECTIONS true` y nunca marca COMPLETED antes de tiempo; el supervisor asegura la marca ante un diario `resuming` (C9‑X8). Se documenta que C9‑B solo verifica la evidencia recibida: C10/C11 la producen y C6/C7 garantizan los backups.
+- El supervisor y `services start` respetan el diario; PostgreSQL no se reinicia con un bloqueo de escrituras sin resolver. Regla nueva de C3: el Stack lee `pgdata\global\pg_control`.
+- Pruebas: unidades (máquina de estados, contexto C9‑X1..X6, supervisor con SCM simulado), `db_tests` contra PostgreSQL 17.6 real (C9‑1..9, H1, M, la suite completa del backend, R y X7 con procesos matados en cada paso) y `services_tests` con los servicios reales. Sin jobs nuevos: «Windows ops (W2-C)» instala los binarios oficiales de PostgreSQL.
+
 ### Added — F1.5: revisión manual de mappings y re‑resolución (en revisión)
 - **Pantalla Comercial › Datos › Mapeos** (`/comercial/datos/mapeos`). Datos muestra solo Importaciones y Mapeos (sale el ítem «Calidad», que era un marcador de fase).
   - **Cola:** tarjetas por estado, filtros (estado, sistema, tipo de código), búsqueda por código o nombre y primero los abiertos más antiguos, en palabras de negocio («Preventista AXUM», «Vendedor STORE SYS», «Cliente AXUM», «Cliente STORE SYS»).
@@ -25,7 +35,7 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
   - La migración 0039 suma dos índices parciales por el código de las filas sin mapping y aplica la regla a los datos existentes.
 - **Auditoría:** `platform.mapping.facts_resolved` por decisión (con `facts_adopted`), `platform.mapping.orphans_adopted` cuando un import crea un mapping que adopta hechos y `platform.mapping.batch_confirmed` por lote. Solo llevan ids y conteos.
 
-### Added — Servidor: W2‑C9‑A, coordinación de operaciones (en revisión)
+### Added — Servidor: W2‑C9‑A, coordinación de operaciones (PR #87, mergeado el 2026-11-17)
 - `districom_ops.oplock`: bloqueo exclusivo entre procesos (`state\operations.lock`). Lo libera el sistema operativo si el proceso muere, nunca vence, y quien no lo consigue falla nombrando al dueño.
 - `maintenance open` y `close` con el bloqueo, y la ventana creada en exclusiva: se corrige la carrera de dos aperturas simultáneas.
 - `services start`, `start --direct`, `stop` y `uninstall` toman el bloqueo. El arranque se niega con una ventana abierta, vencida o ilegible, un registro inválido o una operación incompleta o incierta.
