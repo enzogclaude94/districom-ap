@@ -149,6 +149,9 @@ def policy(
         Rule(root / "config" / "postgres.secret", protected=True, required=False),
         Rule(root / "config" / "integrity.json", protected=True, required=False),
         Rule(pg_data, ((sid["postgresql"], FULL),), protected=True),
+        # C9-B: the automatic recovery reads the control file (pg_controldata) to verify the clean shutdown; the
+        # rest of the data stays PostgreSQL's alone.
+        Rule(pg_data / "global" / "pg_control", ((sid["stack"], READ),), required=False),
         Rule(root / "data" / "uploads", ((sid["backend"], MODIFY),)),
         Rule(root / "logs", ((sid["stack"], MODIFY),)),
         Rule(root / "logs" / "postgresql", ((sid["postgresql"], MODIFY),), protected=True),

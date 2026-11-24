@@ -40,6 +40,7 @@ class Kind(StrEnum):
     UPDATE = "update"
     ROLLBACK = "rollback"
     MANUAL = "manual"
+    RESUME = "resume"  # C9-B: re-enabling writes (manual or automatic); never opens a maintenance window
 
 
 class Event(StrEnum):

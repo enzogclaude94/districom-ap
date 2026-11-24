@@ -9,7 +9,12 @@ inputs:
     required: true
   databases:
     description: Space-separated databases to create (owned by districom)
-    required: true
+    required: false
+    default: ""
+  binaries-only:
+    description: Only install and verify the binaries (DISTRICOM_PG_BIN); no cluster (W2-C9-B makes its own)
+    required: false
+    default: "false"
 runs:
   using: composite
   steps:
@@ -18,6 +23,7 @@ runs:
       env:
         PG_VERSION: ${{ inputs.version }}
         PG_DATABASES: ${{ inputs.databases }}
+        PG_BINARIES_ONLY: ${{ inputs.binaries-only }}
       run: |
         $zip = "$env:RUNNER_TEMP\pg.zip"
         Invoke-WebRequest "https://get.enterprisedb.com/postgresql/postgresql-$env:PG_VERSION-1-windows-x64-binaries.zip" -OutFile $zip
@@ -27,6 +33,11 @@ runs:
         $version = & "$bin\postgres.exe" --version
         $version
         if ($version -notmatch "PostgreSQL\) $([regex]::Escape($env:PG_VERSION))$") { throw "unexpected version: $version" }
+        if ($env:PG_BINARIES_ONLY -eq "true") {
+          "DISTRICOM_PG_BIN=$bin" >> $env:GITHUB_ENV
+          "DISTRICOM_PG_VERSION=$version" >> $env:GITHUB_ENV
+          exit 0
+        }
 
         # Fictitious, CI-only credentials, the same the Linux jobs use. Data directory with the production choices of
         # docs/WINDOWS_DEPLOYMENT.md §2: UTF-8, ICU es-AR and data checksums.

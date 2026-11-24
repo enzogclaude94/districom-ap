@@ -1,5 +1,6 @@
 """Paths of an installation with services (W2-C2), on top of the C1 layout. One place, so nothing guesses."""
 
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
@@ -93,7 +94,8 @@ class Install:
         return manifest()[name]
 
     def pg_bin(self, tool: str) -> Path:
-        return self.artifact("postgresql").path(self.runtime) / "bin" / f"{tool}.exe"
+        suffix = ".exe" if sys.platform == "win32" else ""
+        return self.artifact("postgresql").path(self.runtime) / "bin" / f"{tool}{suffix}"
 
     def release_dir(self) -> Path:
         if not self.release:
@@ -111,6 +113,13 @@ class Install:
     @property
     def frontend_dir(self) -> Path:
         return self.release_dir() / "frontend"
+
+    @property
+    def ops_database(self) -> tuple[str, str, str]:
+        """(user, password, database) of the operations role (C9-B), from OPS_DATABASE_URL in districom.env,
+        which only the stack and administrators read (C3)."""
+        parts = urlsplit(self.ops.ops_database_url.reveal())
+        return unquote(parts.username or ""), unquote(parts.password or ""), parts.path.lstrip("/") or "postgres"
 
     @property
     def database(self) -> tuple[str, str, str, int]:

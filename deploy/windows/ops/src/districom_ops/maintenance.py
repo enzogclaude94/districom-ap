@@ -136,6 +136,8 @@ class MaintenanceWindow:
 
         A crash in the middle of the creation leaves a partial file, which reads as UNREADABLE: an open window
         with an unknown owner (fail-safe), never as no window."""
+        if kind is Kind.RESUME:
+            raise MaintenanceError("a resume never opens a maintenance window")
         with self._locked(lock, "maintenance_open"):
             if self.path.exists():
                 current = self.status(max_minutes=10**9)

@@ -35,6 +35,13 @@ CRITERIA: dict[str, str] = {
     "C9A-11": "Procesos matados durante el arranque: sin PASS falso, sin espera sin fin, bloqueo liberado",
     "C9A-12": "PostgreSQL no se reinicia con el bloqueo ocupado, una ventana abierta o una operación incompleta o incierta",
     "C9A-13": "Un registro antiguo del supervisor nunca da PASS",
+    "C9-H1": "El cluster instalado tiene el modelo de C9-B: la app no es dueña de su base ni miembro del rol operativo",
+    "C9-M": "Las migraciones de C2-1 corrieron como la app sobre el modelo nuevo y la app es dueña de lo que creó",
+    "C9-1": "El bloqueo corta las sesiones del backend real y /ready deja de responder 200",
+    "C9-5": "La reversión devuelve las conexiones y la app se reconecta sola",
+    "C9-6": "Un reinicio de PostgreSQL durante el bloqueo no lo levanta y el supervisor no lo arranca",
+    "C9-8": "Con un cierre no verificado, reiniciar el Stack no saca del bloqueo",
+    "C9-R": "Recuperación automática por el supervisor real solo con evidencia verificada; si no, resume del administrador",
 }
 PENDING = {
     "REBOOT": "Arranque después de un reinicio real de Windows y sin iniciar sesión (laboratorio)",
