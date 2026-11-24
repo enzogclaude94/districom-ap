@@ -12,6 +12,7 @@ import app.api.v1.router  # noqa: F401  (installs the modules: import types, qua
 from app.modules.commercial.config import service as config
 from app.modules.commercial.config.models import NoPurchaseReasonMapping, Zone
 from app.modules.commercial.config.seed import seed_config
+from app.modules.commercial.sales.models import SaleLine
 from app.platform.auth.models import User
 from app.platform.mappings import service as mappings
 from app.platform.parties.models import Employee
@@ -173,6 +174,24 @@ def test_a_code_repeated_in_the_master_closes_when_a_later_one_brings_it_once(db
     assert statuses(db, "commercial.product.duplicate_code") == ["open"]  # still repeated
     run(db, operator, articles_file([article(5, "UNO"), article(6)]), PRODUCTS, snapshot_date=D22)
     assert statuses(db, "commercial.product.duplicate_code") == ["resolved"]
+
+
+def test_an_unknown_product_closes_when_a_later_master_brings_it_but_its_sales_stay_pending(
+    db: Session, operator: User
+) -> None:
+    """Enzo, F1.6 D2: «not in the master» and «sales without product» are two facts. The master closes the first;
+    the sales already loaded keep product_id NULL and their pending issue stays open (no re-resolution in F1.6)."""
+    master(db, operator, [customer(1, "ALMACEN UNO")], D20)
+    sales = run(db, operator, sales_file([sale(999, 1, "ALMACEN UNO")]), SALES, scope="FULL")
+    assert issues(db, "commercial.product.unknown") == [("product_code:999", "open")]
+    assert issues(db, "commercial.sale_line.product_pending") == [(f"job:{sales.id}", "open")]
+
+    run(db, operator, articles_file([article(999)]), PRODUCTS, snapshot_date=D21)  # the sale is not reimported
+
+    assert issues(db, "commercial.product.unknown") == [("product_code:999", "resolved")]
+    assert issues(db, "commercial.sale_line.product_pending") == [(f"job:{sales.id}", "open")]
+    [product_id] = db.scalars(select(SaleLine.product_id).where(SaleLine.source_product_code == "999"))
+    assert product_id is None
 
 
 def test_no_automatic_close_while_an_equivalent_condition_remains(db: Session, operator: User) -> None:

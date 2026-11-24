@@ -46,6 +46,7 @@ TYPE_KEY = "commercial.store_sys.products"
 PRICE_LIST_SETTING = ARTICLES_PRICE_LIST_SETTING
 DUPLICATE_CODE = "commercial.product.duplicate_code"
 MISSING_FROM_MASTER = "commercial.product.missing_from_master"
+UNKNOWN = "commercial.product.unknown"
 PRICES_NOT_LOADED = "commercial.product.prices_not_loaded"
 
 COLUMNS = (
@@ -238,6 +239,15 @@ class ProductsAdapter:
                 f"product:{product.id}",
                 user_id=None,
                 note=f"Volvió a aparecer en el maestro del job {context.job_id}",
+            )
+            # The code is in the master now: «not in the master» no longer holds (F1.6, D2). The sales already loaded
+            # keep product_id NULL; their `sale_line.product_pending` stays open until a future reprocess.
+            resolve_open(
+                db,
+                UNKNOWN,
+                f"product_code:{product.source_code}",
+                user_id=None,
+                note=f"El código llegó en el maestro del job {context.job_id}",
             )
             # Applied once in this snapshot: the repetition that kept it out is gone (F1.6).
             resolve_open(
