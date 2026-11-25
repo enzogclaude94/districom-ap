@@ -160,6 +160,8 @@ Pruebas:
 - `db_tests/`: PostgreSQL real (`DISTRICOM_PG_BIN`, PostgreSQL 17.6 en CI) en clústeres descartables hechos por `database.init`. C9‑1 a C9‑9, H1, M (migraciones como la app y, con `DISTRICOM_C9M_SUITE=1`, la suite completa del backend), R y X7, con procesos matados en cada paso del diario. Resultados en `DISTRICOM_C9B_RESULTS`.
 - `services_tests/test_c9b_write_block.py`: con los servicios reales, en el job «Windows services (W2-C2)».
 
+**Riesgo residual (Enzo 2026-11-24):** si el almacenamiento impide registrar la reversión y también volver a `ALLOW_CONNECTIONS false`, PostgreSQL puede seguir aceptando conexiones con la app detenida: no es un bloqueo total. Antes de producción: red y credenciales verificadas y un procedimiento seguro de recuperación.
+
 **PENDIENTE, nunca PASS:** la LAN con usuarios reales, el reinicio real de Windows a mitad de un cierre, Windows 11 Pro y el cierre real de jornada (C10 y C11; en CI la evidencia es fabricada).
 
 ## Regla de logs para C2 a C13
