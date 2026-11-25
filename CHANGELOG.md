@@ -4,6 +4,9 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Fixed — Servidor: liberación del bloqueo de operaciones en Windows (mantenimiento de C9‑A, PR #93, mergeado el 2026-11-25)
+- `OperationLock.release` ya no falla con `WinError 32` cuando otro hilo o proceso está leyendo `operations.lock.json` en ese momento. El borrado de ese registro, que es solo informativo, se reintenta brevemente y, si no se puede, se deja (lo reemplaza el siguiente dueño). El bloqueo del sistema operativo se libera siempre. Pruebas C9A‑1 nuevas, con un lector real del registro y con fallas de borrado transitorias y permanentes. No cambia el estado de validación física de C9‑A.
+
 ### Added — Servidor: W2‑C9‑B, bloqueo reversible de escrituras (PR #89, mergeado el 2026-11-24)
 - **Riesgo residual documentado (Enzo 2026-11-24):** con una falla de almacenamiento que impide registrar la reversión y volver a `ALLOW_CONNECTIONS false`, PostgreSQL puede seguir aceptando conexiones con la app detenida; queda pendiente de laboratorio y producción (red, credenciales y procedimiento de recuperación).
 - **Modelo de roles de PostgreSQL** en `database init`: `districom_ops` (sin superusuario) es dueño de la base, miembro de `pg_signal_backend` y `pg_read_all_stats`; la app conserva `CONNECT`, `CREATE` y `TEMPORARY`, es dueña de `public` y de lo que crea, no es miembro de ningún rol y `pg_hba.conf` la rechaza en `postgres` y `template1`. Sin revocaciones globales. Las migraciones no cambian.
