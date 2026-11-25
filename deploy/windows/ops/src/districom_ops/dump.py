@@ -156,6 +156,9 @@ def restore_test(ctx: "Context", folder: Path, label: str, plain_sha: str, key: 
     listed = sum(1 for line in listing.splitlines() if " TABLE " in line and " TABLE DATA " not in line
                  and not line.startswith(";"))  # fmt: skip
     data = work / "pgcheck"
+    # Created here, empty: initdb then only fixes its permissions. Left to initdb, its mkdir -p walks up to the
+    # protected install root, which a task account may traverse but not inspect ("could not create directory").
+    data.mkdir()
     password = secrets.token_urlsafe(24)
     pwfile = work / "pgcheck.pw"
     pwfile.write_text(password, encoding="utf-8")
