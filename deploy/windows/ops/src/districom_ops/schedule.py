@@ -138,6 +138,12 @@ class ScheduleError(Exception):
     pass
 
 
+def _why(result: subprocess.CompletedProcess[str]) -> str:
+    """What schtasks said (its own message: no secrets ever reach its command line), on one short line."""
+    text = " ".join((result.stderr + " " + result.stdout).split())
+    return f"{result.returncode}: {text[:300]}" if text else str(result.returncode)
+
+
 def _definition_file(state_tasks: Path, spec: TaskSpec) -> Path:
     return state_tasks / "definitions" / f"{spec.task_name}.xml"
 
@@ -157,7 +163,7 @@ def register(state_tasks: Path, python: Path, settings: Path, working_dir: Path,
         definition.write_text(wanted, encoding="utf-16")
         result = run(["/create", "/tn", spec.task_name, "/xml", str(definition), "/f"])
         if result.returncode != 0:
-            raise ScheduleError(f"registering {spec.task_name} failed ({result.returncode})")
+            raise ScheduleError(f"registering {spec.task_name} failed ({_why(result)})")
         changes.append(f"{spec.task_name}: {'updated' if present else 'created'}")
     return changes
 
@@ -195,5 +201,6 @@ def check_sids(run: Runner = _schtasks) -> list[str]:
 def start_now(name: str, run: Runner = _schtasks) -> None:
     """``schtasks /run``: start a registered task now, through the Task Scheduler and its account."""
     spec = TASKS[name]
-    if run(["/run", "/tn", spec.task_name]).returncode != 0:
-        raise ScheduleError(f"starting {spec.task_name} failed")
+    result = run(["/run", "/tn", spec.task_name])
+    if result.returncode != 0:
+        raise ScheduleError(f"starting {spec.task_name} failed ({_why(result)})")
