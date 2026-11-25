@@ -78,7 +78,10 @@ def _quote(arg: str) -> str:
 
 
 def render(spec: TaskSpec, python: Path, settings: Path, working_dir: Path) -> str:
-    """The Task Scheduler XML (schema 1.4) of one task. Deterministic: the same inputs give the same text."""
+    """The Task Scheduler XML (schema 1.4) of one task. Deterministic: the same inputs give the same text.
+
+    No ``LogonType``: the schema has no ``ServiceAccount`` value (schtasks refuses it); a ``UserId`` of LocalService
+    is what makes the task run as that service account, the way Windows itself exports such tasks."""
     limit = spec.time_limit_minutes + 10
     if spec.hourly:
         trigger = (
@@ -100,7 +103,7 @@ def render(spec: TaskSpec, python: Path, settings: Path, working_dir: Path) -> s
         f"<RegistrationInfo><Description>{escape(spec.description)} (DistriCom W2-C6)</Description></RegistrationInfo>"
         f"<Triggers>{trigger}</Triggers>"
         '<Principals><Principal id="Author">'
-        f"<UserId>{LOCAL_SERVICE}</UserId><LogonType>ServiceAccount</LogonType><RunLevel>LeastPrivilege</RunLevel>"
+        f"<UserId>{LOCAL_SERVICE}</UserId><RunLevel>LeastPrivilege</RunLevel>"
         "<ProcessTokenSidType>Unrestricted</ProcessTokenSidType>"
         "</Principal></Principals>"
         "<Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>"
