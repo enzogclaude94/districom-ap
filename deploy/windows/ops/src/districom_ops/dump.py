@@ -148,6 +148,7 @@ def restore_test(ctx: "Context", folder: Path, label: str, plain_sha: str, key: 
         [str(s.rclone), "copyto", f"{REMOTE_NAME}:{label}.dump", str(check)],
         env=crypt_env(folder, key, s.rclone),
         step="decrypt",
+        tell=True,
     )
     if _sha256(check) != plain_sha:
         raise TaskFailedError("the decrypted dump differs from the dump that was taken")
@@ -166,6 +167,7 @@ def restore_test(ctx: "Context", folder: Path, label: str, plain_sha: str, key: 
             [str(pg / _exe("initdb")), "-D", str(data), "-U", "postgres", f"--pwfile={pwfile}", "-A",
              "scram-sha-256", "--encoding=UTF8", "--locale-provider=icu", "--icu-locale=es-AR", "--locale=C"],
             step="initdb",
+            tell=True,
         )  # fmt: skip
         pwfile.unlink()
         started = True
@@ -173,9 +175,10 @@ def restore_test(ctx: "Context", folder: Path, label: str, plain_sha: str, key: 
             [str(pg / _exe("pg_ctl")), "-D", str(data), "-l", str(work / "pgcheck.log"), "-o",
              f"-p {port} -c listen_addresses=127.0.0.1", "-w", "-t", "120", "start"],
             step="restore_instance_start",
+            tell=True,
         )  # fmt: skip
         conn = ["-h", "127.0.0.1", "-p", port, "-U", "postgres"]
-        ctx.run([str(pg / _exe("createdb")), *conn, "restore_check"], env=env, step="createdb")
+        ctx.run([str(pg / _exe("createdb")), *conn, "restore_check"], env=env, step="createdb", tell=True)
         ctx.run(
             [str(pg / _exe("pg_restore")), *conn, "-d", "restore_check", "--exit-on-error", "--no-owner",
              "--no-privileges", str(check)],

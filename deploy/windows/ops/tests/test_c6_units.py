@@ -357,7 +357,33 @@ def test_a_failed_child_is_a_failed_run_named_by_its_step(settings: TaskSettings
 
     outcome = backup_tasks.run_task(settings, "dump", work=work)
     assert outcome.status == "failed"
-    assert outcome.reason == "pg_dump exited 3"
+    assert outcome.reason == "pg_dump exited 3"  # the output of pg_dump may carry data: never in the reason
+
+
+@pytest.mark.criterion("C6-R")
+def test_a_failed_tool_without_data_tells_its_last_line_redacted(settings: TaskSettings) -> None:
+    from districom_ops.logs import REDACTOR
+
+    secret = "s3cr3t-" + "x" * 24
+    REDACTOR.register(secret)
+
+    def work(ctx: Context) -> None:
+        code = f"print('first'); print('initdb: error: cannot use {secret} here'); raise SystemExit(1)"
+        ctx.run([sys.executable, "-c", code], step="initdb", tell=True)
+
+    outcome = backup_tasks.run_task(settings, "dump", work=work)
+    assert outcome.status == "failed"
+    assert outcome.reason is not None
+    assert outcome.reason.startswith("initdb exited 1: initdb: error: cannot use ")
+    assert secret not in outcome.reason
+
+
+@pytest.mark.criterion("C6-R")
+def test_no_task_record_overwrites_the_off_site_state(settings: TaskSettings) -> None:
+    """The record of the task ``offsite`` once was ``offsite.json``, the same file as the copy state (CI, W2-C6)."""
+    shared = {backup_tasks.OFFSITE_STATE, backup_tasks.RETENTION_INTENT}
+    records = {backup_tasks.record_path(settings, task).name for task in schedule.TASKS}
+    assert not shared & records
 
 
 @pytest.mark.criterion("C6-R")
@@ -464,6 +490,8 @@ def test_task_definitions_run_as_their_own_task_sid_without_password_and_with_li
         assert principal.findtext("t:UserId", namespaces=ns) == schedule.LOCAL_SERVICE
         assert principal.findtext("t:ProcessTokenSidType", namespaces=ns) == "Unrestricted"
         assert principal.findtext("t:RunLevel", namespaces=ns) == "LeastPrivilege"
+        # schtasks refuses LogonType ServiceAccount, "out of range" (CI, W2-C6): the UserId alone says it
+        assert principal.find("t:LogonType", ns) is None
         assert tree.findtext("t:Settings/t:MultipleInstancesPolicy", namespaces=ns) == "IgnoreNew"
         assert tree.findtext("t:Settings/t:ExecutionTimeLimit", namespaces=ns) == f"PT{spec.time_limit_minutes + 10}M"
         arguments = tree.findtext("t:Actions/t:Exec/t:Arguments", namespaces=ns) or ""

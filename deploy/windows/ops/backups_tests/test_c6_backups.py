@@ -75,11 +75,12 @@ def start(task: str) -> str:
     return since
 
 
-def wait_result(task: str, since: str, seconds: float = 900) -> dict[str, Any]:
-    """The first outcome of ``task`` recorded after ``since`` (a run that ended, or a refusal)."""
+def wait_result(task: str, since: str, seconds: float = 900, *, besides: str | None = None) -> dict[str, Any]:
+    """The first outcome of ``task`` recorded after ``since`` (a run that ended, or a refusal); ``besides``: the
+    run id of an earlier run whose ``interrupted`` entry the new run writes first."""
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
-        done = history(since, task)
+        done = [h for h in history(since, task) if h.get("run_id") != besides]
         if done:
             return done[0]
         time.sleep(1)
@@ -370,7 +371,7 @@ def test_a_killed_task_is_recognised_as_interrupted_and_leaves_no_half_copy() ->
     wait_until(lambda: not tasklock.heavy_task_running(STATE), 60, "the killed task still holds backup.lock")
     assert record("base_backup")["status"] == "running"  # nothing could record the end
     bulk(False)
-    again = wait_result("base_backup", start("base_backup"))
+    again = wait_result("base_backup", start("base_backup"), besides=running["run_id"])
     assert again["status"] == "succeeded", again
     interrupted = [h for h in history(since, "base_backup") if h["status"] == "interrupted"]
     assert interrupted, history(since, "base_backup")
@@ -417,7 +418,9 @@ def test_without_the_remote_the_database_keeps_going_and_the_lag_is_recorded() -
         cli("tasks", "install")
     assert failed["status"] == "failed", failed
     lag = failed["detail"]
-    assert lag["last_success_at"] == json.loads((TASKS_STATE / "offsite.json").read_text())["last_success_at"]
+    assert (
+        lag["last_success_at"] == json.loads((TASKS_STATE / backup_tasks.OFFSITE_STATE).read_text())["last_success_at"]
+    )
     assert lag["lag_minutes"] is not None
     assert lag["waiting"]["newest_wal"]
     assert lag["in_repo2"]["newest_wal"]

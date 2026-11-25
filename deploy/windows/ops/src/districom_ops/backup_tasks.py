@@ -60,7 +60,7 @@ from districom_ops.schedule import TASKS
 log = logging.getLogger("districom_ops")
 HISTORY = "history.jsonl"
 RETENTION_INTENT = "retention-intent.json"
-OFFSITE_STATE = "offsite.json"
+OFFSITE_STATE = "offsite-copy.json"  # never "<task>.json": that is the record of the task "offsite"
 WORK = "work"
 LOCK_SECONDS = 10
 
@@ -268,9 +268,13 @@ class Context:
         if stop is not None:
             raise stop
 
-    def run(self, args: list[str], *, env: dict[str, str] | None = None, step: str, poll: float = 0.5) -> str:
+    def run(
+        self, args: list[str], *, env: dict[str, str] | None = None, step: str, poll: float = 0.5, tell: bool = False
+    ) -> str:
         """Run one long step as a child process; stop it at once on a request or at the time limit. Its output
-        goes to a file in the work folder (never to a pipe) and is only read here; it is not logged."""
+        goes to a file in the work folder (never to a pipe) and is only read here; it is not logged. ``tell``: a
+        tool whose messages carry no data of the database (initdb, pg_ctl, createdb, rclone, offsite-push) gets
+        its last line, redacted, in the failure reason; pg_dump, pg_restore and psql never do."""
         self.check()
         self.work.mkdir(parents=True, exist_ok=True)
         out = self.work / f"{step}.out"
@@ -300,8 +304,13 @@ class Context:
                 raise
         text = out.read_text("utf-8", errors="replace")
         if process.returncode != 0:
-            raise TaskFailedError(f"{step} exited {process.returncode}")
+            raise TaskFailedError(f"{step} exited {process.returncode}" + (_last_line(text) if tell else ""))
         return text
+
+
+def _last_line(text: str) -> str:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    return f": {REDACTOR.text(lines[-1])[:300]}" if lines else ""
 
 
 # --- the runner ----------------------------------------------------------------------------------------------------
@@ -507,6 +516,7 @@ def work_offsite(ctx: Context) -> None:
              str(s.rclone), "--repo", str(s.repo)],
             env={"DISTRICOM_OFFSITE_PASSWORD": read_secret(s.offsite_secret)},
             step="offsite_push",
+            tell=True,
         )  # fmt: skip
     except (TaskFailedError, TaskStoppedError):
         last = previous.get("last_success_at")
