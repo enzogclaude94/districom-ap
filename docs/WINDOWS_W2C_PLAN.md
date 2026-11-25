@@ -287,6 +287,30 @@ Ajustes de la revisión 1:
      - el bucket real con bloqueo de objetos;
      - los tiempos en el hardware real.
 
+7. **Diseño de coordinación (Enzo, 2026-11-25): AB, no BA.** Antes de implementar las tareas largas se definieron las ocho condiciones del pedido de Enzo del 2026-11-24 (`/mnt/project-files/servidor/DISENO_W2C6_BACKUPS.md`).
+   - **A:** `operations.lock` solo para la verificación y el registro breves de cada tarea.
+   - **B:** `backup.lock`, del sistema operativo, durante todo el trabajo pesado. Excluye a las otras tareas pesadas.
+   - **Pedidos persistentes de cancelación** desde el mantenimiento, el cierre y la actualización.
+   - **Esperas acotadas fuera de `operations.lock`.**
+   - **Confirmación efectiva** de que la tarea terminó, por el sistema operativo y con `operations.lock` tomado de nuevo, antes de seguir.
+   - **Fallo seguro** si la confirmación no llega: no se abre la ventana.
+   - **Copias anteriores protegidas:** nada se publica antes de verificarse, y una cancelación o una interrupción solo borran lo temporal.
+   - No se implementa BA, que mantendría `operations.lock` durante todo el backup.
+   - **Cambio en C9‑A, justificado y probado:** `maintenance open` y `services stop` agregan el pedido y la espera acotada, siempre sin el bloqueo tomado, y `MaintenanceWindow.open` se niega con una tarea pesada en curso.
+   - **Se conserva:**
+     - «nadie espera a otro proceso con el bloqueo tomado»;
+     - el arranque y el supervisor;
+     - «detener siempre se permite»: `services stop` se detiene aunque la tarea no confirme.
+
+   Regresiones: C9A‑1 a C9A‑13 sin cambios, más C6‑AB.
+8. **Decisiones de implementación** (diseño, §4):
+   - **D2:** `LocalService` con un SID de tarea propio por tarea, sin contraseñas.
+   - **D3:** `config\backup-db.secret` para el rol `districom_backup`.
+   - **D4:** el dump se cifra con `rclone crypt` y su propia clave.
+   - **D5:** el dump se restaura en una instancia descartable con contraseña, en `127.0.0.1`.
+
+   Detalle en `deploy/windows/ops/README.md`, C6.
+
 ### C7. Requisitos de backups: retención, consistencia y criterios de recuperación
 
 1. **Objetivo:** resolver los requisitos 3, 4 y 5 de §8.3.
