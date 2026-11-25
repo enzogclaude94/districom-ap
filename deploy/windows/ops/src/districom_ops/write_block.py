@@ -4,7 +4,8 @@
 **Block** (:func:`block`, run by the operation that owns the open maintenance window, holding the operations lock):
 
 1. Caddy to maintenance mode (C5). Until C5, a hook the journal records as ``not_applicable_yet``.
-2. The writing tasks suspended (C6). Until C6, a hook recorded the same way.
+2. The writing tasks suspended (C6): checked before anything changes (no heavy backup task holds ``backup.lock``)
+   and recorded.
 3. ``ALTER DATABASE … WITH ALLOW_CONNECTIONS false``, by ``districom_ops`` from the ``postgres`` database. No new
    connection of any role gets in, superuser included.
 4. Wait, at most ``wait_seconds``, for the transactions in progress to end. If the wait runs out nothing is forced:
@@ -71,7 +72,7 @@ from typing import Any
 
 from districom_backup.repo import write_atomic
 
-from districom_ops import database
+from districom_ops import database, tasklock
 from districom_ops.install import Install
 from districom_ops.maintenance import MaintenanceWindow, WindowState
 from districom_ops.oplock import OperationLock
@@ -83,6 +84,7 @@ WAIT_SECONDS = 60  # transactions in progress get this long to end; then the blo
 VERIFY_SECONDS = 15  # the ended sessions get this long to disappear from pg_stat_activity
 TERMINATE_MS = 5000
 NOT_YET = "not_applicable_yet"
+TASKS_STOPPED = "no_heavy_backup_task_running"
 LSN = re.compile(r"^[0-9A-F]{1,8}/[0-9A-F]{1,8}$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 log = logging.getLogger("districom_ops")
@@ -304,13 +306,18 @@ def block(install: Install, lock: OperationLock, owner: str, *, wait_seconds: fl
     db = Database(install)
     if not db.allows_connections():
         raise WriteBlockError("connections to the database are already disabled outside the journal; not touching it")
+    # Step 2 (C6, design AB) is decided here, before the journal changes: the window that owns this block was opened
+    # only once no heavy backup task held backup.lock, and no task starts while it is open. A task still running
+    # refuses the block, with nothing changed.
+    if tasklock.heavy_task_running(state):
+        raise WriteBlockError(f"a heavy backup task is running ({tasklock.describe_running(state)}); not blocking")
 
     oplog = _record(install)
     journal = Journal(State.NONE, owner, lock.token)
     journal = _save(state, journal, State.BLOCKING, step=1, changed={"caddy": NOT_YET})
     oplog.step(owner, "write_block", block_step=1, caddy=NOT_YET)  # C5: Caddy to maintenance mode
-    journal = _save(state, journal, State.BLOCKING, step=2, changed={**journal.changed, "tasks": NOT_YET})
-    oplog.step(owner, "write_block", block_step=2, tasks=NOT_YET)  # C6: writing tasks suspended
+    journal = _save(state, journal, State.BLOCKING, step=2, changed={**journal.changed, "tasks": TASKS_STOPPED})
+    oplog.step(owner, "write_block", block_step=2, tasks=TASKS_STOPPED)
     journal = _save(state, journal, State.BLOCKING, step=3,
                     changed={**journal.changed, "allow_connections_was": True})  # fmt: skip
     try:
@@ -367,7 +374,8 @@ def revert(install: Install, lock: OperationLock, owner: str) -> None:
                 raise WriteBlockError("ALLOW_CONNECTIONS did not go back to true")
         except WriteBlockError as exc:
             _revert_failed(install, db, journal, exc)
-    # C6 and C5: tasks resumed and Caddy back to normal mode (hooks; nothing was changed yet).
+    # C6: nothing to resume, the tasks start again on their own once the journal is none and the window closed.
+    # C5: Caddy back to normal mode (a hook; nothing was changed yet).
     _save(state, journal, State.NONE)
     _record(install).step(owner, "write_block_reverted")
     log.warning("write_block_reverted", extra={"operation": owner})

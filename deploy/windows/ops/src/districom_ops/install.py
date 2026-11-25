@@ -83,6 +83,21 @@ class Install:
         return self.root / "config" / "postgres.secret"
 
     @property
+    def backup_secret(self) -> Path:
+        """Password of ``districom_backup`` (W2-C6), written by ``database init``; read by the tasks that connect."""
+        return self.root / "config" / "backup-db.secret"
+
+    @property
+    def tasks_settings(self) -> Path:
+        """``config\\tasks.json`` (W2-C6), written by ``tasks install``. Its presence means the tasks are installed."""
+        return self.root / "config" / "tasks.json"
+
+    @property
+    def repo1(self) -> Path:
+        """The local backup repository (W2-A layout) on the backup disk."""
+        return self.services.backup_disk_root / "repo1"
+
+    @property
     def record(self) -> Path:
         return self.root / "state" / "services.json"
 

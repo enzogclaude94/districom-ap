@@ -21,6 +21,7 @@ from urllib.parse import urlsplit
 
 MIN_PASSWORD_LENGTH = 16
 DEFAULT_MAINTENANCE_MAX_MINUTES = 60
+DEFAULT_BACKUP_CANCEL_WAIT_SECONDS = 120  # W2-C6: bounded wait for a heavy backup task to stop
 LOCAL_HOSTS = {"127.0.0.1", "localhost"}
 # Values that example files and tutorials use: refused even when long enough.
 WEAK_PASSWORDS = {"districom", "postgres", "password", "changeme", "change-me", "secret", "admin", "123456"}
@@ -68,6 +69,7 @@ class OpsConfig:
     lan_subnet: ipaddress.IPv4Network
     maintenance_max_minutes: int
     alert_command: str | None
+    backup_cancel_wait_seconds: int = 120
 
     def secrets(self) -> list[str]:
         """Every secret value, for the log redaction; includes the passwords alone, not only the URLs."""
@@ -180,6 +182,14 @@ def load_config(values: Mapping[str, str]) -> OpsConfig:
 
     alert = values.get("ALERT_COMMAND") or None
 
+    cancel_wait = DEFAULT_BACKUP_CANCEL_WAIT_SECONDS
+    cancel_raw = values.get("BACKUP_CANCEL_WAIT_SECONDS", "")
+    if cancel_raw:
+        if not cancel_raw.isdigit() or not 10 <= int(cancel_raw) <= 1800:
+            problems.append(Problem("BACKUP_CANCEL_WAIT_SECONDS", "must be a whole number of seconds from 10 to 1800"))
+        else:
+            cancel_wait = int(cancel_raw)
+
     if problems:
         raise ConfigError(problems)
     return OpsConfig(
@@ -190,6 +200,7 @@ def load_config(values: Mapping[str, str]) -> OpsConfig:
         lan_subnet=subnet,
         maintenance_max_minutes=minutes,
         alert_command=alert,
+        backup_cancel_wait_seconds=cancel_wait,
     )
 
 
@@ -296,3 +307,46 @@ def load_services_config(values: Mapping[str, str], ops: OpsConfig) -> ServicesC
 
 def read_services_config(path: Path, ops: OpsConfig) -> ServicesConfig:
     return load_services_config(parse_env(path.read_text(encoding="utf-8-sig")), ops)
+
+
+# --- W2-C6: backup tasks (validated by ``tasks install``) ---
+
+DEFAULT_KEEP_BASE = 7
+DEFAULT_KEEP_DUMPS = 14
+DEFAULT_RESTORE_TEST_PORT = 55432
+_REMOTE_UNSAFE = re.compile(r"[\s'\"\x00]")
+
+
+@dataclass(frozen=True)
+class TasksConfig:
+    offsite_remote: str | None
+    keep_base: int
+    keep_dumps: int
+    restore_test_port: int
+
+
+def load_tasks_config(values: Mapping[str, str], pg_port: int) -> TasksConfig:
+    """``OFFSITE_REMOTE`` (optional: without it the off-site task records that it is not configured, a failure for
+    C8), ``BACKUP_KEEP_BASE``, ``BACKUP_KEEP_DUMPS`` and ``RESTORE_TEST_PORT``. Same rules: named, never valued."""
+    problems: list[Problem] = []
+    remote = values.get("OFFSITE_REMOTE", "") or None
+    if remote is not None and (_REMOTE_UNSAFE.search(remote) or remote.startswith("-")):
+        problems.append(Problem("OFFSITE_REMOTE", "must be an rclone remote path without spaces or quotes"))
+    numbers: dict[str, int] = {}
+    for key, default, low, high in (
+        ("BACKUP_KEEP_BASE", DEFAULT_KEEP_BASE, 1, 90),
+        ("BACKUP_KEEP_DUMPS", DEFAULT_KEEP_DUMPS, 1, 365),
+        ("RESTORE_TEST_PORT", DEFAULT_RESTORE_TEST_PORT, 1024, 65535),
+    ):
+        raw = values.get(key, "")
+        if not raw:
+            numbers[key] = default
+        elif not raw.isdigit() or not low <= int(raw) <= high:
+            problems.append(Problem(key, f"must be a whole number from {low} to {high}"))
+        else:
+            numbers[key] = int(raw)
+    if numbers.get("RESTORE_TEST_PORT") == pg_port:
+        problems.append(Problem("RESTORE_TEST_PORT", "must differ from the PostgreSQL port"))
+    if problems:
+        raise ConfigError(problems)
+    return TasksConfig(remote, numbers["BACKUP_KEEP_BASE"], numbers["BACKUP_KEEP_DUMPS"], numbers["RESTORE_TEST_PORT"])

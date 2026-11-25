@@ -16,19 +16,23 @@ from districom_ops import (
     acl,
     artifacts,
     backup_disk,
+    backup_tasks,
+    backups,
     database,
     firewall,
     integrity,
     ntfs,
     permissions,
+    schedule,
     services,
+    tasklock,
     write_block,
 )
 from districom_ops.config import ConfigError, OpsConfig, parse_env, read_config, read_services_config
 from districom_ops.install import Install
 from districom_ops.layout import Layout, LayoutError
 from districom_ops.logs import REDACTOR, setup_logging
-from districom_ops.maintenance import MaintenanceError, MaintenanceWindow
+from districom_ops.maintenance import MaintenanceError, MaintenanceWindow, open_stopping_tasks
 from districom_ops.oplock import LockBusy
 from districom_ops.oplog import Event, Kind, OperationError, OperationsLog
 from districom_ops.safety import writes_resume_check
@@ -113,6 +117,18 @@ def _parser() -> argparse.ArgumentParser:
     i = sub.add_parser("integrity", help="installed executables (C3)").add_subparsers(dest="action", required=True)
     i.add_parser("record", help="record the SHA-256 of runtimes, wrappers and the release")
     i.add_parser("verify", help="compare them with the record (read only)")
+
+    # W2-C6: backup tasks
+    t = sub.add_parser("tasks", help="scheduled backup tasks (C6)").add_subparsers(dest="action", required=True)
+    t.add_parser("install", help="repo1, archiving, task settings, permissions and the scheduled tasks (idempotent)")
+    t.add_parser("uninstall", help="remove the scheduled tasks; repositories, dumps and records stay")
+    t.add_parser("status", help="state of every task, the running heavy task and any cancellation request")
+    p = t.add_parser("start", help="administrator: start a registered task now, through the Task Scheduler")
+    p.add_argument("task", choices=sorted(schedule.TASKS))
+    t.add_parser("clear-cancel", help="administrator: remove a cancellation request left by an interrupted operation")
+    p = t.add_parser("run", help="run by the Task Scheduler: one run of a task")
+    p.add_argument("task", choices=sorted(schedule.TASKS))
+    p.add_argument("--settings", type=Path, required=True)
     return parser
 
 
@@ -122,7 +138,23 @@ def _config(path: Path) -> OpsConfig:
     return config
 
 
+def _run_task(args: argparse.Namespace) -> int:
+    """``tasks run``: reads only ``config\\tasks.json`` and its own secrets, never ``districom.env``."""
+    try:
+        settings = backup_tasks.TaskSettings.read(args.settings)
+    except backup_tasks.TaskSettingsError as exc:
+        setup_logging(None)
+        log.error("refused", extra={"reason": str(exc)})
+        return 2
+    setup_logging(settings.log_dir(args.task))
+    outcome = backup_tasks.run_task(settings, args.task)
+    _print({"task": outcome.task, "status": outcome.status, "reason": outcome.reason})
+    return {"succeeded": 0, "refused": 2}.get(outcome.status, 1)
+
+
 def _run(args: argparse.Namespace) -> int:
+    if args.command == "tasks" and args.action == "run":
+        return _run_task(args)
     if args.command == "init":
         layout = Layout(args.root)
         setup_logging(layout.logs if layout.logs.is_dir() else None)
@@ -148,7 +180,7 @@ def _run(args: argparse.Namespace) -> int:
         return 0
 
     if args.command in (
-        "runtime", "backup-disk", "database", "services", "permissions", "integrity", "firewall", "resume"
+        "runtime", "backup-disk", "database", "services", "permissions", "integrity", "firewall", "resume", "tasks"
     ):  # fmt: skip
         return _services(args, config)
 
@@ -174,7 +206,8 @@ def _run(args: argparse.Namespace) -> int:
         )
         return 0 if check.allowed else 1
     if args.action == "open":
-        op_id = window.open(Kind(args.kind), args.reason)
+        # W2-C6 (design AB): the heavy backup tasks are asked to stop first, with a bounded wait outside the lock.
+        op_id = open_stopping_tasks(window, Kind(args.kind), args.reason, config.backup_cancel_wait_seconds)
         log.info("maintenance_opened", extra={"operation": op_id, "kind": args.kind})
         sys.stdout.write(op_id + "\n")
         return 0
@@ -250,6 +283,8 @@ def _services(args: argparse.Namespace, config: OpsConfig) -> int:
         return 0 if check.ok else 1
     if args.command == "resume":
         return _resume(args, install)
+    if args.command == "tasks":
+        return _tasks(args, install)
     if args.command == "database":
         changed = database.init(install)
         log.info("database_init", extra={"changed": changed})
@@ -299,12 +334,39 @@ def _services(args: argparse.Namespace, config: OpsConfig) -> int:
             services.start_stack(install)
         return 0
     if args.action == "stop":
-        services.stop_services(install)
+        services.stop_services(install, install.ops.backup_cancel_wait_seconds)
         return 0
     if args.action == "status":
         _print(services.status_report(install))
         return 0
     return services.supervise(install)
+
+
+def _tasks(args: argparse.Namespace, install: Install) -> int:
+    if args.action == "install":
+        if not _is_admin():
+            log.error("refused", extra={"reason": "tasks install needs an administrator"})
+            return 2
+        _print({"changes": backups.install_tasks(install, args.config)})
+        return 0
+    if args.action == "uninstall":
+        _print({"removed": backups.uninstall_tasks(install)})
+        return 0
+    if not install.tasks_settings.is_file():
+        log.error("refused", extra={"reason": "the backup tasks are not installed (tasks install)"})
+        return 2
+    settings = backup_tasks.TaskSettings.read(install.tasks_settings)
+    if args.action == "status":
+        _print(backup_tasks.status(settings))
+        return 0
+    if args.action == "start":
+        schedule.start_now(args.task)
+        log.info("backup_task_start_requested", extra={"task": args.task})
+        return 0
+    with services.operations_lock(install, "tasks_clear_cancel").acquire(timeout=services.LOCK_SECONDS) as lock:
+        cleared = tasklock.clear_request(install.layout.state, lock)
+    log.info("cancel_request_cleared", extra={"cleared": cleared})
+    return 0
 
 
 def _firewall(action: str, install: Install, services_running: bool) -> int:
@@ -346,6 +408,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         firewall.FirewallError,
         LockBusy,
         write_block.WriteBlockError,
+        backups.BackupsError,
+        schedule.ScheduleError,
+        tasklock.TaskLockError,
     ) as exc:
         log.error("refused", extra={"reason": str(exc)})
         return 2

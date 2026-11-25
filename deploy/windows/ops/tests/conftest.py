@@ -31,6 +31,9 @@ CRITERIA: dict[str, str] = {
     "C9A-11": "Procesos matados durante el arranque: sin PASS falso, sin espera sin fin, bloqueo liberado",
     "C9A-12": "PostgreSQL no se reinicia con el bloqueo ocupado, una ventana abierta o una operación incompleta o incierta",
     "C9A-13": "Un registro antiguo del supervisor nunca da PASS",
+    "C6-AB": "Diseño AB con procesos reales: espera acotada fuera de operations.lock, pedido persistente, confirmación por el sistema operativo; sin ella no se abre nada",
+    "C6-R": "Ejecutor de tareas: inicio con operations.lock breve, rechazos con motivo, cancelación y vencimiento sin copias a medias, interrupciones reconocidas, retenciones seguras",
+    "C6-U": "Definiciones del Programador de tareas (cuenta propia, sin contraseña, límites), registro idempotente y permisos mínimos de las tareas",
 }
 OUTSIDE_PYTEST = {
     "C1-4": "Calidad: ruff, ruff format y mypy estricto (pasos del job de CI)",

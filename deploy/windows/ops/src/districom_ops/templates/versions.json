@@ -1,5 +1,5 @@
 {
-  "_comment": "W2-C2: every runtime the services use, pinned by version and checksum. A download whose hash differs is deleted and never extracted. EDB publishes no checksum for the PostgreSQL zip: its SHA-256 is the one observed by every Windows CI job of this repository since W2-B (2026-11) and must be re-confirmed when the version changes.",
+  "_comment": "W2-C2: every runtime the services use, pinned by version and checksum. A download whose hash differs is deleted and never extracted. EDB publishes no checksum for the PostgreSQL zip: its SHA-256 is the one observed by every Windows CI job of this repository since W2-B (2026-11) and must be re-confirmed when the version changes. W2-C6: rclone (the tool W2-A uses for the encrypted copies), checksum from the SHA256SUMS that rclone publishes for the release.",
   "artifacts": {
     "winsw": {
       "version": "2.12.0",
@@ -32,6 +32,14 @@
       "digest": "cbc74b5e0982c9dbb41525fd8fb5dcd32fbee237863f7829072f4639a1ce5f20",
       "kind": "zip",
       "target": "node-v22.23.4-win-x64"
+    },
+    "rclone": {
+      "version": "1.68.2",
+      "url": "https://downloads.rclone.org/v1.68.2/rclone-v1.68.2-windows-amd64.zip",
+      "algorithm": "sha256",
+      "digest": "812bf76cc02c04cf6327f3683f3d5a88e47d36c39db84c1a745777496be7d993",
+      "kind": "zip",
+      "target": "rclone-v1.68.2-windows-amd64/rclone.exe"
     }
   }
 }

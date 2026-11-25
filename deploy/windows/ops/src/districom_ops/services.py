@@ -63,6 +63,7 @@ from districom_ops import (
     integrity,
     ntfs,
     permissions,
+    tasklock,
     winservice,
     write_block,
 )
@@ -348,8 +349,13 @@ def permission_policy(install: Install) -> permissions.Policy:
         "node": (install.artifact("node").home(install.runtime), [FRONTEND]),
     }
     marker = None
-    if check_disk(install).ok:
+    disk_ok = check_disk(install).ok
+    if disk_ok:
         marker = install.services.backup_disk_root / backup_disk.MARKER
+    release_readers: list[str] = []
+    extra: list[permissions.Rule] = []
+    if install.tasks_settings.is_file():  # W2-C6: only once tasks install ran
+        release_readers, extra = _task_grants(install, runtimes, disk_ok)
     return permissions.policy(
         root=install.root,
         release=install.release_dir() if install.release else None,
@@ -358,7 +364,62 @@ def permission_policy(install: Install) -> permissions.Policy:
         winsw=list(WINSW),
         names={"backend": BACKEND, "frontend": FRONTEND, "caddy": CADDY, "postgresql": PG, "stack": STACK},
         backup_marker=marker,
+        release_readers=release_readers,
+        extra_rules=extra,
     )
+
+
+def _task_grants(
+    install: Install, runtimes: dict[str, tuple[Path, list[str]]], disk_ok: bool
+) -> tuple[list[str], list[permissions.Rule]]:
+    """What the backup tasks (W2-C6, each with its own task SID) and the PostgreSQL archiver need, nothing more:
+
+    * every task and PostgreSQL read and run the Python of the release (``releases\\…\\windows`` and the runtime);
+    * the tasks that use PostgreSQL's tools read its runtime; the dump and off-site tasks read rclone;
+    * every task reads ``config\\tasks.json``; base backup and dump read ``backup-db.secret``; the dump reads
+      ``dump.secret``; the off-site copy reads ``offsite.secret``;
+    * every task modifies ``state`` (the operations lock, its records, its work folder), like the stack, and its
+      own log folder ``logs\\tasks\\<task>``;
+    * ``repo1`` is protected: the heavy tasks modify it, the WAL check reads it, PostgreSQL only passes through it,
+      reads its marker and modifies ``repo1\\wal``.
+    """
+    from districom_ops import schedule
+
+    sids = {name: spec.sid for name, spec in schedule.TASKS.items()}
+    every = sorted(sids.values())
+    pg = service_sid(PG)
+    pg_tools = [sids["base_backup"], sids["dump"], sids["retention"]]
+    runtimes["python"][1].extend([PG, *every])
+    runtimes["postgresql"][1].extend(pg_tools)
+    rclone_home = install.artifact("rclone").home(install.runtime)
+    runtimes["rclone"] = (rclone_home, [sids["dump"], sids["offsite"]])
+    config = install.root / "config"
+    rules = [
+        permissions.Rule(install.tasks_settings, tuple((s, ntfs.READ) for s in every), protected=True),
+        permissions.Rule(
+            install.backup_secret,
+            ((sids["base_backup"], ntfs.READ), (sids["dump"], ntfs.READ)),
+            protected=True,
+            required=False,
+        ),
+        permissions.Rule(config / "dump.secret", ((sids["dump"], ntfs.READ),), protected=True, required=False),
+        permissions.Rule(config / "offsite.secret", ((sids["offsite"], ntfs.READ),), protected=True, required=False),
+        permissions.Rule(install.root / "state", tuple((s, ntfs.MODIFY) for s in every)),
+        *(
+            permissions.Rule(install.root / "logs" / "tasks" / name, ((sid, ntfs.MODIFY),), protected=True)
+            for name, sid in sids.items()
+        ),
+    ]
+    if disk_ok:
+        repo = install.repo1
+        heavy = [sids[name] for name in schedule.HEAVY]
+        grants = tuple(sorted([*((s, ntfs.MODIFY) for s in heavy), (sids["wal_gaps"], ntfs.READ_EXECUTE)]))
+        rules += [
+            permissions.Rule(repo, grants, protected=True, required=False, traverse=(pg,)),
+            permissions.Rule(repo / ".districom-backup-repo", ((pg, ntfs.READ),), required=False),
+            permissions.Rule(repo / "wal", ((pg, ntfs.MODIFY),), required=False),
+        ]
+    return [pg, *every], rules
 
 
 def base_python(venv_python: Path) -> Path:
@@ -664,11 +725,26 @@ def start_direct(install: Install, until: str = CADDY) -> None:
         start_chain(install, until)
 
 
-def stop_services(install: Install) -> None:
+def stop_services(install: Install, cancel_wait_seconds: float | None = None) -> None:
     """``services stop``: under the lock. Stopping is always allowed, even with an unsafe state: it only moves
-    towards safety, and refusing it would leave an operator unable to stop a blocked installation."""
-    with _locked(install, "services_stop"):
-        stop_all(install)
+    towards safety, and refusing it would leave an operator unable to stop a blocked installation.
+
+    W2-C6 (design AB): first the heavy backup tasks are asked to stop, with the bounded wait outside the lock
+    (``tasklock.quiesce``). The C9-A guarantee above is kept: if a task does not confirm in time, the stop goes on
+    and says so. That is safe for the copies: a task stopped by the stop of PostgreSQL fails before publishing,
+    and nothing published earlier is touched."""
+    wait = tasklock.DEFAULT_CANCEL_WAIT_SECONDS if cancel_wait_seconds is None else cancel_wait_seconds
+    try:
+        stopped = tasklock.quiesce(install.layout.state, "services_stop", "services stop", wait,
+                                   lock_seconds=LOCK_SECONDS)  # fmt: skip
+    except LockBusy as exc:
+        raise ServicesError(str(exc)) from exc
+    (log.info if stopped.stopped else log.warning)("backup_tasks_before_stop", extra={"detail": stopped.describe()})
+    with _locked(install, "services_stop") as lock:
+        try:
+            stop_all(install)
+        finally:
+            tasklock.clear_request(install.layout.state, lock, stopped.request_id)
 
 
 def supervisor_state(install: Install) -> dict[str, object] | None:

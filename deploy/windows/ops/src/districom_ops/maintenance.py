@@ -18,6 +18,11 @@ Invariants (Enzo, 2026-11-06, W2-C revision 1):
 * Opening and closing happen under the exclusive operations lock (C9-A, ``districom_ops.oplock``): the check
   that no window is open and the writing of the new one can no longer interleave with another opening. The
   window file is also created exclusively, so even without the lock a second window can never replace the first.
+* **Backup tasks (W2-C6, design AB):** a window is never opened while a heavy backup task holds ``backup.lock``:
+  :meth:`MaintenanceWindow.open` checks it with the operations lock held and refuses (fail safe). To get there, an
+  operation first asks the tasks to stop and waits outside the lock (:func:`open_stopping_tasks`, which
+  ``maintenance open`` uses; day close and update will use it too). Closing a window also clears a cancellation
+  request left by an operation that ended before clearing its own.
 """
 
 import json
@@ -31,6 +36,7 @@ from pathlib import Path
 
 from districom_backup.repo import fsync_dir
 
+from districom_ops import tasklock
 from districom_ops.oplock import OperationLock
 from districom_ops.oplog import Event, Kind, OperationsLog
 
@@ -108,15 +114,15 @@ class MaintenanceWindow:
         return WindowStatus(state, window, max(elapsed, 0))
 
     @contextmanager
-    def _locked(self, lock: OperationLock | None, operation: str) -> Iterator[None]:
+    def _locked(self, lock: OperationLock | None, operation: str) -> Iterator[OperationLock]:
         """Under ``lock`` (an operation that already holds it) or under a lock taken for this call only."""
         if lock is not None:
             if not lock.held or lock.path.parent != self.path.parent:
                 raise MaintenanceError(f"{operation} needs the operations lock of this installation")
-            yield
+            yield lock
             return
-        with OperationLock(self.path.parent, operation).acquire(timeout=LOCK_SECONDS):
-            yield
+        with OperationLock(self.path.parent, operation).acquire(timeout=LOCK_SECONDS) as taken:
+            yield taken
 
     def _create(self, data: dict[str, str]) -> None:
         """Exclusive creation: never replaces a window, even if the lock were bypassed."""
@@ -143,6 +149,10 @@ class MaintenanceWindow:
                 current = self.status(max_minutes=10**9)
                 owner = current.window.operation_id if current.window else "unknown (unreadable file)"
                 raise MaintenanceError(f"a maintenance window is already open by {owner}")
+            try:
+                tasklock.require_no_heavy_task(self.path.parent, "maintenance open")
+            except tasklock.TaskLockError as exc:
+                raise MaintenanceError(str(exc)) from exc
             op_id = self.oplog.start(kind, reason)
             now = datetime.now(UTC).isoformat()
             self._create({"operation_id": op_id, "kind": kind.value, "reason": reason, "opened_at": now})
@@ -153,8 +163,9 @@ class MaintenanceWindow:
         self, operation_id: str, end: Event = Event.COMPLETED, lock: OperationLock | None = None, **detail: str
     ) -> None:
         """Close the window of ``operation_id`` and end that operation. Any other id is refused."""
-        with self._locked(lock, "maintenance_close"):
+        with self._locked(lock, "maintenance_close") as held:
             self._close(operation_id, end, **detail)
+            tasklock.clear_request(self.path.parent, held)
 
     def _close(self, operation_id: str, end: Event, **detail: str) -> None:
         try:
@@ -169,3 +180,24 @@ class MaintenanceWindow:
         self.path.unlink()
         fsync_dir(self.path.parent)
         self.oplog.finish(operation_id, end, **detail)
+
+
+def open_stopping_tasks(window: MaintenanceWindow, kind: Kind, reason: str, wait_seconds: float) -> str:
+    """Open a window after the heavy backup tasks stopped (W2-C6, design AB).
+
+    1. :func:`tasklock.quiesce`: a persistent cancellation request, written under the operations lock, then a
+       bounded wait **without** the lock until the operating system confirms that ``backup.lock`` is free;
+    2. with the operations lock taken again, :meth:`MaintenanceWindow.open` checks once more and opens;
+    3. the request is cleared (under the same lock): from now on the window keeps the tasks from starting.
+
+    If the task does not confirm that it stopped, nothing is opened and the request is cleared: the refusal names
+    the task and the time waited."""
+    state = window.path.parent
+    stopped = tasklock.quiesce(state, f"maintenance_{kind.value}", reason, wait_seconds, lock_seconds=LOCK_SECONDS)
+    with OperationLock(state, "maintenance_open").acquire(timeout=LOCK_SECONDS) as lock:
+        try:
+            if not stopped.stopped:
+                raise MaintenanceError(f"maintenance open refused: {stopped.describe()}")
+            return window.open(kind, reason, lock=lock)
+        finally:
+            tasklock.clear_request(state, lock, stopped.request_id)

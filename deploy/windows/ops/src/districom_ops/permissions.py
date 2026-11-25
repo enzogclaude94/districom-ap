@@ -111,7 +111,12 @@ class Policy:
 
 
 def _sids(*names: str) -> list[str]:
-    return [service_sid(n) for n in names]
+    return [_sid(n) for n in names]
+
+
+def _sid(name: str) -> str:
+    """A service name, or already a SID (the task accounts of W2-C6, ``S-1-5-87-…``)."""
+    return name if name.startswith("S-1-") else service_sid(name)
 
 
 def policy(
@@ -122,12 +127,17 @@ def policy(
     winsw: list[str],
     names: dict[str, str],
     backup_marker: Path | None = None,
+    release_readers: list[str] | None = None,
+    extra_rules: list[Rule] | None = None,
 ) -> Policy:
-    """``names``: role → service name (backend, frontend, caddy, postgresql, stack). ``runtimes``: home → readers."""
+    """``names``: role → service name (backend, frontend, caddy, postgresql, stack). ``runtimes``: home → readers
+    (service names or SIDs). W2-C6: ``release_readers`` also read and run ``releases\\<release>\\windows`` (the
+    PostgreSQL archiver and the backup tasks) and ``extra_rules`` are the tasks' own grants; both empty until
+    ``tasks install``."""
     sid = {role: service_sid(name) for role, name in names.items()}
     rules: list[Rule] = [Rule(root, protected=True)]
     for home, readers in runtimes.values():
-        rules.append(Rule(home, tuple((service_sid(n), READ_EXECUTE) for n in readers), required=False))
+        rules.append(Rule(home, tuple((_sid(n), READ_EXECUTE) for n in readers), required=False))
     for name in winsw:
         for suffix in (".exe", ".xml"):
             rules.append(Rule(root / "services" / f"{name}{suffix}", ((service_sid(name), READ_EXECUTE),)))
@@ -138,7 +148,7 @@ def policy(
         rules += [
             Rule(release / "backend", ((sid["backend"], READ_EXECUTE),)),
             Rule(release / "frontend", ((sid["frontend"], READ_EXECUTE),)),
-            Rule(release / "windows", ((sid["stack"], READ_EXECUTE),)),
+            Rule(release / "windows", tuple((s, READ_EXECUTE) for s in [sid["stack"], *(release_readers or [])])),
         ]
         links[release / "frontend" / ".next" / "cache"] = root / "state" / "frontend-cache"
     rules += [
@@ -162,12 +172,29 @@ def policy(
     ]
     if backup_marker is not None:
         rules.append(Rule(backup_marker, ((sid["stack"], READ),), protected=True))
+    rules = _merge(rules + (extra_rules or []))
     rules = _with_traverse(root, rules, {pg_data: [sid["stack"]]})
     trees = [root] if pg_data.is_relative_to(root) else [root, pg_data]
     # uv names each Python by a link to its exact version (cpython-3.12-… → cpython-3.12.16-…): a link that stays
     # inside its own runtime is as harmless as one that stays inside its release.
     contained = release_dirs + [home for home, _ in runtimes.values()]
     return Policy(root, rules, trees, links, contained)
+
+
+def _merge(rules: list[Rule]) -> list[Rule]:
+    """One rule per path: a second rule for the same path (W2-C6 adds the task accounts to ``state``) adds its grants
+    and its traverse, and protects the path if either does. Order of first appearance is kept."""
+    merged: dict[Path, Rule] = {}
+    for rule in rules:
+        first = merged.get(rule.path)
+        if first is None:
+            merged[rule.path] = rule
+            continue
+        grants = tuple(dict.fromkeys(first.grants + rule.grants))
+        traverse = tuple(sorted(set(first.traverse) | set(rule.traverse)))
+        merged[rule.path] = Rule(rule.path, grants, first.protected or rule.protected,
+                                 first.required or rule.required, traverse)  # fmt: skip
+    return list(merged.values())
 
 
 def _with_traverse(root: Path, rules: list[Rule], extra: dict[Path, list[str]]) -> list[Rule]:
