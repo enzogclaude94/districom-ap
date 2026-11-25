@@ -90,6 +90,47 @@ def test_a_second_handle_in_the_same_process_is_refused_too(tmp_path: Path) -> N
 
 
 @pytest.mark.criterion("C9A-2")
+@pytest.mark.criterion("C9A-1")
+def test_a_reader_of_the_holder_record_never_makes_the_release_fail(tmp_path: Path) -> None:
+    """Seen on Windows (PR #92): another thread or process reading operations.lock.json while the owner releases
+    made the delete fail with WinError 32 and the release raise. The lock must be freed, without an error."""
+    lock = OperationLock(tmp_path, "day_close").acquire()
+    reader = lock.holder_path.open("rb")  # on Windows: open without FILE_SHARE_DELETE, as read_text does
+    try:
+        lock.release()  # must not raise
+    finally:
+        reader.close()
+    assert not lock.held
+    again = OperationLock(tmp_path, "maintenance").acquire()  # the operating system's lock was freed
+    holder = again.holder()
+    assert holder is not None
+    assert holder["operation"] == "maintenance"  # a stale record, if left, is overwritten
+    again.release()
+
+
+@pytest.mark.criterion("C9A-1")
+@pytest.mark.parametrize("failures", [3, 1000])
+def test_a_holder_record_that_cannot_be_deleted_is_retried_then_left(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failures: int
+) -> None:
+    lock = OperationLock(tmp_path, "day_close").acquire()
+    real_unlink = Path.unlink
+    calls = {"n": 0}
+
+    def unlink(self: Path, missing_ok: bool = False) -> None:
+        if self == lock.holder_path and calls["n"] < failures:
+            calls["n"] += 1
+            raise PermissionError(32, "being used by another process")
+        real_unlink(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", unlink)
+    monkeypatch.setattr("districom_ops.oplock.HOLDER_REMOVE_DELAY", 0)
+    lock.release()
+    monkeypatch.undo()
+    assert lock.holder_path.exists() is (failures >= 1000)  # transient: deleted; permanent: left, harmless
+    OperationLock(tmp_path, "after").acquire(timeout=0).release()
+
+
 def test_a_dead_owner_frees_the_lock_and_leaves_the_persistent_state_as_it_was(tmp_path: Path) -> None:
     process = holder(tmp_path, "manual_maintenance", open_window=True)
     before = snapshot(tmp_path)
