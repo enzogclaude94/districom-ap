@@ -1,6 +1,6 @@
 # PLAN — DistriCom · Plataforma de Inteligencia Comercial
 
-> Estado del documento: **v0.5 — Fase 0 DONE; plataforma modular DONE; Fase 1 de Comercial IN_PROGRESS (F1.0–F1.5 aprobados y mergeados, F1.6 en revisión)**
+> Estado del documento: **v0.5 — Fase 0 DONE; plataforma modular DONE; Fase 1 de Comercial IN_PROGRESS (F1.0–F1.6 aprobados y mergeados, F1.7 en revisión)**
 > Última actualización: 2026-10-30 (secciones de Comercial; las de Rendiciones las mantiene su hilo)
 > Fuente de requisitos: prompt maestro adjunto por Enzo (`message.md`, 165 secciones).
 
@@ -273,8 +273,9 @@ Estado: **IN_PROGRESS.** Diseño F1.0 aprobado por Enzo el 2026-10-30 con las de
 | F1.3b pantalla mínima de Importaciones | DONE (PR #78, 2026-11-10): subir, revisar, confirmar, descartar, decisión de admin e historial; confirm de 7414 líneas en 4,7 s |
 | F1.4 importador AXUM «Compró / No compró» | DONE (PR #85, 2026-11-16): 1271 no compras del export real (las 1490 `Si` quedan solo en el staging), cliente por código y nombre con regla auditada (ADR 018), preventistas pendientes, reimport con decisión de admin |
 | F1.5 revisión manual de mappings | DONE (PR #88, 2026-11-19): pantalla Datos › Mapeos, re‑resolución de hechos por registro del módulo, confirmación en lote atómica, impacto contado por el backend, adopción de huérfanos por código exacto (`docs/IMPORTS.md §6.4`) |
-| F1.6 calidad de datos + pantalla Calidad | En revisión: ciclo de vida auditado por código, dos cierres automáticos corregidos, ignorar (operator) y resolver (admin) con nota, 409 ante una decisión vieja, sin migración (`docs/IMPORTS.md §7.1`) |
-| F1.7 – F1.8 | Pendientes de aprobación sucesiva |
+| F1.6 calidad de datos + pantalla Calidad | DONE (PR #91, 2026-11-26): ciclo de vida auditado por código, dos cierres automáticos corregidos, ignorar (operator) y resolver (admin) con nota, 409 ante una decisión vieja, sin migración (`docs/IMPORTS.md §7.1`) |
+| F1.7 maestros | En revisión: pantalla Datos › Maestros sobre los servicios existentes; clientes con zona, vendedor e historia (solo lectura); vendedores desde empleados y mappings; edición de admin con motivo y 409 por versión; Calidad enlaza al registro exacto; sin migración (`docs/IMPORTS.md §7.2`) |
+| F1.8 | Pendiente de aprobación |
 
 **Confirmaciones de ADR 014 §3:** Enzo respondió S1–S8 el 2026-11-01; ninguna afecta F1.1b y se vuelcan en los documentos de F1.2/F1.3, que las aplican. Lista original:
 - S1 días de visita de las zonas `RUTA 03` y `RUTA 05` (MISA) · S2 `LUVI` = Lumivi y `MAJU` = Majusa → antes de sembrar reglas (F1.2).

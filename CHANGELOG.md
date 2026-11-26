@@ -4,7 +4,21 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
-### Added — F1.6: calidad de datos completa y pantalla Calidad (en revisión)
+### Added — F1.7: Maestros (en revisión)
+- **Pantalla Comercial › Datos › Maestros** (`/comercial/datos/maestros`), un solo módulo con pestañas: Clientes, Productos, Categorías y familias, Zonas (con sus reglas), Vendedores, Listas de precios, Tipos de comprobante y Motivos de no compra. Datos queda con Importaciones, Mapeos, Calidad y Maestros.
+  - Viewer y operator leen; un admin edita con los servicios existentes, siempre con motivo. Los errores 409 y 422 quedan en el diálogo.
+  - Clientes: búsqueda por nombre o código STORE SYS, filtros por estado, genérico, zona y vendedor vigentes, paginados en el backend; el detalle muestra códigos vinculados (con enlace a Mapeos) e historia de zona y vendedor, sin edición. Un admin solo cambia genérico y activo.
+  - Productos: filtros por categoría, familia, con o sin categoría, elegibilidad y estado; precio de hoy en la lista del maestro; historia de precios por lista. Un admin clasifica.
+  - Vendedores: empleados con la función Preventista o con un código vinculado, sus códigos y sus clientes vigentes, y los códigos sin vincular con enlace a Mapeos. Las personas se editan en Empleados.
+- **Calidad enlaza al registro exacto en Maestros** (`fix=masters`, `fix_href`) para producto sin categoría, zona sin configurar, tipo de comprobante sin clasificar, motivo sin categoría y precios sin lista. Al corregir, el issue se cierra por su ciclo de vida existente (`docs/IMPORTS.md §7.2`).
+- **API aditiva:** `GET /commercial/customers` con filtros y código, zona y vendedor vigentes; `GET /commercial/customers/{id}/history`; `GET /commercial/salespeople`; `GET /commercial/products` con `has_category`, `active` y `master_price`; `parent_id` en `PATCH /commercial/product-categories/{id}`.
+- **Control de versión en las ediciones de admin:** aceptan `expected_updated_at`; si otro guardó en el medio, 409 `changed_meanwhile` en vez de pisar. Las ediciones que no pedían motivo aceptan uno opcional y lo auditan.
+- Sin migración. Medido con 20.820 clientes sintéticos: todas las lecturas por debajo de 20 ms, sin índices nuevos.
+
+### Changed — F1.6 cerrada
+- F1.6 (calidad de datos y pantalla Calidad) aprobada y mergeada (PR #91, 2026-11-26).
+
+### Added — F1.6: calidad de datos completa y pantalla Calidad
 - **Pantalla Comercial › Datos › Calidad** (`/comercial/datos/calidad`). Datos queda con Importaciones, Mapeos y Calidad.
   - **Cola:** tarjetas que cuentan problemas y ocurrencias por separado (errores, advertencias e informativos abiertos, resueltos, ignorados). Filtros del lado del servidor por estado, severidad, grupo de negocio, tipo, fechas, importación y palabras del tipo. Primero los errores y, dentro de cada severidad, el más antiguo.
   - **Detalle:** qué pasó, a qué afecta, ocurrencias, primera y última vez, origen con enlace a la importación y cómo se corrige. Enlaza al mapping exacto o a la importación; no hay mini pantallas de edición, y zonas y categorías llegan con Maestros. Si está cerrado, quién, cuándo y con qué nota, o «se resolvió solo».
