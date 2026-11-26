@@ -56,12 +56,15 @@ export function originText(source: IssueSource) {
 }
 
 /** Where a person corrects the cause, when a screen for it exists. Never a guess: only what the code declares. */
-export function fixLink(issue: Pick<Issue, "fix" | "mapping_id" | "source">) {
+export function fixLink(issue: Pick<Issue, "fix" | "mapping_id" | "source" | "fix_href">) {
   if (issue.fix === "mapping")
     return issue.mapping_id !== null
       ? { href: mappingHref(issue.mapping_id), label: "Corregir en Mapeos" }
       : { href: "/comercial/datos/mapeos", label: "Ir a Mapeos" };
   if (issue.fix === "import" && issue.source.job_id !== null)
     return { href: importHref(issue.source.job_id), label: "Ver la importación" };
+  // Calidad diagnoses, Maestros corrects (F1.7): only a relative path of the app, never a URL from data.
+  if (issue.fix === "masters" && issue.fix_href?.startsWith("/comercial/datos/maestros"))
+    return { href: issue.fix_href, label: "Corregir en Maestros" };
   return null;
 }

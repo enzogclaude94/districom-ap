@@ -42,6 +42,7 @@ export const COMMERCIAL_NAV: NavSection[] = [
       { label: "Importaciones", href: "/comercial/datos/importaciones" },
       { label: "Mapeos", href: "/comercial/datos/mapeos" },
       { label: "Calidad", href: "/comercial/datos/calidad" },
+      { label: "Maestros", href: "/comercial/datos/maestros" },
     ],
   },
 ];
