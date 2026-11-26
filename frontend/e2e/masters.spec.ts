@@ -59,12 +59,18 @@ async function expectResolved(page: Page, issueUrl: string) {
 test("assigns a category in Maestros and the Calidad problem resolves", async ({ page }) => {
   test.setTimeout(180_000);
   const { article, jobs } = await importMasters(page);
+  const category = `E2E ${article}`;
+  const created = await page.request.post("/api/v1/commercial/product-categories", {
+    headers: HEADERS,
+    data: { code: category.replace(/\W+/g, "_").toUpperCase(), name: category, default_analytics_eligible: true },
+  });
+  expect(created.status()).toBe(201);
   const issueUrl = await openIssue(page, jobs["articulos.xlsx"], "Producto sin categoría", article);
   await expect(page).toHaveURL(/\/comercial\/datos\/maestros\/productos\/\d+$/);
   await expect(page.getByRole("heading", { name: new RegExp(`^${article} · ARTICULO E2E`) })).toBeVisible();
   await page.getByRole("button", { name: "Clasificar" }).click();
   const dialog = page.getByRole("dialog");
-  await dialog.getByLabel("Categoría").selectOption({ index: 1 });
+  await dialog.getByLabel("Categoría").selectOption({ label: category });
   await dialog.getByLabel("Motivo del cambio").fill("Clasificado en la prueba E2E");
   await dialog.getByRole("button", { name: "Guardar" }).click();
   await expect(dialog).toBeHidden();
