@@ -261,8 +261,9 @@ def test_codes_carry_their_presentation(sign_in) -> None:  # type: ignore[no-unt
     codes = sign_in("viewer").get(f"{API}/codes", params={"module": "commercial"}).json()
     by_code = {c["code"]: c for c in codes}
     assert by_code["commercial.seller.unmapped"]["fix"] == "mapping"
-    assert by_code["commercial.zone.unconfigured"]["fix"] is None
+    assert by_code["commercial.zone.unconfigured"]["fix"] == "masters"  # F1.7: Calidad diagnoses, Maestros corrects
     assert "Maestros" in by_code["commercial.zone.unconfigured"]["action"]
+    assert by_code["commercial.customer.without_zone"]["fix"] is None  # the STORE SYS master owns it
     assert "platform.import.invalid_row" in by_code
     assert "settlements" not in str(codes)
 

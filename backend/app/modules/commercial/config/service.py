@@ -7,7 +7,7 @@ one that does not exist yet; everything else is a module admin's decision, audit
 
 import unicodedata
 from collections.abc import Sequence
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import func, select
@@ -61,6 +61,10 @@ def _reason(reason: str | None, *, required: bool) -> str | None:
     if clean and len(clean) > REASON_LENGTH:
         raise AppError(422, "reason_too_long", f"El motivo tiene como máximo {REASON_LENGTH} caracteres.")
     return clean
+
+
+def _with_reason(after: dict[str, Any], reason: str | None) -> dict[str, Any]:
+    return after if reason is None else {**after, "reason": reason}
 
 
 def _choice(value: str, allowed: Sequence[str], code: str) -> str:
@@ -237,12 +241,14 @@ def configure_zone(
     display_name: str | None,
     active: bool | None,
     reason: str | None,
+    expected_updated_at: datetime | None = None,
 ) -> Zone:
     """An admin's explicit configuration: from now on the zone is MANUAL and no rule touches it again."""
     actor_id = actor.id  # read before any change: an expired actor would autoflush a half-made configuration
     zone = db.scalars(select(Zone).where(Zone.id == zone_id).with_for_update()).first()
     if zone is None:
         raise AppError(404, "zone_not_found", "Esa zona no existe.")
+    zone.ensure_unchanged(expected_updated_at)
     _choice(zone_type, ZONE_TYPES, "invalid_zone_type")
     days = set(weekdays)
     if not days <= set(range(1, 8)):
@@ -372,6 +378,8 @@ def update_rule(db: Session, actor: User, rule_id: int, changes: dict[str, Any])
     ).first()
     if rule is None:
         raise AppError(404, "zone_rule_not_found", "Esa regla no existe.")
+    rule.ensure_unchanged(changes.pop("expected_updated_at", None))
+    clean_reason = _reason(changes.pop("reason", None), required=False)
     before = _rule_state(rule)
     zone_type = changes.get("zone_type", rule.zone_type)
     requires_visit = changes.get("requires_visit", rule.requires_visit)
@@ -385,7 +393,7 @@ def update_rule(db: Session, actor: User, rule_id: int, changes: dict[str, Any])
         rule.description = _clean(changes["description"])
     after = _rule_state(rule)
     if after != before:
-        _audit(db, actor, "zone_rule", "updated", rule.id, before, after)
+        _audit(db, actor, "zone_rule", "updated", rule.id, before, _with_reason(after, clean_reason))
     db.commit()
     db.refresh(rule)
     return rule
@@ -446,6 +454,8 @@ def update_price_list(db: Session, actor: User, list_id: int, changes: dict[str,
     row = db.scalars(select(PriceList).where(PriceList.id == list_id).with_for_update()).first()
     if row is None:
         raise AppError(404, "price_list_not_found", "Esa lista no existe.")
+    row.ensure_unchanged(changes.pop("expected_updated_at", None))
+    clean_reason = _reason(changes.pop("reason", None), required=False)
     before = _list_state(row)
     if changes.get("kind") is not None:
         row.kind = _choice(changes["kind"], PRICE_LIST_KINDS, "invalid_price_list_kind")
@@ -460,7 +470,7 @@ def update_price_list(db: Session, actor: User, list_id: int, changes: dict[str,
             setattr(row, name, changes[name])
     after = _list_state(row)
     if after != before:
-        _audit(db, actor, "price_list", "updated", row.id, before, after)
+        _audit(db, actor, "price_list", "updated", row.id, before, _with_reason(after, clean_reason))
     db.commit()
     db.refresh(row)
     return row
@@ -530,6 +540,8 @@ def update_category(db: Session, actor: User, category_id: int, changes: dict[st
     row = db.scalars(select(ProductCategory).where(ProductCategory.id == category_id).with_for_update()).first()
     if row is None:
         raise AppError(404, "category_not_found", "Esa categoría no existe.")
+    row.ensure_unchanged(changes.pop("expected_updated_at", None))
+    clean_reason = _reason(changes.pop("reason", None), required=False)
     before = _category_state(row)
     if changes.get("name") is not None:
         if not (clean_name := _clean(changes["name"])):
@@ -541,12 +553,29 @@ def update_category(db: Session, actor: User, category_id: int, changes: dict[st
     for name in ("default_analytics_eligible", "active", "sort_order"):
         if changes.get(name) is not None:
             setattr(row, name, changes[name])
+    if "parent_id" in changes:
+        row.parent_id = _parent(db, row, changes["parent_id"])
     after = _category_state(row)
     if after != before:
-        _audit(db, actor, "category", "updated", row.id, before, after)
+        _audit(db, actor, "category", "updated", row.id, before, _with_reason(after, clean_reason))
     db.commit()
     db.refresh(row)
     return row
+
+
+def _parent(db: Session, row: ProductCategory, parent_id: int | None) -> int | None:
+    """A parent that exists and is not the category itself nor one of its descendants (no cycles)."""
+    seen = {row.id}
+    current = parent_id
+    while current is not None:
+        if current in seen:
+            raise AppError(422, "invalid_parent_category", "Una categoría no puede ser padre de sí misma.")
+        parent = db.get(ProductCategory, current)
+        if parent is None:
+            raise AppError(422, "invalid_parent_category", "La categoría padre no existe.")
+        seen.add(current)
+        current = parent.parent_id
+    return parent_id
 
 
 def list_categories(db: Session) -> Sequence[ProductCategory]:
@@ -608,11 +637,13 @@ def classify_document_type(
     sign: int,
     commercial_universe: bool,
     reason: str | None,
+    expected_updated_at: datetime | None = None,
 ) -> DocumentType:
     """An accounting interpretation: admin only, always with a reason (CLAUDE.md §12)."""
     row = db.scalars(select(DocumentType).where(DocumentType.id == type_id).with_for_update()).first()
     if row is None:
         raise AppError(404, "document_type_not_found", "Ese tipo de comprobante no existe.")
+    row.ensure_unchanged(expected_updated_at)
     _choice(document_class, DOCUMENT_CLASSES, "invalid_document_class")
     if sign not in (-1, 0, 1):
         raise AppError(422, "invalid_sign", "El signo es -1, 0 o 1.")
@@ -658,13 +689,22 @@ def create_reason_category(db: Session, actor: User, *, code: str, name: str) ->
 
 
 def update_reason_category(
-    db: Session, actor: User, category_id: int, *, name: str | None, active: bool | None
+    db: Session,
+    actor: User,
+    category_id: int,
+    *,
+    name: str | None,
+    active: bool | None,
+    reason: str | None = None,
+    expected_updated_at: datetime | None = None,
 ) -> NoPurchaseReasonCategory:
     row = db.scalars(
         select(NoPurchaseReasonCategory).where(NoPurchaseReasonCategory.id == category_id).with_for_update()
     ).first()
     if row is None:
         raise AppError(404, "reason_category_not_found", "Esa categoría no existe.")
+    row.ensure_unchanged(expected_updated_at)
+    clean_reason = _reason(reason, required=False)
     before = {"name": row.name, "active": row.active}
     if name is not None:
         if not (clean_name := _clean(name)):
@@ -674,7 +714,7 @@ def update_reason_category(
         row.active = active
     after = {"name": row.name, "active": row.active}
     if after != before:
-        _audit(db, actor, "no_purchase_category", "updated", row.id, before, after)
+        _audit(db, actor, "no_purchase_category", "updated", row.id, before, _with_reason(after, clean_reason))
     db.commit()
     db.refresh(row)
     return row
@@ -702,13 +742,20 @@ def ensure_reason(db: Session, source_system: str, reason_source: str) -> tuple[
 
 
 def set_reason_category(
-    db: Session, actor: User, mapping_id: int, category_id: int | None, *, reason: str | None
+    db: Session,
+    actor: User,
+    mapping_id: int,
+    category_id: int | None,
+    *,
+    reason: str | None,
+    expected_updated_at: datetime | None = None,
 ) -> NoPurchaseReasonMapping:
     row = db.scalars(
         select(NoPurchaseReasonMapping).where(NoPurchaseReasonMapping.id == mapping_id).with_for_update()
     ).first()
     if row is None:
         raise AppError(404, "reason_mapping_not_found", "Ese motivo no existe.")
+    row.ensure_unchanged(expected_updated_at)
     if category_id is not None and db.get(NoPurchaseReasonCategory, category_id) is None:
         raise AppError(422, "invalid_reason_category", "La categoría no existe.")
     before = {"category_id": row.category_id}

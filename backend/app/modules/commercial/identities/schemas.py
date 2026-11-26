@@ -2,6 +2,8 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.modules.commercial.masters.schemas import SellerRefOut, ZoneRefOut
+
 
 class CustomerOut(BaseModel):
     """What any user of the module sees of a customer: no CUIT, address nor phone (minimum privilege)."""
@@ -16,6 +18,11 @@ class CustomerOut(BaseModel):
     last_seen_on: date | None
     created_at: datetime
     updated_at: datetime
+    # What Comercial knows of it (F1.7, Maestros): its STORE SYS code and the zone and seller in force, as the STORE
+    # SYS master assigned them. Not PII; null when it has none.
+    store_sys_code: str | None = None
+    zone: ZoneRefOut | None = None
+    salesperson: SellerRefOut | None = None
 
 
 class CustomerContactOut(CustomerOut):
@@ -36,6 +43,8 @@ class CustomerFlagsIn(BaseModel):
     is_generic: bool | None = None
     active: bool | None = None
     reason: str = Field(min_length=1, max_length=500)
+    # The version the screen read: a save over a newer one is a 409 `changed_meanwhile` (F1.7).
+    expected_updated_at: datetime | None = None
 
 
 class FactCountOut(BaseModel):

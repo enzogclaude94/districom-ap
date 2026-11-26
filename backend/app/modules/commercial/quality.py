@@ -1,11 +1,12 @@
 """Comercial's data quality codes and how the Calidad screen presents them (F1.6, docs/IMPORTS.md §7.1).
 
-Each code declares its business group, what it means, what corrects it, when it closes by itself and, when that
-screen exists, where the correction is made (Mapeos, the import). Codes whose correction belongs to Maestros (F1.7)
-say so and link nowhere: Calidad never edits zones, products, document types or reasons.
+Each code declares its business group, what it means, what corrects it, when it closes by itself and where the
+correction is made (Mapeos, the import, Maestros). Calidad diagnoses, Maestros corrects (F1.7): the Maestros link
+goes to the exact product, zone, document type or reason, and the fix closes the issue through its own lifecycle.
+Calidad never edits zones, products, document types or reasons.
 """
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -22,7 +23,28 @@ ZONES = QualityGroup("zones", "Zonas", 40)
 DOCUMENTS = QualityGroup("documents", "Comprobantes", 50)
 AXUM = QualityGroup("axum", "AXUM", 60)
 
-MASTERS_LATER = "La edición completa llega en Maestros."
+MASTERS = "/comercial/datos/maestros"
+
+
+def _entity_path(section: str) -> Callable[[int | None, str], str | None]:
+    def path(entity_id: int | None, _: str) -> str | None:
+        return None if entity_id is None else f"{MASTERS}/{section}/{entity_id}"
+
+    return path
+
+
+def _document_type_path(entity_id: int | None, _: str) -> str | None:
+    return None if entity_id is None else f"{MASTERS}/comprobantes?tipo={entity_id}"
+
+
+def _reason_path(_: int | None, dedupe_key: str) -> str | None:
+    prefix, _sep, reason_id = dedupe_key.partition(":")
+    return f"{MASTERS}/motivos?motivo={reason_id}" if prefix == "reason" and reason_id.isdigit() else None
+
+
+def _price_lists_path(_: int | None, __: str) -> str | None:
+    return f"{MASTERS}/listas"
+
 
 QUALITY_CODES = (
     # --- Clientes
@@ -97,8 +119,10 @@ QUALITY_CODES = (
         "Producto sin categoría",
         group=PRODUCTS,
         description="El artículo no tiene categoría, así que queda fuera de los análisis.",
-        action="Asignale una categoría. La edición de categorías llega con Maestros (F1.7).",
+        action="Asignale una categoría en Maestros.",
         closes_when="Cuando el artículo recibe una categoría, a mano o por el mapeo de su rubro.",
+        fix="masters",
+        fix_path=_entity_path("productos"),
     ),
     QualityCodeSpec(
         "commercial.product.unknown",
@@ -137,8 +161,11 @@ QUALITY_CODES = (
         group=PRODUCTS,
         description="El maestro de artículos trae precios, pero no hay una lista de precios configurada para "
         "guardarlos.",
-        action="Un admin configura la lista de precios del maestro; se corrige con el próximo maestro.",
+        action="Un admin configura en Maestros la lista que alimenta el precio del maestro; se corrige con el próximo "
+        "maestro.",
         closes_when="Cuando un maestro se importa con la lista de precios configurada.",
+        fix="masters",
+        fix_path=_price_lists_path,
     ),
     QualityCodeSpec(
         "commercial.sale_line.product_pending",
@@ -156,8 +183,10 @@ QUALITY_CODES = (
         "Zona sin configurar",
         group=ZONES,
         description="Apareció una zona que ninguna regla clasifica: no tiene tipo ni días de visita.",
-        action=f"Requiere configuración de zona. {MASTERS_LATER}",
+        action="Un admin configura la zona en Maestros: tipo, si se visita y qué días.",
         closes_when="Cuando un admin configura la zona.",
+        fix="masters",
+        fix_path=_entity_path("zonas"),
     ),
     # --- Comprobantes
     QualityCodeSpec(
@@ -167,8 +196,10 @@ QUALITY_CODES = (
         group=DOCUMENTS,
         description="Apareció un tipo de comprobante sin clasificar: sus comprobantes quedan fuera del universo "
         "comercial.",
-        action=f"Un admin lo clasifica (es una interpretación contable). {MASTERS_LATER}",
+        action="Un admin lo clasifica en Maestros (es una interpretación contable).",
         closes_when="Cuando un admin clasifica el tipo.",
+        fix="masters",
+        fix_path=_document_type_path,
     ),
     QualityCodeSpec(
         "commercial.document.changed",
@@ -210,8 +241,10 @@ QUALITY_CODES = (
         "Motivo de no compra sin categoría",
         group=AXUM,
         description="Un motivo de no compra de AXUM no tiene categoría.",
-        action=f"Un admin le asigna una categoría. {MASTERS_LATER}",
+        action="Un admin le asigna una categoría en Maestros.",
         closes_when="Cuando el motivo recibe una categoría.",
+        fix="masters",
+        fix_path=_reason_path,
     ),
 )
 

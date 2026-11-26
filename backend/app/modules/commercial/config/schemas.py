@@ -3,6 +3,10 @@ from datetime import date, datetime
 from pydantic import BaseModel, ConfigDict, Field
 
 Reason = Field(min_length=1, max_length=500)
+# The version the screen read (its `updated_at`): a save over a newer version is a 409 `changed_meanwhile` (F1.7).
+Expected = Field(default=None)
+# Optional on edits that never required one (kept compatible); Maestros always sends it and the audit records it.
+OptionalReason = Field(default=None, max_length=500)
 
 
 class ZoneOut(BaseModel):
@@ -18,6 +22,7 @@ class ZoneOut(BaseModel):
     configured_by: int | None
     configured_at: datetime | None
     created_at: datetime
+    updated_at: datetime
 
 
 class VisitDayOut(BaseModel):
@@ -43,6 +48,7 @@ class ZoneConfigurationIn(BaseModel):
     display_name: str | None = Field(default=None, max_length=120)
     active: bool | None = None
     reason: str = Reason
+    expected_updated_at: datetime | None = Expected
 
 
 class ZoneRuleOut(BaseModel):
@@ -57,6 +63,7 @@ class ZoneRuleOut(BaseModel):
     weekdays: list[int]
     active: bool
     description: str | None
+    updated_at: datetime
 
 
 class ZoneRuleIn(BaseModel):
@@ -75,6 +82,8 @@ class ZoneRulePatch(BaseModel):
     weekdays: list[int] | None = Field(default=None, max_length=7)
     active: bool | None = None
     description: str | None = Field(default=None, max_length=500)
+    reason: str | None = OptionalReason
+    expected_updated_at: datetime | None = Expected
 
 
 class PriceListOut(BaseModel):
@@ -88,6 +97,7 @@ class PriceListOut(BaseModel):
     kind: str
     commercially_relevant: bool
     active: bool
+    updated_at: datetime
 
 
 class PriceListIn(BaseModel):
@@ -104,6 +114,8 @@ class PriceListPatch(BaseModel):
     commercially_relevant: bool | None = None
     active: bool | None = None
     description: str | None = Field(default=None, max_length=500)
+    reason: str | None = OptionalReason
+    expected_updated_at: datetime | None = Expected
 
 
 class ArticlesPriceListIn(BaseModel):
@@ -135,6 +147,7 @@ class CategoryOut(BaseModel):
     parent_id: int | None
     sort_order: int
     active: bool
+    updated_at: datetime
 
 
 class CategoryIn(BaseModel):
@@ -152,6 +165,9 @@ class CategoryPatch(BaseModel):
     default_analytics_eligible: bool | None = None
     sort_order: int | None = None
     active: bool | None = None
+    parent_id: int | None = None
+    reason: str | None = OptionalReason
+    expected_updated_at: datetime | None = Expected
 
 
 class DocumentTypeOut(BaseModel):
@@ -166,6 +182,7 @@ class DocumentTypeOut(BaseModel):
     decided_by: int | None
     decided_at: datetime | None
     notes: str | None
+    updated_at: datetime
 
 
 class DocumentTypeClassificationIn(BaseModel):
@@ -173,6 +190,7 @@ class DocumentTypeClassificationIn(BaseModel):
     sign: int = Field(ge=-1, le=1)
     commercial_universe: bool
     reason: str = Reason
+    expected_updated_at: datetime | None = Expected
 
 
 class ReasonCategoryOut(BaseModel):
@@ -182,6 +200,7 @@ class ReasonCategoryOut(BaseModel):
     code: str
     name: str
     active: bool
+    updated_at: datetime
 
 
 class ReasonCategoryIn(BaseModel):
@@ -192,6 +211,8 @@ class ReasonCategoryIn(BaseModel):
 class ReasonCategoryPatch(BaseModel):
     name: str | None = Field(default=None, max_length=120)
     active: bool | None = None
+    reason: str | None = OptionalReason
+    expected_updated_at: datetime | None = Expected
 
 
 class ReasonMappingOut(BaseModel):
@@ -203,8 +224,10 @@ class ReasonMappingOut(BaseModel):
     category_id: int | None
     decided_by: int | None
     decided_at: datetime | None
+    updated_at: datetime
 
 
 class ReasonMappingIn(BaseModel):
     category_id: int | None
     reason: str | None = Field(default=None, max_length=500)
+    expected_updated_at: datetime | None = Expected

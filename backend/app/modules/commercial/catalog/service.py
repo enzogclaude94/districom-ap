@@ -10,7 +10,7 @@ import hashlib
 import json
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -236,13 +236,22 @@ def _canonical_state(product: Product) -> dict[str, Any]:
     }
 
 
-def set_canonical(db: Session, actor: User, product_id: int, changes: dict[str, Any], *, reason: str | None) -> Product:
+def set_canonical(
+    db: Session,
+    actor: User,
+    product_id: int,
+    changes: dict[str, Any],
+    *,
+    reason: str | None,
+    expected_updated_at: datetime | None = None,
+) -> Product:
     """An admin's decision on what DistriCom says of a product. Keys present in `changes` are applied:
     `category_id` (None removes it), `product_kind`, `analytics_eligible` (needs a category), `family_id`
     (None removes it), `active`. Audited with a reason; no import undoes it."""
     product = db.scalars(select(Product).where(Product.id == product_id).with_for_update()).first()
     if product is None:
         raise AppError(404, "product_not_found", "Ese producto no existe.")
+    product.ensure_unchanged(expected_updated_at)
     clean_reason = " ".join((reason or "").split())
     if not clean_reason:
         raise AppError(422, "reason_required", "Indicá el motivo del cambio.")
@@ -311,6 +320,8 @@ def list_products(
     analytics_eligible: bool | None,
     limit: int,
     offset: int,
+    has_category: bool | None = None,
+    active: bool | None = None,
 ) -> tuple[Sequence[Product], int]:
     query = select(Product)
     if q and (text := " ".join(q.split())):
@@ -326,6 +337,12 @@ def list_products(
         query = query.where(Product.canonical_category_id.is_(None))
     if analytics_eligible is not None:
         query = query.where(Product.analytics_eligible.is_(analytics_eligible))
+    if has_category is not None:
+        query = query.where(
+            Product.canonical_category_id.is_not(None) if has_category else Product.canonical_category_id.is_(None)
+        )
+    if active is not None:
+        query = query.where(Product.active.is_(active))
     total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
     rows = db.scalars(query.order_by(Product.source_code).offset(offset).limit(limit)).all()
     return rows, total
@@ -365,6 +382,8 @@ def update_family(db: Session, actor: User, family_id: int, changes: dict[str, A
     family = db.scalars(select(ProductFamily).where(ProductFamily.id == family_id).with_for_update()).first()
     if family is None:
         raise AppError(404, "family_not_found", "Esa familia no existe.")
+    family.ensure_unchanged(changes.pop("expected_updated_at", None))
+    clean_reason = " ".join((changes.pop("reason", None) or "").split())[:500] or None
     before = {"name": family.name, "description": family.description, "active": family.active}
     if changes.get("name") is not None:
         if not (clean := " ".join(changes["name"].split())):
@@ -384,7 +403,7 @@ def update_family(db: Session, actor: User, family_id: int, changes: dict[str, A
             entity_type="commercial.product_family",
             entity_id=family.id,
             before=before,
-            after=after,
+            after=after if clean_reason is None else {**after, "reason": clean_reason},
         )
     db.commit()
     db.refresh(family)
@@ -449,6 +468,22 @@ def price_history(db: Session, product_id: int) -> Sequence[tuple[ProductPrice, 
         .where(ProductPrice.product_id == product_id)
         .order_by(PriceList.list_number, ProductPrice.valid_from, ProductPrice.id)
     ).all()
+
+
+def current_prices(db: Session, product_ids: Sequence[int], price_list_id: int, on: date) -> dict[int, Decimal]:
+    """The price each product has on a day in one list, for a page of products in one query."""
+    if not product_ids:
+        return {}
+    rows = db.execute(
+        select(ProductPrice.product_id, ProductPrice.price).where(
+            ProductPrice.product_id.in_(product_ids),
+            ProductPrice.price_list_id == price_list_id,
+            ProductPrice.voided_by_job_id.is_(None),
+            ProductPrice.valid_from <= on,
+            (ProductPrice.valid_to.is_(None)) | (ProductPrice.valid_to >= on),
+        )
+    ).all()
+    return {int(product_id): price for product_id, price in rows}
 
 
 def price_on(db: Session, product_id: int, price_list_id: int, on: date) -> Decimal | None:

@@ -2,10 +2,12 @@
 families and rubro mappings, audited. No endpoint creates a product or writes a price: only the articles import
 does (F1.3)."""
 
+from decimal import Decimal
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 
+from app.core.clock import business_today
 from app.modules.commercial.catalog import service
 from app.modules.commercial.catalog.models import Product
 from app.modules.commercial.catalog.schemas import (
@@ -21,6 +23,7 @@ from app.modules.commercial.catalog.schemas import (
     SourceCategoryMappingOut,
     UnmappedSourceCategory,
 )
+from app.modules.commercial.config import service as config
 from app.platform.auth.access import require_module_access
 from app.platform.auth.deps import DbSession
 from app.platform.auth.models import User
@@ -29,6 +32,19 @@ router = APIRouter()
 
 Viewer = Annotated[User, Depends(require_module_access("commercial", "viewer"))]
 Admin = Annotated[User, Depends(require_module_access("commercial", "admin"))]
+
+
+def _master_prices(db: DbSession, product_ids: list[int]) -> dict[int, Decimal]:
+    """Today's price in the list the articles master feeds, for the products of a page (one query)."""
+    number = config.articles_price_list(db)
+    price_list = config.price_list_by_number(db, number) if number is not None else None
+    if price_list is None:
+        return {}
+    return service.current_prices(db, product_ids, price_list.id, business_today())
+
+
+def _product(product: Product, prices: dict[int, Decimal]) -> ProductOut:
+    return ProductOut.model_validate(product).model_copy(update={"master_price": prices.get(product.id)})
 
 
 def _detail(db: DbSession, product: Product) -> ProductDetail:
@@ -44,7 +60,7 @@ def _detail(db: DbSession, product: Product) -> ProductDetail:
         )
         for price, price_list in service.price_history(db, product.id)
     ]
-    return ProductDetail(**ProductOut.model_validate(product).model_dump(), prices=prices)
+    return ProductDetail(**_product(product, _master_prices(db, [product.id])).model_dump(), prices=prices)
 
 
 @router.get("/products", response_model=ProductPage, summary="Productos")
@@ -56,6 +72,8 @@ def list_products(
     family_id: int | None = None,
     without_category: bool = False,
     analytics_eligible: bool | None = None,
+    has_category: bool | None = None,
+    active: bool | None = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> ProductPage:
@@ -66,10 +84,13 @@ def list_products(
         family_id=family_id,
         without_category=without_category,
         analytics_eligible=analytics_eligible,
+        has_category=has_category,
+        active=active,
         limit=limit,
         offset=offset,
     )
-    return ProductPage(items=[ProductOut.model_validate(r) for r in rows], total=total)
+    prices = _master_prices(db, [r.id for r in rows])
+    return ProductPage(items=[_product(r, prices) for r in rows], total=total)
 
 
 @router.get("/products/{product_id}", response_model=ProductDetail, summary="Producto con su historia de precios")
@@ -79,8 +100,11 @@ def get_product(db: DbSession, _: Viewer, product_id: int) -> ProductDetail:
 
 @router.patch("/products/{product_id}", response_model=ProductDetail, summary="Clasificar producto")
 def update_product(db: DbSession, user: Admin, product_id: int, body: ProductPatch) -> ProductDetail:
-    changes = body.model_dump(exclude_unset=True, exclude={"reason"})
-    return _detail(db, service.set_canonical(db, user, product_id, changes, reason=body.reason))
+    changes = body.model_dump(exclude_unset=True, exclude={"reason", "expected_updated_at"})
+    product = service.set_canonical(
+        db, user, product_id, changes, reason=body.reason, expected_updated_at=body.expected_updated_at
+    )
+    return _detail(db, product)
 
 
 @router.get("/product-families", response_model=list[FamilyOut], summary="Familias de producto")
