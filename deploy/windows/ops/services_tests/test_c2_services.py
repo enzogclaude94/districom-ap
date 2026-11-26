@@ -32,6 +32,8 @@ LETTER = "R"
 HOST = "districom.test"
 # Long enough for a disk image to mount on a CI runner (Mount-DiskImage took > 12 s in run 6).
 DISK_WAIT_SECONDS = 90
+# W2-C6 needs room for repo1 (base backups, WAL, dumps); the other jobs keep the small disk.
+DISK_MB = int(os.environ.get("DISTRICOM_C2_DISK_MB", "128"))
 CONFIG = ROOT / "config" / "districom.env"
 
 pytestmark = pytest.mark.timeout(900)
@@ -97,7 +99,7 @@ def disk_root() -> Path:
 def create_disk(name: str) -> Path:
     vhd = DISKS / f"{name}.vhdx"
     diskpart(
-        f'create vdisk file="{vhd}" maximum=128 type=expandable\n'
+        f'create vdisk file="{vhd}" maximum={DISK_MB} type=expandable\n'
         f'select vdisk file="{vhd}"\nattach vdisk\nconvert mbr\ncreate partition primary\n'
         f"format fs=ntfs quick label=DCBACKUP\nassign letter={LETTER}\n"
     )
@@ -234,11 +236,13 @@ def test_runtimes_are_verified_and_a_tampered_download_is_refused() -> None:
     )
     started = time.monotonic()
     cli("runtime", "fetch")
-    metrics["descarga y verificación de los 4 runtimes (s)"] = round(time.monotonic() - started, 1)
+    metrics[f"descarga y verificación de los {len(artifacts.manifest())} runtimes (s)"] = round(
+        time.monotonic() - started, 1
+    )
     since = now()
     cli("runtime", "fetch")
     assert all(not e["changed"] for e in events(since, "runtime_ready")), "a second fetch changed something"
-    assert len(events(since, "runtime_ready")) == 4
+    assert len(events(since, "runtime_ready")) == len(artifacts.manifest())  # rclone joined in W2-C6
 
     winsw = artifacts.manifest()["winsw"]
     downloaded = ROOT / "downloads" / winsw.url.rsplit("/", 1)[-1]

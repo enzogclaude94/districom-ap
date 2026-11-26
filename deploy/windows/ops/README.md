@@ -1,4 +1,4 @@
-# W2-C: operación de DistriCom en Windows (C1 base operativa, C2 servicios, C3 permisos, C4 firewall, C9‑A coordinación, C9‑B bloqueo de escrituras)
+# W2-C: operación de DistriCom en Windows (C1 base operativa, C2 servicios, C3 permisos, C4 firewall, C9‑A coordinación, C9‑B bloqueo de escrituras, C6 backups)
 
 Primera subetapa de W2‑C (ADR 016, en estado **Propuesto**; plan en `docs/WINDOWS_DEPLOYMENT.md` y propuesta W2‑C revisión 1). Son las piezas que usan las subetapas siguientes. Esta carpeta **no** instala servicios, no toca el firewall ni bloquea escrituras: eso es C2 a C13.
 
@@ -124,7 +124,7 @@ Las pruebas C4‑1 a C4‑4 (`firewall_tests/`) corren en el job «Windows firew
 
 Plan: `docs/WINDOWS_W2C_PLAN.md`, C9‑A. No toca `ALLOW_CONNECTIONS`, la propiedad ni los roles de PostgreSQL, y no tiene `resume` (eso es C9‑B).
 
-- **Quién toma el bloqueo:** `maintenance open` y `close`, `services start`, `start --direct`, `stop` y `uninstall`, y el supervisor para decidir el arranque y para reiniciar PostgreSQL.
+- **Quién toma el bloqueo:** `maintenance open` y `close`, `services start`, `start --direct`, `stop` y `uninstall`, el supervisor para decidir el arranque y para reiniciar PostgreSQL y, desde C6, cada tarea de backup durante su verificación de inicio (nunca durante el trabajo).
 - **`maintenance open` sin carrera:** comprueba y escribe con el bloqueo tomado, y crea `maintenance.json` en exclusiva, así que una segunda ventana nunca reemplaza a la primera.
 - **Arranque:** `services start` y `start --direct` se niegan con una ventana abierta, vencida o ilegible, con un registro inválido o con una operación incompleta o incierta (`safety.start_blockers`, los mismos motivos que `writes_resume_check`). `services stop` siempre se permite, con el bloqueo: detener solo acerca a un estado seguro.
 - **Protocolo sin interbloqueo:**
@@ -148,7 +148,7 @@ Las pruebas C9A‑1 a C9A‑13 están en dos lugares:
 Plan: `docs/WINDOWS_W2C_PLAN.md`, C9‑B, con sus precisiones de implementación.
 
 - **Roles** (`database init`): `districom_ops` (el de `OPS_DATABASE_URL`, sin superusuario) es dueño de la base. La app conserva `CONNECT`, `CREATE` y `TEMPORARY`, es dueña de `public` y de lo que crea, no es miembro de ningún rol y `pg_hba.conf` la rechaza fuera de su base. No puede revertir `ALLOW_CONNECTIONS false`.
-- **Bloqueo** (`write_block.block`, con el bloqueo de C9‑A y la operación dueña): enganches de Caddy (C5) y tareas (C6) registrados como «no aplica todavía», `ALLOW_CONNECTIONS false` desde `postgres`, espera acotada de las transacciones (si vence, se revierte), `pg_terminate_backend` y comprobación de la marca y de las sesiones. Cualquier falla revierte.
+- **Bloqueo** (`write_block.block`, con el bloqueo de C9‑A y la operación dueña): enganche de Caddy (C5) registrado como «no aplica todavía»; tareas de C6 verificadas antes de cambiar nada (ninguna tarea pesada tiene `backup.lock`; si alguna lo tiene, se niega sin tocar el diario); `ALLOW_CONNECTIONS false` desde `postgres`, espera acotada de las transacciones (si vence, se revierte), `pg_terminate_backend` y comprobación de la marca y de las sesiones. Cualquier falla revierte.
 - **Reversión que no se verifica** (Enzo 2026-11-19): la marca vuelve a `false` si se puede, el diario queda en `reverting` con `revert_failed` y solo `resume` lo resuelve.
 - **Diario** `state\write-block.json`: `none`, `blocking`, `blocked`, `closed_complete`, `reverting`, `resuming`, con transiciones cerradas. Se escribe antes de cada paso; uno ilegible o desconocido bloquea.
 - **`districom-ops resume --operation <id> --reason <texto>`:** solo un administrador; antes se termina la operación dueña. Después, `services stop` y `services start`.
@@ -163,6 +163,52 @@ Pruebas:
 **Riesgo residual (Enzo 2026-11-24):** si el almacenamiento impide registrar la reversión y también volver a `ALLOW_CONNECTIONS false`, PostgreSQL puede seguir aceptando conexiones con la app detenida: no es un bloqueo total. Antes de producción: red y credenciales verificadas y un procedimiento seguro de recuperación.
 
 **PENDIENTE, nunca PASS:** la LAN con usuarios reales, el reinicio real de Windows a mitad de un cierre, Windows 11 Pro y el cierre real de jornada (C10 y C11; en CI la evidencia es fabricada).
+
+## C6: integración de los backups (diseño AB)
+
+Plan: `docs/WINDOWS_W2C_PLAN.md`, C6, y el diseño AB que aprobó Enzo el 2026-11-25. Usa `districom_backup` (W2‑A) sin cambiar su lógica.
+
+- **Instalación** (`districom-ops tasks install`, administrador, idempotente): crea `repo1` en el disco de backup verificado; escribe `districom-archive.conf` en los datos de PostgreSQL (`archive_mode`, `archive_timeout = 300` y los `archive_command` y `restore_command` de W2‑A con el Python de la release; hace falta reiniciar PostgreSQL); escribe `config\tasks.json`, sin secretos; aplica los permisos de C3 con las cuentas de las tareas y registra las tareas. `database init` crea el rol `districom_backup` (`REPLICATION` y `pg_read_all_data`, sin superusuario ni propiedad) y su contraseña en `config\backup-db.secret`.
+- **Claves:** el administrador escribe `config\dump.secret` y, si hay `OFFSITE_REMOTE`, `config\offsite.secret` (32 o más caracteres al azar), y **guarda una copia fuera del servidor**. Sin ellas no se pueden leer los dumps ni `repo2`.
+- **Tareas** (Programador de tareas, carpeta raíz, `DistriComBackup<Nombre>`), cada una como `LocalService` con su **SID de tarea** propio (`NT TASK\…`, `S-1-5-87-…`), sin contraseña:
+
+  | Tarea | Pesada | Cuándo | Límite |
+  |---|---|---|---|
+  | `base_backup` | sí | 15:00 todos los días (ventana de 15 a 17; si se pierde, no corre tarde) | 120 min |
+  | `dump` (cifrado y prueba de restauración) | sí | 13:00 | 90 min |
+  | `offsite` (subida asíncrona a `repo2`) | sí | cada hora, a los :40 | 120 min |
+  | `retention` | sí | 03:00 | 30 min |
+  | `wal_gaps` (solo lectura) | no | cada hora, a los :50 | 15 min |
+
+- **Coordinación AB** (`tasklock`):
+  - Una tarea toma `operations.lock` **solo** para verificar y registrarse. Con el bloqueo tomado comprueba que no haya ventana, operación incompleta o incierta, diario de C9‑B distinto de `none`, pedido de cancelación ni, si es pesada, otra tarea pesada (`backup.lock`). Si algo no cumple, no empieza y registra `refused` con el motivo (C6‑7). Después suelta `operations.lock` y trabaja con `backup.lock`.
+  - El mantenimiento (y con él el cierre y la actualización) llama a `open_stopping_tasks`. Escribe un **pedido de cancelación persistente** con `operations.lock` tomado, espera **sin el bloqueo**, con un plazo acotado (`BACKUP_CANCEL_WAIT_SECONDS`, 120 s por defecto), a que el sistema operativo confirme que `backup.lock` está libre, y recién entonces abre la ventana, con `operations.lock` tomado de nuevo. Si la tarea no confirma, **no se abre nada** y se niega con el motivo. `MaintenanceWindow.open` también se niega, por cualquier camino, mientras haya una tarea pesada.
+  - **Cada pedido tiene dueño** (revisión de Enzo, 2026-11-26). Vive en `state\tasks\cancel-requests\` como dos archivos: `<id>.owner`, un bloqueo del sistema operativo que el proceso solicitante retiene mientras el pedido siga en pie, y `<id>.json`, qué pide. Por eso:
+    - dos pedidos nunca se pisan, y la tarea ve todos;
+    - solo el dueño puede borrar el suyo: cerrar una ventana y `tasks clear-cancel` quitan únicamente **huérfanos**;
+    - si el solicitante muere, el sistema operativo libera su bloqueo y el pedido queda huérfano. El próximo inicio de tarea lo reconcilia con `operations.lock` tomado y lo registra;
+    - un pedido ilegible o una carpeta que no se puede leer cuentan como pedido válido (fallo seguro);
+    - `services stop` detiene igual aunque no pueda escribir su pedido.
+  - `services stop` pide lo mismo y espera igual, pero se detiene de todos modos: se conserva la garantía de C9‑A de que detener siempre se permite. Es seguro para las copias porque una tarea cortada no publica nada.
+  - El supervisor no cambia.
+- **Cancelación e interrupciones:** los pasos largos corren como procesos hijos que la tarea termina junto con sus propios hijos (`taskkill /T`) ante un pedido o al vencer su límite (`cancelled` o `timeout`). Después borra lo temporal y recién entonces suelta `backup.lock`. Nada se publica antes de verificarse, y una copia anterior nunca se toca. Una tarea matada queda `running` en su registro, y la siguiente corrida la marca `interrupted` y limpia lo temporal. La retención deja antes un registro de intención y termina una remoción cortada (primero los metadatos, después los datos).
+- **Registro para C8** (`state\tasks\`): `<tarea>.json` (el último estado), `history.jsonl` (todos los resultados), `offsite-copy.json` (qué llegó a `repo2` y qué espera) y `districom-ops tasks status`. Cada copia se registra como **creada** o **verificada** por separado. Verificada significa que `pg_verifybackup` pasó, o que el dump se restauró en una instancia descartable. La copia externa queda «copiada, no verificada» hasta C7. **Ningún registro afirma que el sistema sea recuperable** (C7, C13).
+- **Comandos:** `tasks install`, `tasks uninstall`, `tasks status`, `tasks start <tarea>` (por el Programador de tareas), `tasks clear-cancel` (quita los pedidos huérfanos, nunca uno cuyo dueño siga vivo) y `tasks run` (lo que ejecuta el Programador).
+
+Pruebas:
+- `tests/test_c6_units.py` (C6‑AB, C6‑R y C6‑U): procesos reales que tienen `backup.lock`, el ejecutor, las retenciones, las definiciones y los permisos. Corren en cualquier plataforma y en el job «Windows ops (W2-C)».
+- `backups_tests/` (C6‑1 a C6‑7, C6‑AB y C6‑I): con los servicios reales, PostgreSQL 17, el Programador de tareas y rclone, en el job «Windows backups (W2-C6)».
+
+**PENDIENTE, nunca PASS:**
+- el horario real durante días;
+- reinicios, apagados y cortes de energía con una tarea en curso;
+- Windows 11 Pro;
+- el disco real, desconectado o lleno;
+- el bucket real con bloqueo de objetos;
+- Defender;
+- los tiempos en el i3‑9100;
+- el resguardo de las claves fuera del servidor;
+- la recuperabilidad completa (C7 y C13).
 
 ## Regla de logs para C2 a C13
 

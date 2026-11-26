@@ -51,7 +51,7 @@ def _artifact(tmp_path: Path, content: bytes, kind: str = "file", name: str = "t
 
 def test_the_manifest_pins_every_runtime_with_a_full_checksum() -> None:
     manifest = artifacts.manifest()
-    assert set(manifest) == {"winsw", "postgresql", "caddy", "node"}
+    assert set(manifest) == {"winsw", "postgresql", "caddy", "node", "rclone"}
     for artifact in manifest.values():
         assert artifact.url.startswith("https://")
         assert len(artifact.digest) == {"sha256": 64, "sha512": 128}[artifact.algorithm]

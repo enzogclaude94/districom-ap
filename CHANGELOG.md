@@ -4,6 +4,24 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Added — Servidor: W2‑C6, integración de los backups (en revisión, sin merge)
+- **Archivado de WAL** del servicio de PostgreSQL 17 a `repo1`, con los `archive_command` y `restore_command` de W2‑A (`districom-archive.conf`, que escribe `tasks install`; `archive_timeout = 300`). Un clúster sin las tareas instaladas no archiva.
+- **Rol `districom_backup`** en `database init`: `REPLICATION` y `pg_read_all_data`, sin superusuario ni propiedad. Su contraseña queda en `config\backup-db.secret`.
+- **Cinco tareas del Programador de tareas**, cada una como `LocalService` con su propio SID de tarea y sin contraseña: backup base verificado (15:00, dentro de la ventana de 15 a 17), dump cifrado con `rclone crypt` y restaurado en una instancia descartable (13:00), copia externa asíncrona con el atraso registrado (cada hora), retención (03:00) y revisión de huecos (cada hora). Su registro es idempotente (`tasks install`).
+- **Coordinación AB con C9:**
+  - `operations.lock` solo para la verificación y el registro breves;
+  - `backup.lock` durante el trabajo pesado;
+  - pedido de cancelación persistente, con dueño: un archivo por pedido y un bloqueo del sistema operativo que retiene el solicitante; nadie borra el pedido de otro y un solicitante muerto deja un huérfano que se reconcilia;
+  - espera acotada fuera del bloqueo;
+  - confirmación por el sistema operativo y fallo seguro.
+
+  `maintenance open` y `services stop` piden la cancelación antes de seguir, y `services stop` se detiene igual. El paso 2 del bloqueo de escrituras ahora verifica que no haya ninguna tarea pesada. Ninguna tarea empieza con ventana, operación incompleta, diario de C9‑B o bloqueo ocupado.
+- **Registro de cada corrida para C8** (`state\tasks\`). Distingue una copia **creada** de una **verificada**, reconoce las corridas interrumpidas y no afirma recuperabilidad completa (C7, C13).
+- **rclone 1.68.2** se suma a los runtimes fijados por checksum.
+- **Pruebas:**
+  - C6‑AB, C6‑R, C6‑RQ y C6‑U en cualquier plataforma;
+  - C6‑1 a C6‑7, C6‑AB y C6‑I en el nuevo job «Windows backups (W2-C6)».
+
 ### Added — F1.6: calidad de datos completa y pantalla Calidad (en revisión)
 - **Pantalla Comercial › Datos › Calidad** (`/comercial/datos/calidad`). Datos queda con Importaciones, Mapeos y Calidad.
   - **Cola:** tarjetas que cuentan problemas y ocurrencias por separado (errores, advertencias e informativos abiertos, resueltos, ignorados). Filtros del lado del servidor por estado, severidad, grupo de negocio, tipo, fechas, importación y palabras del tipo. Primero los errores y, dentro de cada severidad, el más antiguo.
