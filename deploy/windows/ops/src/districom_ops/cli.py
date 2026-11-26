@@ -364,8 +364,11 @@ def _tasks(args: argparse.Namespace, install: Install) -> int:
         log.info("backup_task_start_requested", extra={"task": args.task})
         return 0
     with services.operations_lock(install, "tasks_clear_cancel").acquire(timeout=services.LOCK_SECONDS) as lock:
-        cleared = tasklock.clear_request(install.layout.state, lock)
-    log.info("cancel_request_cleared", extra={"cleared": cleared})
+        removed = tasklock.reconcile(install.layout.state, lock)
+        standing = [r for r in tasklock.cancel_requests(install.layout.state) if r.live]
+    # Only orphans go: a valid request belongs to an operation that is still running and clears it itself.
+    log.info("cancel_requests_reconciled", extra={"removed": [r.request_id for r in removed],
+                                                  "standing": [r.operation for r in standing]})  # fmt: skip
     return 0
 
 

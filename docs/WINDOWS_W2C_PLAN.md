@@ -290,7 +290,7 @@ Ajustes de la revisión 1:
 7. **Diseño de coordinación (Enzo, 2026-11-25): AB, no BA.** Antes de implementar las tareas largas se definieron las ocho condiciones del pedido de Enzo del 2026-11-24 (`/mnt/project-files/servidor/DISENO_W2C6_BACKUPS.md`).
    - **A:** `operations.lock` solo para la verificación y el registro breves de cada tarea.
    - **B:** `backup.lock`, del sistema operativo, durante todo el trabajo pesado. Excluye a las otras tareas pesadas.
-   - **Pedidos persistentes de cancelación** desde el mantenimiento, el cierre y la actualización.
+   - **Pedidos persistentes de cancelación** desde el mantenimiento, el cierre y la actualización. **Cada pedido tiene dueño** (revisión de Enzo, 2026-11-26): un archivo por pedido más un bloqueo del sistema operativo que retiene el solicitante. Dos pedidos no se pisan, solo el dueño borra el suyo, un solicitante muerto deja un huérfano que se reconcilia con `operations.lock` tomado, y ninguna tarea empieza con un pedido válido. Pruebas C6‑RQ.
    - **Esperas acotadas fuera de `operations.lock`.**
    - **Confirmación efectiva** de que la tarea terminó, por el sistema operativo y con `operations.lock` tomado de nuevo, antes de seguir.
    - **Fallo seguro** si la confirmación no llega: no se abre la ventana.

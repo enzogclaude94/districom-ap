@@ -165,7 +165,8 @@ class MaintenanceWindow:
         """Close the window of ``operation_id`` and end that operation. Any other id is refused."""
         with self._locked(lock, "maintenance_close") as held:
             self._close(operation_id, end, **detail)
-            tasklock.clear_request(self.path.parent, held)
+            # Only orphans (their requester died): a valid request belongs to an operation still running.
+            tasklock.reconcile(self.path.parent, held)
 
     def _close(self, operation_id: str, end: Event, **detail: str) -> None:
         try:
@@ -188,7 +189,8 @@ def open_stopping_tasks(window: MaintenanceWindow, kind: Kind, reason: str, wait
     1. :func:`tasklock.quiesce`: a persistent cancellation request, written under the operations lock, then a
        bounded wait **without** the lock until the operating system confirms that ``backup.lock`` is free;
     2. with the operations lock taken again, :meth:`MaintenanceWindow.open` checks once more and opens;
-    3. the request is cleared (under the same lock): from now on the window keeps the tasks from starting.
+    3. its own request is cleared (under the same lock; nobody else's): from now on the window keeps the tasks
+       from starting.
 
     If the task does not confirm that it stopped, nothing is opened and the request is cleared: the refusal names
     the task and the time waited."""
@@ -200,4 +202,4 @@ def open_stopping_tasks(window: MaintenanceWindow, kind: Kind, reason: str, wait
                 raise MaintenanceError(f"maintenance open refused: {stopped.describe()}")
             return window.open(kind, reason, lock=lock)
         finally:
-            tasklock.clear_request(state, lock, stopped.request_id)
+            stopped.request.clear(lock)  # its own request only

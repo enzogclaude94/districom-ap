@@ -328,12 +328,18 @@ def _window(settings: TaskSettings) -> MaintenanceWindow:
     return MaintenanceWindow(settings.state, OperationsLog(settings.state / "operations.jsonl"))
 
 
-def _start_refusal(settings: TaskSettings, task: str, heavy_lock: tasklock.FileLock | None) -> str | None:
-    """With ``operations.lock`` held: why the task must not start (None: it may)."""
+def _start_refusal(
+    settings: TaskSettings, task: str, heavy_lock: tasklock.FileLock | None, lock: OperationLock
+) -> str | None:
+    """With ``operations.lock`` held: why the task must not start (None: it may). Orphan cancellation requests
+    (their requester died) are reconciled first; every valid one refuses the start."""
+    for orphan in tasklock.reconcile(settings.state, lock):
+        log.warning("cancel_request_orphan_reconciled",
+                    extra={"task": task, "request": orphan.request_id, "operation": orphan.operation})  # fmt: skip
     reasons = list(start_blockers(_window(settings), settings.maintenance_max_minutes))
-    request = tasklock.cancel_request(settings.state)
-    if request is not None:
-        reasons.append(f"operation {request.operation} asked the backup tasks to stop ({request.reason})")
+    for request in tasklock.cancel_requests(settings.state):
+        if request.live:
+            reasons.append(f"operation {request.operation} asked the backup tasks to stop ({request.reason})")
     if reasons:
         return "; ".join(reasons)
     if heavy_lock is not None and not heavy_lock.try_acquire():
@@ -383,8 +389,8 @@ def run_task(settings: TaskSettings, task: str, work: Callable[[Context], None] 
                            "reason": f"found by run {run_id}: the run ended without recording its result"}  # fmt: skip
             _write_record(settings, task, interrupted)
         try:
-            with OperationLock(settings.state, f"backup_task_{task}").acquire(timeout=LOCK_SECONDS):
-                refusal = _start_refusal(settings, task, heavy)
+            with OperationLock(settings.state, f"backup_task_{task}").acquire(timeout=LOCK_SECONDS) as oplock:
+                refusal = _start_refusal(settings, task, heavy, oplock)
                 if refusal is None:
                     if heavy is not None:
                         write_atomic(settings.tasks / tasklock.RUNNING,
@@ -599,6 +605,7 @@ def status(settings: TaskSettings) -> dict[str, Any]:
         "heavy_task_running": tasklock.heavy_task_running(settings.state),
         "running": tasklock.running_task(settings.state) if tasklock.heavy_task_running(settings.state) else None,
         "cancel_request": request.__dict__ if request else None,
+        "cancel_requests": [r.__dict__ for r in tasklock.cancel_requests(settings.state)],
         "tasks": {},
     }
     for name in TASKS:

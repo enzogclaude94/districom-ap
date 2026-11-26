@@ -33,6 +33,7 @@ CRITERIA: dict[str, str] = {
     "C9A-13": "Un registro antiguo del supervisor nunca da PASS",
     "C6-AB": "Diseño AB con procesos reales: espera acotada fuera de operations.lock, pedido persistente, confirmación por el sistema operativo; sin ella no se abre nada",
     "C6-R": "Ejecutor de tareas: inicio con operations.lock breve, rechazos con motivo, cancelación y vencimiento sin copias a medias, interrupciones reconocidas, retenciones seguras",
+    "C6-RQ": "Pedidos de cancelación con dueño: dos pedidos no se pisan, nadie borra el de otro, un solicitante muerto deja un huérfano que se reconcilia, ninguna tarea arranca con un pedido válido",
     "C6-U": "Definiciones del Programador de tareas (cuenta propia, sin contraseña, límites), registro idempotente y permisos mínimos de las tareas",
 }
 OUTSIDE_PYTEST = {

@@ -11,7 +11,7 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 - **Coordinación AB con C9:**
   - `operations.lock` solo para la verificación y el registro breves;
   - `backup.lock` durante el trabajo pesado;
-  - pedido de cancelación persistente;
+  - pedido de cancelación persistente, con dueño: un archivo por pedido y un bloqueo del sistema operativo que retiene el solicitante; nadie borra el pedido de otro y un solicitante muerto deja un huérfano que se reconcilia;
   - espera acotada fuera del bloqueo;
   - confirmación por el sistema operativo y fallo seguro.
 
@@ -19,7 +19,7 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 - **Registro de cada corrida para C8** (`state\tasks\`). Distingue una copia **creada** de una **verificada**, reconoce las corridas interrumpidas y no afirma recuperabilidad completa (C7, C13).
 - **rclone 1.68.2** se suma a los runtimes fijados por checksum.
 - **Pruebas:**
-  - C6‑AB, C6‑R y C6‑U en cualquier plataforma;
+  - C6‑AB, C6‑R, C6‑RQ y C6‑U en cualquier plataforma;
   - C6‑1 a C6‑7, C6‑AB y C6‑I en el nuevo job «Windows backups (W2-C6)».
 
 ### Fixed — Servidor: liberación del bloqueo de operaciones en Windows (mantenimiento de C9‑A, PR #93, mergeado el 2026-11-25)

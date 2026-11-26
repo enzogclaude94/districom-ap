@@ -734,17 +734,22 @@ def stop_services(install: Install, cancel_wait_seconds: float | None = None) ->
     and says so. That is safe for the copies: a task stopped by the stop of PostgreSQL fails before publishing,
     and nothing published earlier is touched."""
     wait = tasklock.DEFAULT_CANCEL_WAIT_SECONDS if cancel_wait_seconds is None else cancel_wait_seconds
+    stopped: tasklock.Quiesce | None = None
     try:
         stopped = tasklock.quiesce(install.layout.state, "services_stop", "services stop", wait,
                                    lock_seconds=LOCK_SECONDS)  # fmt: skip
     except LockBusy as exc:
-        raise ServicesError(str(exc)) from exc
-    (log.info if stopped.stopped else log.warning)("backup_tasks_before_stop", extra={"detail": stopped.describe()})
+        raise ServicesError(str(exc)) from exc  # the stop itself needs the lock too (C9-A, unchanged)
+    except Exception as exc:  # an unsafe state never prevents the stop
+        log.warning("backup_tasks_not_asked_before_stop", extra={"error": type(exc).__name__})
+    if stopped is not None:
+        (log.info if stopped.stopped else log.warning)("backup_tasks_before_stop", extra={"detail": stopped.describe()})
     with _locked(install, "services_stop") as lock:
         try:
             stop_all(install)
         finally:
-            tasklock.clear_request(install.layout.state, lock, stopped.request_id)
+            if stopped is not None:
+                stopped.request.clear(lock)  # its own request only
 
 
 def supervisor_state(install: Install) -> dict[str, object] | None:

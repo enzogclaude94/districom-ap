@@ -31,8 +31,7 @@ SRC = Path(__file__).resolve().parents[1] / "src"
 BACKUP_SRC = Path(__file__).resolve().parents[2] / "backup" / "src"
 
 
-@pytest.fixture
-def settings(tmp_path: Path) -> TaskSettings:
+def make_settings(tmp_path: Path) -> TaskSettings:
     root = tmp_path / "DistriCom"
     (root / "state").mkdir(parents=True)
     (root / "config").mkdir()
@@ -52,6 +51,11 @@ def settings(tmp_path: Path) -> TaskSettings:
         restore_test_port=55432,
         maintenance_max_minutes=60,
     )
+
+
+@pytest.fixture
+def settings(tmp_path: Path) -> TaskSettings:
+    return make_settings(tmp_path)
 
 
 def window(settings: TaskSettings) -> MaintenanceWindow:
@@ -267,7 +271,8 @@ def test_a_task_does_not_start_with_an_incompatible_state_and_records_why(settin
         holder = OperationLock(state, "update").acquire()
     elif case == "request":
         with OperationLock(state, "x").acquire() as lock:
-            tasklock._write_request(state, lock, "maintenance_day_close", "cierre")
+            standing = tasklock._write_request(state, lock, "maintenance_day_close", "cierre")  # owner alive
+        assert standing.standing
     elif case == "heavy":
         other = tasklock.backup_lock(state)
         assert other.try_acquire()
@@ -321,10 +326,12 @@ def test_a_cancellation_request_stops_the_child_cleans_the_temporary_and_keeps_p
         (settings.repo / "base" / ".tmp-base-new").mkdir()
         ctx.run(_sleeper(60), step="slow")
 
+    owned: list[tasklock.OwnedRequest] = []
+
     def request() -> None:
         time.sleep(1.5)
         with OperationLock(settings.state, "maintenance").acquire() as lock:
-            tasklock._write_request(settings.state, lock, "maintenance_day_close", "cierre")
+            owned.append(tasklock._write_request(settings.state, lock, "maintenance_day_close", "cierre"))
 
     thread = threading.Thread(target=request)
     thread.start()
