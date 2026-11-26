@@ -538,6 +538,11 @@ export function ImportDetailView({ jobId }: { jobId: number }) {
               ]}
             />
             {isSales && days.length > 0 && <p className="text-sm text-muted-foreground">Ventas de {daysText(days)}.</p>}
+            {(issues.data?.length ?? 0) > 0 && (
+              <Link href={`/comercial/datos/calidad?job_id=${jobId}`} className="text-sm underline underline-offset-2">
+                Ver sus problemas en Calidad
+              </Link>
+            )}
           </CardContent>
         </Card>
       )}

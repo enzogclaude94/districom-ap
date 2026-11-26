@@ -234,7 +234,7 @@ SUBIR → DETECTAR → ANALIZAR ─────────────► PREVI
 **Reglas:**
 - **Identidad:** `codart`. Este es el único import que crea productos. Un código repetido en el archivo rechaza todas sus filas y abre `commercial.product.duplicate_code`.
 - **Reimport:** solo actualiza `source_*` (`unchanged` si el contenido es igual). Nunca pisa categoría, tipo, elegibilidad ni familia.
-- **Rubro:** el export no lo trae. Todo producto nuevo queda sin categoría, `analytics_eligible = false` (D‑D) y con `commercial.product.without_category`. No se crean mappings de rubro y no se infiere nada de la descripción (ni familia, ni capacidad, ni pack). `commercial.product.unmapped_category` queda para un export que traiga rubro.
+- **Rubro:** el export no lo trae. Todo producto nuevo queda sin categoría, `analytics_eligible = false` (D‑D) y con `commercial.product.without_category`. No se crean mappings de rubro y no se infiere nada de la descripción (ni familia, ni capacidad, ni pack). Si un export futuro trae rubro, esa fase registra el código que lo revise (F1.6 sacó `commercial.product.unmapped_category`, que nada podía emitir).
 - **Columnas fuera del contrato:** si un export trae otras columnas, se guardan textuales en `source_extra` sin interpretarlas, y el preview las lista (`source_columns_without_contract`).
 - **Precio:** el export no dice a qué lista corresponde `precio`. La lista la fija el parámetro confirmado `commercial.store_sys_articles_price_list` (número de lista existente en `price_lists`). **Sin valor (default), los precios no se cargan:** quedan en el staging del job, el preview dice `prices.loaded = false` y se abre `commercial.product.prices_not_loaded`. Una lista que no existe tampoco carga (nunca se crea una lista desde un export). La confirmación usa la lista que anunció el preview. La decide un admin del módulo, con motivo y auditada (`commercial.config.articles_price_list_set`): `GET`/`PUT /api/v1/commercial/price-lists/articles-master` `{"list_number": n | null, "reason": "…"}`. Rige desde el próximo import o reproceso del maestro; no toca precios ya cargados.
 - **`precio` = Lista 1** (Enzo, 2026-11-05). STORE SYS no lo declara: se confirmó con el export real de ventas de octubre con importes (`codigo, descripcion, cantidad, final, rubro, vendedor, zona, fecha, lista_de_precios`). Comparando `final ÷ cantidad` con el `precio` del maestro, la mediana de la relación es 1,000 en Lista 1 (1,017 en Lista 2 y 0,971 en Lista 3), y 135 de 155 últimos precios cobrados con Lista 1 coinciden dentro de ±$0,05. Las diferencias son bonificaciones (líneas en $0), descuentos y redondeos. `commercial seed-config` lo deja como parámetro auditado (`app_settings` con el motivo, evento `commercial.config.articles_price_list_set`) **solo si nadie lo fijó**: una decisión posterior de un admin (otra lista o ninguna) no se deshace.
@@ -511,11 +511,13 @@ Alcance: solo `customer/STORE_SYS/customer`, en `sale_lines` y en `documents` (e
 - `platform.import.duplicate_file`, `invalid_row`, `missing_columns`;
 - `commercial.customer.without_zone`, `without_salesperson`, `missing_from_master`, `unresolved_code` (código STORE SYS sin mapping, desde comprobantes y ventas);
 - `commercial.seller.unmapped` (vendedor STORE SYS sin vincular);
-- `commercial.product.unknown` (código de ventas que no está en el maestro), `without_category`, `unmapped_category` (rubro sin mapping; el export actual no trae rubro), `duplicate_code` (código repetido en el maestro), `missing_from_master` (info), `prices_not_loaded` (precio sin lista confirmada);
+- `commercial.product.unknown` (código de ventas que no está en el maestro), `without_category`, `duplicate_code` (código repetido en el maestro), `missing_from_master` (info), `prices_not_loaded` (precio sin lista confirmada);
 - `commercial.sale_line.product_pending` (por job);
 - `commercial.zone.unconfigured`;
 - `commercial.document.unclassified_type`, `changed`;
-- pendientes de su muestra: `commercial.no_purchase.*` (AXUM, F1.4).
+- AXUM (F1.4): `commercial.axum_salesperson.unmapped`, `commercial.axum_customer.unresolved`, `name_mismatch`, `commercial.no_purchase.reason_unmapped`.
+
+Cómo se abre, se cuenta y se cierra cada código, y la pantalla Calidad: §7.1.
 
 **Reproceso:**
 - **Re‑resolver:** cada decisión sobre un mapping completa (o desvincula) sus hechos en la misma transacción (§6.4).
@@ -544,6 +546,92 @@ Alcance: solo `customer/STORE_SYS/customer`, en `sale_lines` y en `documents` (e
 **Retención:**
 - El staging no se purga por defecto (`platform.imports.row_retention_days` = sin límite).
 - Los archivos originales no se borran desde la app.
+
+### 7.1 Ciclo de vida y pantalla Calidad (F1.6)
+
+**Única fuente de verdad:** `public.data_quality_issues`. La pantalla no copia los issues a otra tabla; se leen con `app.platform.quality.review`, que es la única implementación de la búsqueda.
+
+**Estados:**
+- `open`: la condición está presente. Cada vez que se vuelve a ver, suma una ocurrencia sobre la misma fila.
+- `resolved`: la condición desapareció y el sistema la cerró solo, o un admin la marcó resuelta a mano con una nota.
+- `ignored`: alguien la revisó y es lo esperado (operator o admin, con nota).
+- Un issue cerrado **nunca se reabre**. Si la misma condición vuelve, se abre una fila nueva con la misma `(code, dedupe_key)`. La cerrada conserva su nota y su historia. `ignored` no es una lista negra: no suprime ocurrencias futuras.
+- Ni la API ni la pantalla borran issues. Una decisión manual no cambia ningún dato de negocio, y la severidad no se edita.
+
+**Cada código declara su presentación** en su `QualityCodeSpec`: grupo de negocio («Clientes», «Vendedores y preventistas», «Artículos», «Zonas», «Comprobantes», «AXUM», «Importaciones»), descripción, acción recomendada, cuándo se cierra solo y dónde se corrige (`fix`: `mapping`, `import` o ninguno). La pantalla nunca ramifica por código. Para nombrar lo afectado, el módulo registra un `QualitySubjectSpec` por `entity_type` («Artículo 123 · AGUA 500», «Zona RUTA 03»).
+
+**Cierre automático:**
+
+| Código | Severidad | Se abre en | `dedupe_key` | Se cierra solo cuando |
+|---|---|---|---|---|
+| `customer.without_zone` / `without_salesperson` | warning | maestro de clientes | `customer:{id}` | un maestro posterior lo trae con zona / vendedor |
+| `customer.missing_from_master` | info | maestro de clientes | `customer:{id}` | reaparece en un maestro |
+| `customer.unresolved_code` | warning | ventas, comprobantes | `customer_code:{código}` | el mapping se decide y no quedan hechos huérfanos de ese código (§6.4) |
+| `seller.unmapped`, `axum_salesperson.unmapped` | warning | maestro, ventas / AXUM | `mapping:{id}` | el mapping se confirma o se excluye |
+| `axum_customer.unresolved`, `name_mismatch` | warning | AXUM | `axum_customer:{código}` | el mapping se decide |
+| `product.without_category` | warning | maestro de artículos | `product:{id}` | el artículo recibe categoría |
+| `product.unknown` | warning | ventas | `product_code:{código}` | un maestro de artículos posterior trae ese código (**F1.6, D2**). Las líneas ya cargadas siguen con `product_id` NULL: no se re‑resuelven, y su `sale_line.product_pending` sigue abierto hasta un reproceso. Son dos hechos distintos |
+| `product.duplicate_code` | error | maestro de artículos | `product_code:{código}` | un maestro posterior trae el código una sola vez (**corrección de F1.6**) |
+| `product.missing_from_master` | info | maestro de artículos | `product:{id}` | reaparece en un maestro |
+| `product.prices_not_loaded` | warning | maestro de artículos | `store_sys_articles_price_list` | un maestro con la lista configurada |
+| `zone.unconfigured` | warning | zona nueva sin regla | `zone:{id}` | un admin configura la zona |
+| `document.unclassified_type` | warning | configuración, comprobantes | `document_type:{id}` | un admin clasifica el tipo |
+| `no_purchase.reason_unmapped` | warning | AXUM | `reason:{id}` | un admin le asigna categoría al motivo (**corrección de F1.6**) |
+
+Los códigos de Comercial llevan el prefijo `commercial.`. Ningún cierre ocurre mientras siga una condición equivalente: dos clientes sin zona son dos issues, y cada uno se cierra por su lado.
+
+**Sin cierre automático** (los cierra una persona, con nota):
+- `sale_line.product_pending`: es por job;
+- `document.changed`: es un evento;
+- `platform.import.duplicate_file`, `invalid_row`, `missing_columns`: son hechos de un job.
+
+`product.unmapped_category` se sacó del registro en F1.6 (decisión de Enzo, D1): ninguna fuente actual trae rubro, así que nada podía emitirlo. Se vuelve a registrar en la fase que incorpore una fuente con rubro.
+
+**Decisiones y permisos** (del módulo dueño del issue; los `platform.import.*` toman el módulo del tipo de su job):
+- `viewer` lee y navega;
+- `operator` también ignora;
+- `admin` también resuelve a mano;
+- quien no tiene el módulo no descubre el issue (404).
+- La nota es obligatoria, de hasta 500 caracteres.
+- La decisión bloquea la fila (`SELECT … FOR UPDATE`). Si el issue ya no está abierto responde 409 `issue_not_open` con `{issue_id, status}` y no pisa nada.
+- Se audita `platform.quality.resolved` / `platform.quality.ignored` con `{issue_id, code, severity, from_status, to_status}`. Nunca lleva la nota, el `dedupe_key`, el `external_ref`, nombres ni códigos externos.
+- «Resuelto automáticamente» se distingue de «resuelto a mano» por ese evento de auditoría, porque las decisiones de Mapeos también registran a quien decidió.
+
+**API** (`/api/v1/quality`, aditiva):
+
+| Endpoint | Para qué |
+|---|---|
+| `GET /codes?module=` | tipos con su presentación |
+| `GET /issues?module=&status&severity&code&group&job_id&seen_from&seen_to&q&sort&limit&offset` | la cola: por defecto error → warning → info y, dentro de cada uno, el más antiguo primero; `sort=recent` ordena por última vez |
+| `GET /issues/summary?module=&…` | issues y ocurrencias por separado: abiertos por severidad, resueltos e ignorados |
+| `GET /issues/{id}` | el detalle |
+| `POST /issues/{id}/ignore` (operator) | ignorar, con `{note}` |
+| `POST /issues/{id}/resolve` (admin) | resolver a mano, con `{note}` |
+
+`q` busca solo en las palabras del tipo de problema (etiqueta, descripción, grupo), nunca en los datos. Así ninguna PII viaja en la URL. No hay operaciones en lote.
+
+**Privacidad:**
+- `details` y `external_ref` nunca salen tal como están guardados.
+- El detalle muestra solo hechos permitidos (`lines`, `row_number`, `codes`, `mapping_status`, `match`, `duplicate_of_job_id`, `first_job_id`, `rows_with_price`, `missing`) con valores simples.
+- Lo afectado se nombra como lo nombra Mapeos: nombre de fantasía, código o artículo. Nunca CUIT, teléfono ni dirección.
+- `dedupe_key`, `entity_type` y `entity_id` van como referencia técnica secundaria, solo para operator o admin.
+
+**Pantalla** `/comercial/datos/calidad`:
+- Tarjetas que cuentan problemas y ocurrencias por separado.
+- Filtros del lado del servidor y columnas en palabras de negocio.
+- El detalle dice qué pasó, de dónde vino (enlace a la importación) y cómo se corrige:
+  - enlace al mapping exacto cuando existe, a Mapeos cuando todavía no;
+  - a la importación para `fix=import`;
+  - sin pantalla de edición para zonas y categorías, que llegan con Maestros.
+- El detalle de una importación enlaza a sus problemas (`?job_id=`).
+- No resalta la fila del staging: se muestra «fila N» con enlace a la importación. El deep‑link o filtro por `row_id` o número de fila queda para F1.8 (D3).
+
+**Rendimiento** (copia descartable con 10.794 issues):
+- la página por defecto, 14 ms con 5 consultas;
+- la última página, 22 ms;
+- el resumen, una sola consulta agrupada de 3 ms.
+
+Con esa base, `EXPLAIN ANALYZE` muestra un recorrido secuencial de 2 a 3 ms. Ningún índice nuevo lo mejora, porque los abiertos son la mayoría de las filas; los filtros por código y por job ya usan `(status, code)` y `(job_id)`. F1.6 no agrega migración.
 
 ## 8. Permisos (D‑I)
 

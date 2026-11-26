@@ -13,7 +13,7 @@ from app.platform.mappings.resolvers import MappingResolverSpec
 from app.platform.mappings.resolvers import registry as mapping_resolver_registry
 from app.platform.parties.functions import EmployeeFunctionSpec
 from app.platform.parties.functions import registry as function_registry
-from app.platform.quality.registry import QualityCodeSpec
+from app.platform.quality.registry import QualityCodeSpec, QualitySubjectSpec
 from app.platform.quality.registry import registry as quality_code_registry
 from app.platform.settings.registry import SettingsScope
 from app.platform.settings.registry import registry as settings_registry
@@ -47,6 +47,8 @@ class ModuleSpec:
     import_types: tuple[ImportTypeSpec, ...] = ()
     # Data quality codes the module raises; codes are `<key>.<entity>.<problem>`.
     quality_codes: tuple[QualityCodeSpec, ...] = ()
+    # How the Calidad screen names the module's entities an issue points to (F1.6), without PII.
+    quality_subjects: tuple[QualitySubjectSpec, ...] = ()
     # How the module's facts follow a mapping decision (F1.5): which columns took their identity from a mapping and
     # which issues the decision may close. The platform decides; it applies these without importing the module.
     mapping_resolvers: tuple[MappingResolverSpec, ...] = ()
@@ -74,6 +76,8 @@ def install(module: ModuleSpec) -> None:
         import_type_registry.register(module.key, import_type)
     for code in module.quality_codes:
         quality_code_registry.register(code)
+    for subject in module.quality_subjects:
+        quality_code_registry.register_subject(subject)
     for resolver in module.mapping_resolvers:
         mapping_resolver_registry.register(resolver)
 
