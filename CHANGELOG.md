@@ -4,6 +4,30 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Added — F1.6: calidad de datos completa y pantalla Calidad (en revisión)
+- **Pantalla Comercial › Datos › Calidad** (`/comercial/datos/calidad`). Datos queda con Importaciones, Mapeos y Calidad.
+  - **Cola:** tarjetas que cuentan problemas y ocurrencias por separado (errores, advertencias e informativos abiertos, resueltos, ignorados). Filtros del lado del servidor por estado, severidad, grupo de negocio, tipo, fechas, importación y palabras del tipo. Primero los errores y, dentro de cada severidad, el más antiguo.
+  - **Detalle:** qué pasó, a qué afecta, ocurrencias, primera y última vez, origen con enlace a la importación y cómo se corrige. Enlaza al mapping exacto o a la importación; no hay mini pantallas de edición, y zonas y categorías llegan con Maestros. Si está cerrado, quién, cuándo y con qué nota, o «se resolvió solo».
+  - El detalle de una importación enlaza a sus problemas en Calidad.
+- **API de plataforma** `/api/v1/quality` (aditiva): `codes`, `issues` (lista paginada), `issues/summary`, `issues/{id}`, `issues/{id}/ignore` (operator) y `issues/{id}/resolve` (admin).
+  - Nota obligatoria. La decisión bloquea la fila; una decisión vieja responde 409 `issue_not_open` con el estado actual.
+  - Auditoría `platform.quality.ignored` / `resolved`, sin nota, `dedupe_key` ni valores.
+  - `details` y `external_ref` nunca salen crudos: solo hechos permitidos y lo afectado en palabras de negocio.
+  - Sin borrado, sin lote y sin editar la severidad.
+- **Presentación por código:** `QualityCodeSpec` suma grupo, descripción, acción, cuándo se cierra y dónde se corrige. Los módulos registran `QualitySubjectSpec` para nombrar sus entidades. Comercial declara sus 18 códigos en `app/modules/commercial/quality.py`.
+- Ciclo de vida documentado código por código en `docs/IMPORTS.md §7.1`. Medido con 10.794 issues (página 14 ms, resumen 3 ms): sin índices nuevos ni migración.
+
+### Fixed — F1.6: issues que no se cerraban aunque su causa desapareciera
+- `commercial.no_purchase.reason_unmapped` se cierra cuando un admin le asigna una categoría al motivo.
+- `commercial.product.duplicate_code` se cierra cuando un maestro de artículos posterior trae el código una sola vez.
+- `commercial.product.unknown` se cierra cuando un maestro de artículos posterior trae el código (D2). Las ventas ya cargadas no se re‑resuelven: siguen con `product_id` NULL y su `commercial.sale_line.product_pending` queda abierto.
+
+### Removed — F1.6
+- `commercial.product.unmapped_category` sale del registro (D1). Ninguna fuente actual trae rubro, así que nada podía emitirlo, y nunca hubo issues con ese código. Vuelve en la fase que incorpore rubro.
+
+### Fixed — Tests con fechas que vencían (PR #90, 2026-11-19)
+- `test_employee_loans_db_invariants.py` usaba fechas fijas que el calendario alcanzó y el CI de `main` falló sin cambios de código. Ahora deriva las fechas de las relaciones que el test verifica. Regla: una fecha fija solo cuando la fecha concreta es el requisito; si lo que importa es antes o después, una relación temporal.
+
 ### Fixed — Servidor: liberación del bloqueo de operaciones en Windows (mantenimiento de C9‑A, PR #93, mergeado el 2026-11-25)
 - `OperationLock.release` ya no falla con `WinError 32` cuando otro hilo o proceso está leyendo `operations.lock.json` en ese momento. El borrado de ese registro, que es solo informativo, se reintenta brevemente y, si no se puede, se deja (lo reemplaza el siguiente dueño). El bloqueo del sistema operativo se libera siempre. Pruebas C9A‑1 nuevas, con un lector real del registro y con fallas de borrado transitorias y permanentes. No cambia el estado de validación física de C9‑A.
 
@@ -18,7 +42,7 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 - El supervisor y `services start` respetan el diario; PostgreSQL no se reinicia con un bloqueo de escrituras sin resolver. Regla nueva de C3: el Stack lee `pgdata\global\pg_control`.
 - Pruebas: unidades (máquina de estados, contexto C9‑X1..X6, supervisor con SCM simulado), `db_tests` contra PostgreSQL 17.6 real (C9‑1..9, H1, M, la suite completa del backend, R y X7 con procesos matados en cada paso) y `services_tests` con los servicios reales. Sin jobs nuevos: «Windows ops (W2-C)» instala los binarios oficiales de PostgreSQL.
 
-### Added — F1.5: revisión manual de mappings y re‑resolución (en revisión)
+### Added — F1.5: revisión manual de mappings y re‑resolución (DONE, PR #88)
 - **Pantalla Comercial › Datos › Mapeos** (`/comercial/datos/mapeos`). Datos muestra solo Importaciones y Mapeos (sale el ítem «Calidad», que era un marcador de fase).
   - **Cola:** tarjetas por estado, filtros (estado, sistema, tipo de código), búsqueda por código o nombre y primero los abiertos más antiguos, en palabras de negocio («Preventista AXUM», «Vendedor STORE SYS», «Cliente AXUM», «Cliente STORE SYS»).
   - **Detalle:** origen, candidatos (nunca preseleccionados), última decisión y el impacto de cada decisión contado por el backend, por ejemplo «655 eventos de no compra históricos quedarán asociados a este preventista.».

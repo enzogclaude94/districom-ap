@@ -517,7 +517,7 @@ Sin purga por defecto (`platform.imports.row_retention_days`); habilita auditor�
 
 ### 7.5 data_quality_issues
 `id`, `code` (registrado por módulo), `severity` (`error`, `warning`, `info`), `status` (`open`, `resolved`, `ignored`), `dedupe_key` text, `entity_type`, `entity_id`, `external_ref` jsonb (sistema + namespace + id cuando no hay entidad), `job_id` FK NULL, `row_id` FK NULL, `details` jsonb (sin PII), `occurrences` int, `first_seen_at`, `last_seen_at`, `resolved_by`, `resolved_at`, `resolution_note`.
-`UNIQUE (code, dedupe_key) WHERE status = 'open'`. Códigos en `docs/IMPORTS.md §7`. Se escribe solo con `app.platform.quality.service.record_issue` (inserta o suma una ocurrencia).
+`UNIQUE (code, dedupe_key) WHERE status = 'open'`. Códigos en `docs/IMPORTS.md §7`. Se escribe solo con `app.platform.quality.service.record_issue` (inserta o suma una ocurrencia). Un issue cerrado nunca se reabre: la misma condición abre una fila nueva. Ciclo de vida, decisiones manuales y pantalla Calidad en `docs/IMPORTS.md §7.1` (F1.6, sin cambios de schema).
 
 Migración `0033` (F1.1b) crea `import_files`, `import_jobs`, `import_rows` y `data_quality_issues`. Su downgrade se niega si hay jobs o issues: nunca borra historia.
 

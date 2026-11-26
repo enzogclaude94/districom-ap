@@ -92,11 +92,12 @@ const calls = (spy: ReturnType<typeof mockApi>, method: string, path: string) =>
 const bodyOf = (init: RequestInit | undefined) => JSON.parse(String(init?.body)) as Record<string, unknown>;
 
 describe("Datos navigation", () => {
-  it("shows only Importaciones and Mapeos", () => {
+  it("shows Importaciones, Mapeos and Calidad", () => {
     const datos = COMMERCIAL_NAV.find((s) => s.label === "Datos");
     expect(datos?.items?.map((i) => [i.label, i.href])).toEqual([
       ["Importaciones", "/comercial/datos/importaciones"],
       ["Mapeos", "/comercial/datos/mapeos"],
+      ["Calidad", "/comercial/datos/calidad"],
     ]);
   });
 });
