@@ -15,7 +15,14 @@ readable by administrators.
   ``CREATE`` and ``TEMPORARY`` on it, owns the ``public`` schema and everything it creates, and is member of no
   role. ``pg_hba.conf`` lets it reach only its database: any other one (``postgres``, ``template1``) is rejected.
   The migrations keep their contract: they run as this role and create their schemas, tables and extensions.
+* ``districom_backup`` (W2-C6): ``LOGIN REPLICATION`` (for ``pg_basebackup``) and member of ``pg_read_all_data``
+  (for ``pg_dump``), with ``CONNECT`` on the application database. Not a superuser, owner of nothing, it cannot
+  change ``ALLOW_CONNECTIONS`` nor write any table. Its random password is only in ``config\\backup-db.secret``,
+  which C3 lets only administrators and the backup tasks read.
 * ``postgres``: the superuser, for administrators.
+
+WAL archiving (W2-C6) lives in ``districom-archive.conf``, which ``tasks install`` writes (it knows the release and
+the repository) and ``districom.conf`` includes if it exists: a cluster without the tasks installed does not archive.
 
 Nothing else is changed: no global revocation, no other role or database.
 """
@@ -33,6 +40,8 @@ from districom_ops.install import Install
 
 PG_SERVICE = "DistriComPostgreSQL"
 CONF = "districom.conf"
+ARCHIVE_CONF = "districom-archive.conf"
+BACKUP_ROLE = "districom_backup"
 IDENTIFIER = re.compile(r"^[a-z_][a-z0-9_]{0,62}$")
 log = logging.getLogger("districom_ops")
 
@@ -64,6 +73,8 @@ def settings(install: Install) -> str:
             "log_duration = off",
             "log_parameter_max_length = 0",
             "log_parameter_max_length_on_error = 0",
+            "# W2-C6: archive_mode, archive_command and restore_command, written by tasks install.",
+            f"include_if_exists = '{ARCHIVE_CONF}'",
             "",
         ]
     )
@@ -105,7 +116,7 @@ def hba(install: Install) -> str:
     )
 
 
-def init_sql(install: Install) -> str:
+def init_sql(install: Install, backup_password: str) -> str:
     user, password, database, _ = install.database
     ops_user, ops_pw, _ = install.ops_database
 
@@ -120,6 +131,10 @@ def init_sql(install: Install) -> str:
         f'CREATE DATABASE "{database}" OWNER "{ops_user}";\n'
         f'REVOKE ALL ON DATABASE "{database}" FROM PUBLIC;\n'
         f'GRANT CONNECT, CREATE, TEMPORARY ON DATABASE "{database}" TO "{user}";\n'
+        f'CREATE ROLE "{BACKUP_ROLE}" LOGIN REPLICATION NOSUPERUSER NOCREATEDB NOCREATEROLE '
+        f"PASSWORD {literal(backup_password)};\n"
+        f'GRANT pg_read_all_data TO "{BACKUP_ROLE}";\n'
+        f'GRANT CONNECT ON DATABASE "{database}" TO "{BACKUP_ROLE}";\n'
         f'\\connect "{database}"\n'
         f'ALTER SCHEMA public OWNER TO "{user}";\n'
     )
@@ -146,15 +161,22 @@ def init(install: Install) -> bool:
         raise DatabaseError("the PostgreSQL data folder is not empty and has no cluster; not touching it")
     user, _, database, port = install.database
     ops_user, ops_pw, ops_db = install.ops_database
-    if not (IDENTIFIER.match(user) and IDENTIFIER.match(database)):
+    if not (IDENTIFIER.match(user) and IDENTIFIER.match(database)) or user == BACKUP_ROLE:
         raise DatabaseError("DATABASE_URL user and database must be lowercase identifiers")
-    if not (IDENTIFIER.match(ops_user) and ops_pw and ops_db == "postgres") or ops_user in (user, "postgres"):
+    if not (IDENTIFIER.match(ops_user) and ops_pw and ops_db == "postgres") or ops_user in (
+        user,
+        "postgres",
+        BACKUP_ROLE,
+    ):
         raise DatabaseError("OPS_DATABASE_URL needs its own lowercase role, a password and the postgres database")
 
     superuser = secrets.token_urlsafe(32)
     install.superuser_secret.parent.mkdir(parents=True, exist_ok=True)
     install.superuser_secret.write_text(superuser, encoding="utf-8")
     acl.restrict(install.superuser_secret, readers=[])
+    backup_password = secrets.token_urlsafe(32)
+    install.backup_secret.write_text(backup_password, encoding="utf-8")
+    acl.restrict(install.backup_secret, readers=[])
     output = install.postgres_logs / "init.log"
     # initdb runs with a restricted token: the Administrators group only denies, and an elevated administrator's
     # files are owned by that group. The password file is therefore readable by administrators, SYSTEM and this
@@ -187,7 +209,7 @@ def init(install: Install) -> bool:
     if code != 0:
         raise DatabaseError(f"the temporary server did not start ({code}); see logs\\postgresql")
     try:
-        sql = init_sql(install)
+        sql = init_sql(install, backup_password)
         code = _run(
             [str(install.pg_bin("psql")), "-X", "-q", "-h", "127.0.0.1", "-p", str(port), "-U", "postgres",
              "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-f", "-"],

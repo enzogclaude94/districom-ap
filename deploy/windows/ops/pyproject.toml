@@ -46,10 +46,12 @@ ignore = ["S101"]
 "firewall_tests/conftest.py" = ["E501"]
 "db_tests/**" = ["S105", "S106", "S108", "S603", "S608"]
 "db_tests/conftest.py" = ["E501"]
+"backups_tests/**" = ["S105", "S106", "S108", "S603", "S608"]
+"backups_tests/conftest.py" = ["E501"]
 
 [tool.mypy]
 strict = true
-files = ["src", "tests", "services_tests", "permissions_tests", "firewall_tests", "db_tests"]
+files = ["src", "tests", "services_tests", "permissions_tests", "firewall_tests", "db_tests", "backups_tests"]
 # districom_backup has no py.typed marker: mypy reads its source, which is strictly typed too (W2-A).
 mypy_path = "../backup/src"
 
@@ -57,4 +59,4 @@ mypy_path = "../backup/src"
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
 timeout = 300
-markers = ["criterion(id): W2-C acceptance criterion (C1-1 ... C3-5) that the test provides evidence for"]
+markers = ["criterion(id): W2-C acceptance criterion (C1-1 ... C6-7) that the test provides evidence for"]

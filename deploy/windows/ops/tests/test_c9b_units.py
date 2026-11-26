@@ -242,7 +242,7 @@ def test_the_model_sql_and_pg_hba(tmp_path: Path) -> None:
     install = make_install(tmp_path / "DistriCom")
     user, _, name, _ = install.database
     ops_user, _, _ = install.ops_database
-    sql = database.init_sql(install)
+    sql = database.init_sql(install, "backup-password-of-the-test")
     assert f'CREATE DATABASE "{name}" OWNER "{ops_user}";' in sql
     assert f'GRANT pg_signal_backend, pg_read_all_stats TO "{ops_user}";' in sql
     assert f'GRANT CONNECT, CREATE, TEMPORARY ON DATABASE "{name}" TO "{user}";' in sql
