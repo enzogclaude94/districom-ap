@@ -7,9 +7,10 @@ Name, legal name, CUIT, address and phone are PII: never in logs nor audit paylo
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
+from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import Select, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.errors import AppError
@@ -141,26 +142,54 @@ def get(db: Session, customer_id: int) -> Customer:
 
 
 def search(
-    db: Session, *, q: str | None, include_inactive: bool, limit: int, offset: int
+    db: Session,
+    *,
+    q: str | None,
+    include_inactive: bool,
+    limit: int,
+    offset: int,
+    active: bool | None = None,
+    is_generic: bool | None = None,
+    also_matching: Select[Any] | None = None,
+    within: Sequence[Select[Any]] = (),
 ) -> tuple[Sequence[Customer], int]:
+    """Customers by name, paginated in the database. A module may widen what `q` matches (`also_matching`: ids it
+    resolves the text to, such as a source code through its mapping) and narrow the page to ids it owns the meaning
+    of (`within`: a current zone, a seller), without the platform knowing those tables. `active` decides over
+    `include_inactive` when given."""
     query = select(Customer)
-    if not include_inactive:
+    if active is not None:
+        query = query.where(Customer.active.is_(active))
+    elif not include_inactive:
         query = query.where(Customer.active.is_(True))
+    if is_generic is not None:
+        query = query.where(Customer.is_generic.is_(is_generic))
     if q and (key := name_key(q)):
-        query = query.where(Customer.display_name_key.contains(key, autoescape=True))
+        by_name = Customer.display_name_key.contains(key, autoescape=True)
+        query = query.where(by_name if also_matching is None else or_(by_name, Customer.id.in_(also_matching)))
+    for ids in within:
+        query = query.where(Customer.id.in_(ids))
     total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
     rows = db.scalars(query.order_by(Customer.display_name_key, Customer.id).offset(offset).limit(limit)).all()
     return rows, total
 
 
 def set_flags(
-    db: Session, actor: User, customer_id: int, *, is_generic: bool | None, active: bool | None, reason: str | None
+    db: Session,
+    actor: User,
+    customer_id: int,
+    *,
+    is_generic: bool | None,
+    active: bool | None,
+    reason: str | None,
+    expected_updated_at: datetime | None = None,
 ) -> Customer:
     """What DistriCom decides about a customer: generic (Consumidor Final…, excluded from customer universes) and
     active. Audited with a reason; the master never changes them."""
     customer = db.scalars(select(Customer).where(Customer.id == customer_id).with_for_update()).first()
     if customer is None:
         raise AppError(404, "customer_not_found", "Ese cliente no existe.")
+    customer.ensure_unchanged(expected_updated_at)
     clean = " ".join(reason.split()) if reason else ""
     if not clean:
         raise AppError(422, "reason_required", "Indicá el motivo del cambio.")

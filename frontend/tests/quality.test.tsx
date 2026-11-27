@@ -120,9 +120,10 @@ const calls = (spy: ReturnType<typeof mockApi>, method: string, path: string) =>
 const lastUrl = (spy: ReturnType<typeof mockApi>, path: string) => String(calls(spy, "GET", path).at(-1)?.[0]);
 
 describe("Datos navigation", () => {
-  it("has Calidad after Mapeos and no Maestros yet", () => {
+  it("has Calidad after Mapeos, then Maestros", () => {
     const datos = COMMERCIAL_NAV.find((s) => s.label === "Datos");
-    expect(datos?.items?.map((i) => i.label)).toEqual(["Importaciones", "Mapeos", "Calidad"]);
+    expect(datos?.items?.map((i) => i.label)).toEqual(["Importaciones", "Mapeos", "Calidad", "Maestros"]);
+    expect(datos?.items?.find((i) => i.label === "Maestros")?.href).toBe("/comercial/datos/maestros");
     expect(datos?.items?.find((i) => i.label === "Calidad")?.href).toBe("/comercial/datos/calidad");
   });
 });
@@ -253,7 +254,7 @@ describe("Calidad detail", () => {
     );
   });
 
-  it("says the category edit comes with Maestros and offers no editor", async () => {
+  it("links a product without category to that exact product in Maestros, with no editor here", async () => {
     mockApi("operator", {
       "GET /quality/issues/33": () =>
         jsonResponse(
@@ -262,17 +263,29 @@ describe("Calidad detail", () => {
             id: 33,
             code: "commercial.product.without_category",
             label: "Producto sin categoría",
-            fix: null,
+            fix: "masters",
+            fix_href: "/comercial/datos/maestros/productos/123",
             mapping_id: null,
             subject: "Artículo 123 · AGUA 500",
-            action: "Asignale una categoría. La edición de categorías llega con Maestros (F1.7).",
+            action: "Asignale una categoría en Maestros.",
           }),
         ),
     });
     renderWithQuery(<QualityDetailView issueId={33} />);
-    expect(await screen.findByText(/La edición de categorías llega con Maestros \(F1\.7\)/)).toBeInTheDocument();
+    const link = await screen.findByRole("link", { name: "Corregir en Maestros" });
+    expect(link).toHaveAttribute("href", "/comercial/datos/maestros/productos/123");
     expect(screen.queryByRole("link", { name: /Mapeos|importación$/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+  });
+
+  it("never links a masters fix outside Maestros", async () => {
+    mockApi("viewer", {
+      "GET /quality/issues/34": () =>
+        jsonResponse(200, detail({ id: 34, fix: "masters", fix_href: "https://example.com/x", mapping_id: null })),
+    });
+    renderWithQuery(<QualityDetailView issueId={34} />);
+    await screen.findByText("Vinculalo con su empleado en Mapeos.");
+    expect(screen.queryByRole("link", { name: "Corregir en Maestros" })).not.toBeInTheDocument();
   });
 
   it("lets an operator ignore with a required note, but not resolve", async () => {

@@ -30,6 +30,8 @@ class ProductOut(BaseModel):
     active: bool
     created_at: datetime
     updated_at: datetime
+    # Today's price in the list the articles master feeds (Lista 1 today); None when it has none or no list is set.
+    master_price: Decimal | None = None
 
 
 class ProductPage(BaseModel):
@@ -60,6 +62,8 @@ class ProductPatch(BaseModel):
     family_id: int | None = None
     active: bool | None = None
     reason: str = Field(min_length=1, max_length=500)
+    # The version the screen read: a save over a newer one is a 409 `changed_meanwhile` (F1.7).
+    expected_updated_at: datetime | None = None
 
 
 class FamilyOut(BaseModel):
@@ -70,6 +74,7 @@ class FamilyOut(BaseModel):
     name: str
     description: str | None
     active: bool
+    updated_at: datetime
 
 
 class FamilyIn(BaseModel):
@@ -82,6 +87,8 @@ class FamilyPatch(BaseModel):
     name: str | None = Field(default=None, max_length=120)
     description: str | None = Field(default=None, max_length=500)
     active: bool | None = None
+    reason: str = Field(min_length=1, max_length=500)  # an edit says why (F1.7 D1)
+    expected_updated_at: datetime | None = None
 
 
 class SourceCategoryMappingOut(BaseModel):

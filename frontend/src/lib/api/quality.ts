@@ -10,7 +10,7 @@ import type { Page } from "@/lib/api/imports";
 export type IssueStatus = "open" | "resolved" | "ignored";
 export type Severity = "error" | "warning" | "info";
 /** Where the cause is corrected; null: no screen yet (Maestros). */
-export type Fix = "mapping" | "import" | null;
+export type Fix = "mapping" | "import" | "masters" | null;
 
 export interface QualityGroup {
   key: string;
@@ -52,6 +52,8 @@ export interface Issue {
   source: IssueSource;
   mapping_id: number | null;
   fix: Fix;
+  /** With fix `masters`: the path of the exact record to correct in Maestros (F1.7), built by the backend. */
+  fix_href?: string | null;
   action: string;
   resolved_at: string | null;
   resolved_by_name: string | null;

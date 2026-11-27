@@ -3,6 +3,8 @@ from datetime import datetime
 from sqlalchemy import BigInteger, DateTime, Identity, MetaData, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+from app.core.errors import AppError
+
 # Deterministic constraint names keep Alembic autogenerate and downgrades stable.
 NAMING_CONVENTION = {
     "ix": "ix_%(column_0_label)s",
@@ -26,3 +28,15 @@ class TimestampMixin:
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+    def ensure_unchanged(self, expected_updated_at: datetime | None) -> None:
+        """Optimistic concurrency for an admin edit (F1.7): the caller locked the row (`FOR UPDATE`), and the edit
+        was made on the version the screen read. If someone else saved in between, 409 instead of a silent
+        overwrite. None: the client did not say which version it read (older clients); the lock alone applies."""
+        if expected_updated_at is not None and self.updated_at != expected_updated_at:
+            raise AppError(
+                409,
+                "changed_meanwhile",
+                "Alguien modificó este dato mientras lo editabas. Recargá para ver la versión actual.",
+                {"updated_at": self.updated_at.isoformat()},
+            )

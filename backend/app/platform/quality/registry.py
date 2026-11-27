@@ -12,8 +12,14 @@ from dataclasses import dataclass
 from sqlalchemy.orm import Session
 
 # Where the correction is made, when that screen exists: the frontend turns it into a link with the safe ids the API
-# returns (the mapping, the import job). None: there is no screen for it yet, the action text says so.
-FIXES = ("mapping", "import")
+# returns (the mapping, the import job). `masters`: the module's master screen (F1.7), at the path its `fix_path`
+# builds from the issue's own references. None: there is no screen for it yet, the action text says so.
+FIXES = ("mapping", "import", "masters")
+
+# The screen path of the exact thing to correct (`/comercial/datos/maestros/zonas/7`), from the issue's entity id and
+# dedupe key; None when the issue does not say which one. Declared by the owner module: the platform never knows its
+# screens.
+FixPath = Callable[[int | None, str], str | None]
 
 
 @dataclass(frozen=True)
@@ -38,10 +44,19 @@ class QualityCodeSpec:
     fix: str | None = None  # one of FIXES
     # Entity type of the mapping behind the issue, to find it from `external_ref` when the issue does not carry its id.
     mapping_entity_type: str | None = None
+    fix_path: FixPath | None = None  # required when fix is `masters`
 
     def __post_init__(self) -> None:
         if self.fix is not None and self.fix not in FIXES:
             raise ValueError(f"Unknown quality fix {self.fix} for {self.code}")
+        if (self.fix == "masters") != (self.fix_path is not None):
+            raise ValueError(f"A masters fix needs its fix_path, and only it has one: {self.code}")
+
+    def fix_href(self, entity_id: int | None, dedupe_key: str) -> str | None:
+        if self.fix_path is None:
+            return None
+        path = self.fix_path(entity_id, dedupe_key)
+        return path if path is not None and path.startswith("/") and "//" not in path else None
 
 
 # Names what an issue's entity is, in business words and without PII («Zona RUTA 01»), for a page of issues at once.

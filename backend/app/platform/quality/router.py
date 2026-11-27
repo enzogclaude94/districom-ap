@@ -66,6 +66,7 @@ def _item(view: review.IssueView) -> IssueOut:
         source=IssueSourceOut(**vars(view.source)),
         mapping_id=view.mapping_id,
         fix=spec.fix if spec else None,
+        fix_href=spec.fix_href(issue.entity_id, issue.dedupe_key) if spec else None,
         action=spec.action if spec else "",
         resolved_at=issue.resolved_at,
         resolved_by_name=view.resolved_by_name,

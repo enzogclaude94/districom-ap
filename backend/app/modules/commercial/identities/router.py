@@ -35,6 +35,7 @@ from app.modules.commercial.identities.schemas import (
     MappingSummaryOut,
     ResolutionOut,
 )
+from app.modules.commercial.masters import customers as master_customers
 from app.platform.auth.access import has_module_access, require_module_access
 from app.platform.auth.deps import DbSession
 from app.platform.auth.models import User
@@ -52,12 +53,18 @@ Operator = Annotated[User, Depends(require_module_access("commercial", "operator
 Admin = Annotated[User, Depends(require_module_access("commercial", "admin"))]
 
 
-def _customer(customer: Customer, user: User) -> CustomerContactOut | CustomerOut:
+def _customer(
+    customer: Customer, user: User, known: master_customers.Current | None = None
+) -> CustomerContactOut | CustomerOut:
     """The one projection of a customer: CUIT, address and phone only for an operator or admin of the module. A
-    viewer's response does not carry those keys at all (not masked, not null)."""
-    if has_module_access(user, "commercial", "operator"):
-        return CustomerContactOut.model_validate(customer)
-    return CustomerOut.model_validate(customer)
+    viewer's response does not carry those keys at all (not masked, not null). `known`: its code, zone and seller."""
+    schema = CustomerContactOut if has_module_access(user, "commercial", "operator") else CustomerOut
+    out = schema.model_validate(customer)
+    if known is not None:
+        out = out.model_copy(
+            update={"store_sys_code": known.store_sys_code, "zone": known.zone, "salesperson": known.salesperson}
+        )
+    return out
 
 
 @router.get("/customers", response_model=CustomerPage, summary="Clientes")
@@ -66,11 +73,35 @@ def list_customers(
     user: Viewer,
     q: Annotated[str | None, Query(max_length=100)] = None,
     include_inactive: bool = False,
+    active: Annotated[
+        bool | None, Query(description="Solo activos o solo inactivos; decide sobre include_inactive")
+    ] = None,
+    is_generic: bool | None = None,
+    zone_id: Annotated[int | None, Query(description="Zona vigente")] = None,
+    salesperson_id: Annotated[int | None, Query(description="Vendedor vigente (empleado)")] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> CustomerPage:
-    rows, total = customers.search(db, q=q, include_inactive=include_inactive, limit=limit, offset=offset)
-    return CustomerPage(items=[_customer(r, user) for r in rows], total=total)
+    """By name or STORE SYS code (exact), paginated in the database, with each customer's code, zone and seller in
+    force (F1.7)."""
+    within = []
+    if zone_id is not None:
+        within.append(master_customers.in_zone(zone_id))
+    if salesperson_id is not None:
+        within.append(master_customers.with_salesperson(salesperson_id))
+    rows, total = customers.search(
+        db,
+        q=q,
+        include_inactive=include_inactive,
+        limit=limit,
+        offset=offset,
+        active=active,
+        is_generic=is_generic,
+        also_matching=master_customers.by_code(db, q),
+        within=within,
+    )
+    known = master_customers.current(db, rows)
+    return CustomerPage(items=[_customer(r, user, known.get(r.id)) for r in rows], total=total)
 
 
 @router.get(
@@ -79,7 +110,8 @@ def list_customers(
     summary="Cliente (CUIT, dirección y teléfono solo para operator o admin)",
 )
 def get_customer(db: DbSession, user: Viewer, customer_id: int) -> CustomerContactOut | CustomerOut:
-    return _customer(customers.get(db, customer_id), user)
+    customer = customers.get(db, customer_id)
+    return _customer(customer, user, master_customers.current(db, [customer]).get(customer.id))
 
 
 @router.patch(
@@ -87,9 +119,18 @@ def get_customer(db: DbSession, user: Viewer, customer_id: int) -> CustomerConta
 )
 def update_customer(db: DbSession, user: Admin, customer_id: int, body: CustomerFlagsIn) -> CustomerContactOut:
     customer = customers.set_flags(
-        db, user, customer_id, is_generic=body.is_generic, active=body.active, reason=body.reason
+        db,
+        user,
+        customer_id,
+        is_generic=body.is_generic,
+        active=body.active,
+        reason=body.reason,
+        expected_updated_at=body.expected_updated_at,
     )
-    return CustomerContactOut.model_validate(customer)
+    known = master_customers.current(db, [customer]).get(customer.id)
+    out = _customer(customer, user, known)
+    assert isinstance(out, CustomerContactOut)  # an admin is an operator too
+    return out
 
 
 def _targets_out(found: dict[int, targets.Target], ids: list[int]) -> list[LinkTargetOut]:

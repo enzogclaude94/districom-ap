@@ -558,7 +558,7 @@ Cómo se abre, se cuenta y se cierra cada código, y la pantalla Calidad: §7.1.
 - Un issue cerrado **nunca se reabre**. Si la misma condición vuelve, se abre una fila nueva con la misma `(code, dedupe_key)`. La cerrada conserva su nota y su historia. `ignored` no es una lista negra: no suprime ocurrencias futuras.
 - Ni la API ni la pantalla borran issues. Una decisión manual no cambia ningún dato de negocio, y la severidad no se edita.
 
-**Cada código declara su presentación** en su `QualityCodeSpec`: grupo de negocio («Clientes», «Vendedores y preventistas», «Artículos», «Zonas», «Comprobantes», «AXUM», «Importaciones»), descripción, acción recomendada, cuándo se cierra solo y dónde se corrige (`fix`: `mapping`, `import` o ninguno). La pantalla nunca ramifica por código. Para nombrar lo afectado, el módulo registra un `QualitySubjectSpec` por `entity_type` («Artículo 123 · AGUA 500», «Zona RUTA 03»).
+**Cada código declara su presentación** en su `QualityCodeSpec`: grupo de negocio («Clientes», «Vendedores y preventistas», «Artículos», «Zonas», «Comprobantes», «AXUM», «Importaciones»), descripción, acción recomendada, cuándo se cierra solo y dónde se corrige (`fix`: `mapping`, `import`, `masters` o ninguno; con `masters`, el módulo declara `fix_path`, que arma la ruta del registro exacto en Maestros desde el `entity_id` o el `dedupe_key`, y la API la devuelve como `fix_href`). La pantalla nunca ramifica por código. Para nombrar lo afectado, el módulo registra un `QualitySubjectSpec` por `entity_type` («Artículo 123 · AGUA 500», «Zona RUTA 03»).
 
 **Cierre automático:**
 
@@ -622,7 +622,7 @@ Los códigos de Comercial llevan el prefijo `commercial.`. Ningún cierre ocurre
 - El detalle dice qué pasó, de dónde vino (enlace a la importación) y cómo se corrige:
   - enlace al mapping exacto cuando existe, a Mapeos cuando todavía no;
   - a la importación para `fix=import`;
-  - sin pantalla de edición para zonas y categorías, que llegan con Maestros.
+  - al registro exacto en Maestros para `fix=masters` (F1.7, §7.2). Calidad no edita nada.
 - El detalle de una importación enlaza a sus problemas (`?job_id=`).
 - No resalta la fila del staging: se muestra «fila N» con enlace a la importación. El deep‑link o filtro por `row_id` o número de fila queda para F1.8 (D3).
 
@@ -632,6 +632,60 @@ Los códigos de Comercial llevan el prefijo `commercial.`. Ningún cierre ocurre
 - el resumen, una sola consulta agrupada de 3 ms.
 
 Con esa base, `EXPLAIN ANALYZE` muestra un recorrido secuencial de 2 a 3 ms. Ningún índice nuevo lo mejora, porque los abiertos son la mayoría de las filas; los filtros por código y por job ya usan `(status, code)` y `(job_id)`. F1.6 no agrega migración.
+
+### 7.2 Maestros (F1.7)
+
+«Calidad diagnostica. Maestros corrige.» La pantalla `/comercial/datos/maestros` expone y organiza lo que ya existía: no hay maestros, mappings ni importadores nuevos, ni migración.
+
+**Qué se corrige desde Maestros y qué issue cierra** (siempre por el servicio existente, que ya cerraba el issue):
+
+| Código | Enlace desde Calidad | Corrección |
+|---|---|---|
+| `product.without_category` | `/comercial/datos/maestros/productos/{entity_id}` | un admin asigna la categoría (`set_canonical`) |
+| `zone.unconfigured` | `/comercial/datos/maestros/zonas/{entity_id}` | un admin configura la zona (`configure_zone`) |
+| `document.unclassified_type` | `/comercial/datos/maestros/comprobantes?tipo={entity_id}` | un admin clasifica el tipo |
+| `no_purchase.reason_unmapped` | `/comercial/datos/maestros/motivos?motivo={id de reason:{id}}` | un admin le asigna categoría |
+| `product.prices_not_loaded` | `/comercial/datos/maestros/listas` | un admin elige la lista del maestro; se cierra con el próximo maestro |
+
+Los demás códigos siguen como estaban: los de clientes los corrige el maestro de STORE SYS; los de vendedores y clientes AXUM, Mapeos.
+
+**Dueños y límites:**
+- Clientes: `public.customers` (plataforma). Comercial compone su código STORE SYS (mapping confirmado), su zona y su vendedor vigentes y su historia, sin moverlos de dueño. Nombre, razón social, CUIT, dirección, teléfono, zona y vendedor son del maestro; un admin solo cambia genérico y activo, con motivo. No se crean clientes ni se editan asignaciones.
+- Productos: código, descripción y precios son de STORE SYS; un admin cambia categoría, tipo, familia, elegibilidad y activo. No se crean productos.
+- Zonas: una regla nueva o modificada solo afecta zonas que aparecen después; no hay «aplicar a todas». Configurar una zona no reasigna clientes.
+- Vendedores: `public.employees` con la función `commercial.salesperson` más sus mappings `employee` STORE SYS `seller` y AXUM `salesperson`. Los códigos se deciden en Mapeos; las personas, en Empleados. Nunca se escribe `employees.external_store_id`.
+- Listas: el número es la identidad; no se inventan listas por ausencia. Cambiar la lista del maestro de artículos se aplica desde el próximo maestro.
+
+**Privacidad:** se mantiene la de F1.2: un viewer no recibe las claves `tax_id`, `address` ni `phone` (ni en el cliente, ni en la historia). Código STORE SYS, zona y vendedor no son PII y los ve cualquier rol del módulo. Nada de eso va a logs ni a auditoría.
+
+**Concurrencia:** cada edición de admin bloquea la fila (`FOR UPDATE`, como antes) y acepta `expected_updated_at`, el `updated_at` que leyó la pantalla. Si otro guardó en el medio responde 409 `changed_meanwhile` con el `updated_at` actual y no pisa nada. Sin ese campo (clientes viejos) rige solo el bloqueo. Las salidas de zonas, reglas, listas, categorías, familias, tipos, categorías de motivo y motivos suman `updated_at`.
+
+**API** (aditiva, `/api/v1/commercial`):
+
+| Endpoint | Cambio |
+|---|---|
+| `GET /customers` | filtros `active`, `is_generic`, `zone_id`, `salesperson_id`; `q` también busca el código STORE SYS exacto; cada cliente trae `store_sys_code`, `zone` y `salesperson` |
+| `GET /customers/{id}/history` | nuevo: códigos vinculados, historia de zona y de vendedor (solo lectura) |
+| `GET /salespeople` | nuevo: empleados con la función o con un código vinculado, sus códigos y clientes vigentes, y los códigos de vendedor sin vincular |
+| `GET /products` | filtros `has_category` y `active`; cada producto trae `master_price`, su precio de hoy en la lista del maestro |
+| `PATCH /product-categories/{id}` | acepta `parent_id` (debe existir, sin ciclos) |
+| ediciones de admin existentes | aceptan `expected_updated_at`; las que no pedían motivo ahora lo exigen (D1, abajo) |
+
+**Motivo (D1, Enzo 2026-11-27):** modificar una configuración o decisión existente exige motivo; crear no.
+- **Exigen motivo:** las ediciones de regla de zona, lista de precios, categoría de producto, familia y categoría de motivo de no compra, y asignar o cambiar la categoría de un motivo (`PATCH` y `PUT …/category`).
+- **Cómo se valida:**
+  - el schema lo pide con `min_length=1`;
+  - el servicio lo limpia y rechaza el que solo tiene espacios, con 422 `reason_required`;
+  - una edición sin motivo no cambia nada.
+- **Auditoría:** el motivo queda en `after.reason` del evento existente, como antes. Nunca va a logs.
+- **Ya lo exigían y siguen igual:** cliente, producto, configuración de zona, tipo de comprobante y lista del maestro de artículos.
+- **Altas sin motivo:** crear categoría, familia, lista, regla o categoría de motivo no lo pide. Quedan auditadas como `created`, y los formularios de alta no tienen el campo.
+
+**Datos reales** (copias locales, no commiteadas):
+- **Clientes:** el maestro tiene 820. Los ~408 son los códigos de cliente que aparecen en las ventas de octubre (§ ventas), no el tamaño del maestro.
+- **Productos:** son 281 y los 281 están sin categoría, porque el export real no trae rubro. Se clasifican a mano desde Maestros hasta que haya una fuente explícita.
+
+**Rendimiento** (copia descartable con 20.820 clientes sintéticos): primera página de clientes con código, zona y vendedor 10 ms; offset 20.000, 14 ms; búsqueda por nombre o código 16–17 ms; filtro por zona 13 ms; historia 4 ms; vendedores 10 ms. Sin índices nuevos.
 
 ## 8. Permisos (D‑I)
 

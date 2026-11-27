@@ -20,7 +20,7 @@ class QualityCodeOut(BaseModel):
     description: str
     action: str
     closes_when: str  # empty: only a person closes it
-    fix: str | None  # mapping, import or None (no screen yet)
+    fix: str | None  # mapping, import, masters or None (no screen yet)
 
 
 class IssueSourceOut(BaseModel):
@@ -46,6 +46,8 @@ class IssueOut(BaseModel):
     source: IssueSourceOut
     mapping_id: int | None
     fix: str | None
+    # With fix `masters`: the path of the exact record to correct, built by the owner module (F1.7); else null.
+    fix_href: str | None = None
     action: str
     resolved_at: datetime | None
     resolved_by_name: str | None

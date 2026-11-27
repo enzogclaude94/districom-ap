@@ -4,6 +4,26 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Added — F1.7: Maestros (en revisión)
+- **Pantalla Comercial › Datos › Maestros** (`/comercial/datos/maestros`), un solo módulo con pestañas: Clientes, Productos, Categorías y familias, Zonas (con sus reglas), Vendedores, Listas de precios, Tipos de comprobante y Motivos de no compra. Datos queda con Importaciones, Mapeos, Calidad y Maestros.
+  - Viewer y operator leen; un admin edita con los servicios existentes, siempre con motivo. Los errores 409 y 422 quedan en el diálogo.
+  - Clientes: búsqueda por nombre o código STORE SYS, filtros por estado, genérico, zona y vendedor vigentes, paginados en el backend; el detalle muestra códigos vinculados (con enlace a Mapeos) e historia de zona y vendedor, sin edición. Un admin solo cambia genérico y activo.
+  - Productos: filtros por categoría, familia, con o sin categoría, elegibilidad y estado; precio de hoy en la lista del maestro; historia de precios por lista. Un admin clasifica.
+  - Vendedores: empleados con la función Preventista o con un código vinculado, sus códigos y sus clientes vigentes, y los códigos sin vincular con enlace a Mapeos. Las personas se editan en Empleados.
+- **Calidad enlaza al registro exacto en Maestros** (`fix=masters`, `fix_href`) para producto sin categoría, zona sin configurar, tipo de comprobante sin clasificar, motivo sin categoría y precios sin lista. Al corregir, el issue se cierra por su ciclo de vida existente (`docs/IMPORTS.md §7.2`).
+- **API aditiva:** `GET /commercial/customers` con filtros y código, zona y vendedor vigentes; `GET /commercial/customers/{id}/history`; `GET /commercial/salespeople`; `GET /commercial/products` con `has_category`, `active` y `master_price`; `parent_id` en `PATCH /commercial/product-categories/{id}`.
+- **Control de versión en las ediciones de admin:** aceptan `expected_updated_at`; si otro guardó en el medio, 409 `changed_meanwhile` en vez de pisar.
+- Sin migración. Medido con 20.820 clientes sintéticos: todas las lecturas por debajo de 20 ms, sin índices nuevos.
+- **Motivo obligatorio también en la API al modificar algo existente** (D1, Enzo 2026-11-27). Aplica a regla de zona, lista de precios, categoría de producto, familia, categoría de motivo y la categoría de un motivo.
+  - Sin motivo, vacío o solo con espacios: 422, sin cambios.
+  - El motivo queda en la auditoría del evento existente.
+  - Crear sigue sin pedir motivo (D3).
+  - Cambio de contrato: un consumidor de la API que editaba sin `reason` ahora recibe 422. La pantalla ya lo enviaba siempre.
+- **Datos reales:** el maestro de clientes tiene 820 (los ~408 son los clientes con ventas en octubre). Los 281 productos están sin categoría porque el export no trae rubro; se clasifican en Maestros.
+
+### Changed — F1.6 cerrada
+- F1.6 (calidad de datos y pantalla Calidad) aprobada y mergeada (PR #91, 2026-11-26).
+
 ### Added — Servidor: W2‑C6, integración de los backups (PR #94, merge `7632a2c`, 2026-11-26; DONE a nivel de implementación y CI, validación física PENDIENTE)
 - **Archivado de WAL** del servicio de PostgreSQL 17 a `repo1`, con los `archive_command` y `restore_command` de W2‑A (`districom-archive.conf`, que escribe `tasks install`; `archive_timeout = 300`). Un clúster sin las tareas instaladas no archiva.
 - **Rol `districom_backup`** en `database init`: `REPLICATION` y `pg_read_all_data`, sin superusuario ni propiedad. Su contraseña queda en `config\backup-db.secret`.
@@ -22,7 +42,7 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
   - C6‑AB, C6‑R, C6‑RQ y C6‑U en cualquier plataforma;
   - C6‑1 a C6‑7, C6‑AB y C6‑I en el nuevo job «Windows backups (W2-C6)».
 
-### Added — F1.6: calidad de datos completa y pantalla Calidad (en revisión)
+### Added — F1.6: calidad de datos completa y pantalla Calidad
 - **Pantalla Comercial › Datos › Calidad** (`/comercial/datos/calidad`). Datos queda con Importaciones, Mapeos y Calidad.
   - **Cola:** tarjetas que cuentan problemas y ocurrencias por separado (errores, advertencias e informativos abiertos, resueltos, ignorados). Filtros del lado del servidor por estado, severidad, grupo de negocio, tipo, fechas, importación y palabras del tipo. Primero los errores y, dentro de cada severidad, el más antiguo.
   - **Detalle:** qué pasó, a qué afecta, ocurrencias, primera y última vez, origen con enlace a la importación y cómo se corrige. Enlaza al mapping exacto o a la importación; no hay mini pantallas de edición, y zonas y categorías llegan con Maestros. Si está cerrado, quién, cuándo y con qué nota, o «se resolvió solo».

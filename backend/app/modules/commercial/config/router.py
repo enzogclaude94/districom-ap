@@ -58,6 +58,7 @@ def _zone(db: DbSession, zone: Zone) -> ZoneOut:
         configured_by=zone.configured_by,
         configured_at=zone.configured_at,
         created_at=zone.created_at,
+        updated_at=zone.updated_at,
     )
 
 
@@ -89,6 +90,7 @@ def configure_zone(db: DbSession, user: Admin, zone_id: int, body: ZoneConfigura
         display_name=body.display_name,
         active=body.active,
         reason=body.reason,
+        expected_updated_at=body.expected_updated_at,
     )
     return _zone_detail(db, zone)
 
@@ -217,7 +219,15 @@ def create_reason_category(db: DbSession, user: Admin, body: ReasonCategoryIn) -
 def update_reason_category(
     db: DbSession, user: Admin, category_id: int, body: ReasonCategoryPatch
 ) -> ReasonCategoryOut:
-    row = service.update_reason_category(db, user, category_id, name=body.name, active=body.active)
+    row = service.update_reason_category(
+        db,
+        user,
+        category_id,
+        name=body.name,
+        active=body.active,
+        reason=body.reason,
+        expected_updated_at=body.expected_updated_at,
+    )
     return ReasonCategoryOut.model_validate(row)
 
 
@@ -228,5 +238,7 @@ def list_reasons(db: DbSession, _: Viewer) -> list[ReasonMappingOut]:
 
 @router.put("/no-purchase-reasons/{mapping_id}/category", response_model=ReasonMappingOut, summary="Categorizar motivo")
 def set_reason_category(db: DbSession, user: Admin, mapping_id: int, body: ReasonMappingIn) -> ReasonMappingOut:
-    row = service.set_reason_category(db, user, mapping_id, body.category_id, reason=body.reason)
+    row = service.set_reason_category(
+        db, user, mapping_id, body.category_id, reason=body.reason, expected_updated_at=body.expected_updated_at
+    )
     return ReasonMappingOut.model_validate(row)
