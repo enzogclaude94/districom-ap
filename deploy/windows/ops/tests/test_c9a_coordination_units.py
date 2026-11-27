@@ -533,19 +533,49 @@ def test_the_supervisor_dying_while_starting_fails_services_start_and_frees_the_
     OperationLock(scm.install.layout.state, "after").acquire().release()
 
 
+@pytest.fixture
+def decisions(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Every restart decision of the supervisor, as it was made: ``""`` allowed, otherwise why not. The waits of
+    C9A-12 are on these decisions (observable), never on a fixed time (the race of PR #95, 2026-11-26)."""
+    made: list[str] = []
+    real = services._pg_restart_allowed
+
+    def recorded(install: Install) -> tuple[OperationLock | None, str]:
+        lock, why = real(install)
+        made.append(why)
+        return lock, why
+
+    monkeypatch.setattr(services, "_pg_restart_allowed", recorded)
+    return made
+
+
+def declined(made: list[str], since: int, cause: str, times: int = 10) -> Callable[[], bool]:
+    """At least ``times`` decisions after ``since`` held the restart back for ``cause``."""
+    return lambda: sum(1 for why in made[since:] if cause in why) >= times
+
+
 @pytest.mark.criterion("C9A-12")
-def test_postgresql_is_not_restarted_while_the_lock_is_held_or_a_window_is_open(scm: SCM) -> None:
+def test_postgresql_is_not_restarted_while_the_lock_is_held_or_a_window_is_open(scm: SCM, decisions: list[str]) -> None:
     start(scm)
     starts = scm.pg_starts
-    lock = OperationLock(scm.install.layout.state, "day_close").acquire()
+    state = scm.install.layout.state
+    # The supervisor may still hold the lock for its own start for a moment: a bounded wait, like any operation.
+    lock = OperationLock(state, "day_close").acquire(timeout=5, poll_seconds=0.01)
     scm.states[services.PG] = State.STOPPED  # stopped on purpose by the operation
-    time.sleep(0.3)
+    wait(declined(decisions, 0, "holds the operations lock"))  # the supervisor saw it and held back, repeatedly
     assert scm.states[services.PG] is State.STOPPED
+    assert scm.pg_starts == starts
     op_id = window(scm).open(Kind.DAY_CLOSE, "cierre", lock)
     lock.release()
-    time.sleep(0.3)
+    seen = len(decisions)
+    wait(declined(decisions, seen, "maintenance"))  # the lock is free now: the open window holds it back
     assert scm.states[services.PG] is State.STOPPED, "restarted with a window open"
-    window(scm).close(op_id)
+    assert scm.pg_starts == starts
+    assert "" not in decisions, "a restart was allowed while the lock or the window stood"
+    # The close takes the lock like any operation, waiting a bounded time while the supervisor polls it (100 Hz
+    # here): the fixture's 0.2 s gave it two attempts, which the supervisor's own polls could both take.
+    with OperationLock(state, "day_close").acquire(timeout=5, poll_seconds=0.01) as closing:
+        window(scm).close(op_id, lock=closing)
     wait(lambda: scm.states[services.PG] is State.RUNNING)  # an unexpected stop, nothing in the way: restarted
     assert scm.pg_starts == starts + 1
 
@@ -553,7 +583,7 @@ def test_postgresql_is_not_restarted_while_the_lock_is_held_or_a_window_is_open(
 @pytest.mark.criterion("C9A-12")
 @pytest.mark.parametrize("unsafe", ["incomplete", "uncertain"])
 def test_postgresql_is_not_restarted_after_an_operation_that_may_have_stopped_it_on_purpose(
-    scm: SCM, unsafe: str, caplog: pytest.LogCaptureFixture
+    scm: SCM, unsafe: str, caplog: pytest.LogCaptureFixture, decisions: list[str]
 ) -> None:
     """No ``maintenance.json``, the lock free, the supervisor still watching, PostgreSQL stopped, and the record
     shows a critical operation without end (it may have stopped PostgreSQL itself and died) or one that cannot be
@@ -569,8 +599,10 @@ def test_postgresql_is_not_restarted_after_an_operation_that_may_have_stopped_it
             f.write('{"no": "válido"}\n')
     caplog.set_level("WARNING", logger=services.log.name)
     scm.states[services.PG] = State.STOPPED
-    time.sleep(0.3)  # about thirty polls of the supervisor
+    cause = "has no end" if unsafe == "incomplete" else "invalid line"
+    wait(declined(decisions, 0, cause, times=30))  # thirty polls held back by the record, observed
     assert scm.states[services.PG] is State.STOPPED, "restarted with an operation that may have stopped it"
+    assert "" not in decisions
     assert scm.pg_starts == starts
     assert phase_is(scm, "running"), "the supervisor kept watching"
     held = [r for r in caplog.records if r.getMessage() == "postgresql_not_restarted"]
