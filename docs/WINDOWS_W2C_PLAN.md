@@ -253,6 +253,8 @@ Ajustes de la revisión 1:
 
 ### C6. Integración de los backups de W2‑A
 
+**Estado:** DONE a nivel de implementación y CI (PR #94, merge `7632a2c`, aprobada por Enzo el 2026-11-26). **Riesgos pendientes (Enzo, 2026-11-26):** la copia externa queda pendiente de verificación y restauración real (C7); las claves de cifrado, de resguardo fuera del servidor; los pedidos de cancelación colgados (un solicitante vivo pero colgado bloquea las tareas: riesgo aceptado, C8 debe detectarlo y alertar **sin borrar automáticamente pedidos activos**); la verificación del WAL durante el cierre (C10); el rendimiento real de los backups en el servidor previsto; y las validaciones de Windows 11 Pro, LAN, discos, reinicios y cortes de energía. **C6 no es una garantía de recuperación completa** (C7, C13).
+
 1. **Objetivo:** llevar la prueba de concepto de W2‑A a la operación:
    - `archive_command` y `restore_command` configurados en el PostgreSQL de C2;
    - **Programador de tareas** con la cuenta de backups:
