@@ -278,7 +278,8 @@ def test_category_defaults_never_rewrite_classified_products(sign_in, world: dic
     assert patched.status_code == 200, patched.text
     assert client.get(f"{API}/products/{product_id}").json()["analytics_eligible"] is True
     stale = client.patch(
-        f"{API}/product-categories/{created['id']}", json={"name": "X", "expected_updated_at": created["updated_at"]}
+        f"{API}/product-categories/{created['id']}",
+        json={"name": "X", "reason": "Otro", "expected_updated_at": created["updated_at"]},
     )
     assert stale.status_code == 409
 
@@ -292,10 +293,20 @@ def test_a_category_parent_must_exist_and_never_loop(sign_in, world: dict[str, A
         f"{API}/product-categories",
         json={"code": "HIJA", "name": "Hija", "default_analytics_eligible": True, "parent_id": parent["id"]},
     ).json()
-    loop = client.patch(f"{API}/product-categories/{parent['id']}", json={"parent_id": child["id"]})
+    loop = client.patch(f"{API}/product-categories/{parent['id']}", json={"parent_id": child["id"], "reason": "Ciclo"})
     assert (loop.status_code, loop.json()["code"]) == (422, "invalid_parent_category")
-    assert client.patch(f"{API}/product-categories/{child['id']}", json={"parent_id": 999999}).status_code == 422
-    assert client.patch(f"{API}/product-categories/{child['id']}", json={"parent_id": None}).json()["parent_id"] is None
+    assert (
+        client.patch(
+            f"{API}/product-categories/{child['id']}", json={"parent_id": 999999, "reason": "Inexistente"}
+        ).status_code
+        == 422
+    )
+    assert (
+        client.patch(f"{API}/product-categories/{child['id']}", json={"parent_id": None, "reason": "Sin padre"}).json()[
+            "parent_id"
+        ]
+        is None
+    )
 
 
 def test_families_are_listed_created_and_edited_by_an_admin(sign_in, world: dict[str, Any], db: Session) -> None:  # type: ignore[no-untyped-def]
@@ -309,7 +320,8 @@ def test_families_are_listed_created_and_edited_by_an_admin(sign_in, world: dict
     )
     assert edited.status_code == 200, edited.text
     stale = client.patch(
-        f"{API}/product-families/{family['id']}", json={"active": False, "expected_updated_at": family["updated_at"]}
+        f"{API}/product-families/{family['id']}",
+        json={"active": False, "reason": "Otro", "expected_updated_at": family["updated_at"]},
     )
     assert stale.status_code == 409
     audit = db.scalar(
@@ -375,7 +387,8 @@ def test_zone_rules_are_edited_with_reason_and_version(sign_in, world: dict[str,
     assert edited.status_code == 200, edited.text
     assert {z["source_name"]: z["weekdays"] for z in items(client, "/zones")} == before  # existing zones untouched
     stale = client.patch(
-        f"{API}/zone-rules/{rule['id']}", json={"active": False, "expected_updated_at": rule["updated_at"]}
+        f"{API}/zone-rules/{rule['id']}",
+        json={"active": False, "reason": "Otro", "expected_updated_at": rule["updated_at"]},
     )
     assert stale.status_code == 409
     audit = db.scalar(
@@ -436,7 +449,8 @@ def test_price_lists_known_ones_and_the_articles_master_list(sign_in, world: dic
     )
     assert edited.status_code == 200, edited.text
     stale = client.patch(
-        f"{API}/price-lists/{first['id']}", json={"active": False, "expected_updated_at": first["updated_at"]}
+        f"{API}/price-lists/{first['id']}",
+        json={"active": False, "reason": "Otro", "expected_updated_at": first["updated_at"]},
     )
     assert stale.status_code == 409
     assert client.put(f"{API}/price-lists/articles-master", json={"list_number": 2, "reason": ""}).status_code == 422
@@ -468,7 +482,7 @@ def test_no_purchase_reasons_get_a_category_with_version(sign_in, world: dict[st
     assert read["category_id"] is None
     stale = client.put(
         f"{API}/no-purchase-reasons/{reason.id}/category",
-        json={"category_id": categories[0]["id"], "expected_updated_at": "2000-01-01T00:00:00+00:00"},
+        json={"category_id": categories[0]["id"], "reason": "Otro", "expected_updated_at": "2000-01-01T00:00:00+00:00"},
     )
     assert stale.status_code == 409
     done = client.put(
@@ -487,6 +501,84 @@ def test_no_purchase_reasons_get_a_category_with_version(sign_in, world: dict[st
 
 
 # --- Calidad diagnostica, Maestros corrige ----------------------------------------------------------------------
+
+
+def _editable(client: TestClient, db: Session, kind: str) -> tuple[str, str, str, dict[str, Any], str]:
+    """One existing row of each Maestros edit that did not require a reason before F1.7 D1: its read path, the edit's
+    method and path, a change, and the audit event the edit writes."""
+    if kind == "zone_rule":
+        row = client.post(
+            f"{API}/zone-rules",
+            json={"priority": 91, "pattern": "MOTIVO", "zone_type": "PRESALE", "requires_visit": True, "weekdays": [1]},
+        ).json()
+        return (
+            "/zone-rules",
+            "PATCH",
+            f"/zone-rules/{row['id']}",
+            {"weekdays": [1, 3]},
+            "commercial.config.zone_rule_updated",
+        )
+    if kind == "price_list":
+        row = items(client, "/price-lists")[0]
+        return (
+            "/price-lists",
+            "PATCH",
+            f"/price-lists/{row['id']}",
+            {"name": "Lista editada"},
+            "commercial.config.price_list_updated",
+        )
+    if kind == "category":
+        row = client.post(
+            f"{API}/product-categories", json={"code": "MOTIVO", "name": "Motivo", "default_analytics_eligible": True}
+        ).json()
+        path = f"/product-categories/{row['id']}"
+        return "/product-categories", "PATCH", path, {"name": "Motivo 2"}, "commercial.config.category_updated"
+    if kind == "family":
+        row = client.post(f"{API}/product-families", json={"code": "MOTIVO", "name": "Motivo"}).json()
+        path = f"/product-families/{row['id']}"
+        return "/product-families", "PATCH", path, {"name": "Motivo 2"}, "commercial.catalog.family_updated"
+    if kind == "reason_category":
+        row = client.post(f"{API}/no-purchase-reason-categories", json={"code": "MOTIVO", "name": "Motivo"}).json()
+        path = f"/no-purchase-reason-categories/{row['id']}"
+        return (
+            "/no-purchase-reason-categories",
+            "PATCH",
+            path,
+            {"name": "Motivo 2"},
+            "commercial.config.no_purchase_category_updated",
+        )
+    reason, _ = config.ensure_reason(db, "AXUM", "MOTIVO OBLIGATORIO")
+    db.commit()
+    category = items(client, "/no-purchase-reason-categories")[0]
+    path = f"/no-purchase-reasons/{reason.id}/category"
+    return (
+        "/no-purchase-reasons",
+        "PUT",
+        path,
+        {"category_id": category["id"]},
+        "commercial.config.no_purchase_reason_mapped",
+    )
+
+
+@pytest.mark.parametrize("kind", ["zone_rule", "price_list", "category", "family", "reason_category", "reason_mapping"])
+def test_every_edit_of_an_existing_master_requires_a_reason(  # type: ignore[no-untyped-def]
+    sign_in, world: dict[str, Any], db: Session, kind: str
+) -> None:
+    """F1.7 D1: modifying an existing configuration or decision needs a reason in the API too, not only on screen. A
+    missing or empty one is refused by the schema, one of only spaces by the service; neither changes anything."""
+    client = sign_in("boss", "admin")
+    read, method, path, change, event = _editable(client, db, kind)
+    before = items(client, read)
+    for body in (change, {**change, "reason": ""}, {**change, "reason": "   "}):
+        refused = client.request(method, f"{API}{path}", json=body)
+        assert refused.status_code == 422, (body, refused.text)
+        assert refused.json()["code"] in ("validation_error", "reason_required")
+    assert client.request(method, f"{API}{path}", json={**change, "reason": "   "}).json()["code"] == "reason_required"
+    assert items(client, read) == before
+    done = client.request(method, f"{API}{path}", json={**change, "reason": "  Pedido   por Enzo "})
+    assert done.status_code == 200, done.text
+    audits = db.scalars(text("SELECT payload::text FROM audit_events WHERE event_type = :e"), {"e": event}).all()
+    assert any('"reason": "Pedido por Enzo"' in a for a in audits)
 
 
 def test_calidad_links_each_fixable_issue_to_its_exact_master(sign_in, world: dict[str, Any], db: Session) -> None:  # type: ignore[no-untyped-def]

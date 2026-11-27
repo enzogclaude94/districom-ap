@@ -669,7 +669,21 @@ Los demás códigos siguen como estaban: los de clientes los corrige el maestro 
 | `GET /salespeople` | nuevo: empleados con la función o con un código vinculado, sus códigos y clientes vigentes, y los códigos de vendedor sin vincular |
 | `GET /products` | filtros `has_category` y `active`; cada producto trae `master_price`, su precio de hoy en la lista del maestro |
 | `PATCH /product-categories/{id}` | acepta `parent_id` (debe existir, sin ciclos) |
-| ediciones de admin existentes | aceptan `expected_updated_at`; las que no pedían motivo aceptan `reason` opcional y lo auditan |
+| ediciones de admin existentes | aceptan `expected_updated_at`; las que no pedían motivo ahora lo exigen (D1, abajo) |
+
+**Motivo (D1, Enzo 2026-11-27):** modificar una configuración o decisión existente exige motivo; crear no.
+- **Exigen motivo:** las ediciones de regla de zona, lista de precios, categoría de producto, familia y categoría de motivo de no compra, y asignar o cambiar la categoría de un motivo (`PATCH` y `PUT …/category`).
+- **Cómo se valida:**
+  - el schema lo pide con `min_length=1`;
+  - el servicio lo limpia y rechaza el que solo tiene espacios, con 422 `reason_required`;
+  - una edición sin motivo no cambia nada.
+- **Auditoría:** el motivo queda en `after.reason` del evento existente, como antes. Nunca va a logs.
+- **Ya lo exigían y siguen igual:** cliente, producto, configuración de zona, tipo de comprobante y lista del maestro de artículos.
+- **Altas sin motivo:** crear categoría, familia, lista, regla o categoría de motivo no lo pide. Quedan auditadas como `created`, y los formularios de alta no tienen el campo.
+
+**Datos reales** (copias locales, no commiteadas):
+- **Clientes:** el maestro tiene 820. Los ~408 son los códigos de cliente que aparecen en las ventas de octubre (§ ventas), no el tamaño del maestro.
+- **Productos:** son 281 y los 281 están sin categoría, porque el export real no trae rubro. Se clasifican a mano desde Maestros hasta que haya una fuente explícita.
 
 **Rendimiento** (copia descartable con 20.820 clientes sintéticos): primera página de clientes con código, zona y vendedor 10 ms; offset 20.000, 14 ms; búsqueda por nombre o código 16–17 ms; filtro por zona 13 ms; historia 4 ms; vendedores 10 ms. Sin índices nuevos.
 

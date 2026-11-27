@@ -170,7 +170,7 @@ def test_manual_eligibility_override_and_category_rules(db: Session, admin, jobs
     db.refresh(product)
     assert (product.analytics_eligible, product.eligibility_origin) == (False, "MANUAL")
     # Changing the category's default never rewrites a product already decided.
-    config.update_category(db, admin, beer.id, {"default_analytics_eligible": False})
+    config.update_category(db, admin, beer.id, {"default_analytics_eligible": False, "reason": "Ya no"})
     service.set_canonical(db, admin, product.id, {"category_id": None}, reason="Sin categoría")
     db.refresh(product)
     assert (product.canonical_category_id, product.category_origin, product.analytics_eligible) == (None, "NONE", False)
@@ -199,7 +199,7 @@ def test_families_are_explicit_never_inferred(db: Session, admin, jobs: list[int
     service.set_canonical(db, admin, product.id, {"family_id": family.id}, reason="Familia Coca")
     db.refresh(product)
     assert product.family_id == family.id
-    service.update_family(db, admin, family.id, {"active": False})
+    service.update_family(db, admin, family.id, {"active": False, "reason": "Discontinuada"})
     assert [f.active for f in service.list_families(db)] == [False]
 
 

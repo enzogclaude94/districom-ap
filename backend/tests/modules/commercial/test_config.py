@@ -62,7 +62,7 @@ def test_seed_is_idempotent_and_never_overwrites_an_edit(db: Session, admin) -> 
     assert (first.reason_categories, first.reason_mappings) == (5, 6)
     assert first.product_categories == 7
     bandera = db.scalars(select(PriceList).where(PriceList.list_number == 5)).one()
-    service.update_price_list(db, admin, bandera.id, {"name": "Bandera (editada)"})
+    service.update_price_list(db, admin, bandera.id, {"name": "Bandera (editada)", "reason": "Renombrada"})
     again = seed_config(db)
     assert again.total() == 0
     db.refresh(bandera)
@@ -86,7 +86,9 @@ def test_confirmed_product_categories_seeded_without_rubro_mappings(db: Session,
     assert db.scalar(select(text("count(*)")).select_from(SourceCategoryMapping)) == 0
     # An admin's edit survives a new seed.
     wines = next(c for c in service.list_categories(db) if c.code == "VINOS")
-    service.update_category(db, admin, wines.id, {"name": "Vinos y espumantes", "default_analytics_eligible": False})
+    service.update_category(
+        db, admin, wines.id, {"name": "Vinos y espumantes", "default_analytics_eligible": False, "reason": "Editada"}
+    )
     assert seed_config(db).total() == 0
     db.refresh(wines)
     assert (wines.name, wines.default_analytics_eligible) == ("Vinos y espumantes", False)
@@ -143,7 +145,7 @@ def test_a_rule_never_changes_an_existing_zone(db: Session, seeded: None, admin)
         db, admin, priority=5, pattern="MISA", zone_type="PRESALE", requires_visit=True, weekdays=[2], description=None
     )
     rule = db.scalars(select(ZoneClassificationRule).where(ZoneClassificationRule.pattern == "LUVI")).one()
-    service.update_rule(db, admin, rule.id, {"weekdays": [2, 4]})
+    service.update_rule(db, admin, rule.id, {"weekdays": [2, 4], "reason": "Nuevos días"})
     db.refresh(misa)
     db.refresh(luvi)
     assert misa.zone_type == "UNCLASSIFIED"
@@ -388,7 +390,7 @@ def test_reasons_seeded_and_new_ones_arrive_without_category(db: Session, seeded
     assert new.category_id is None
     assert service.ensure_reason(db, "AXUM", "  precio  ALTO ")[0].id == new.id
     other = next(c for c in service.list_reason_categories(db) if c.code == "OTRO")
-    service.set_reason_category(db, admin, new.id, other.id, reason=None)
+    service.set_reason_category(db, admin, new.id, other.id, reason="Confirmado")
     row = db.get(NoPurchaseReasonMapping, new.id)
     assert row is not None
     assert row.category_id == other.id

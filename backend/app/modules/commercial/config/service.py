@@ -379,7 +379,7 @@ def update_rule(db: Session, actor: User, rule_id: int, changes: dict[str, Any])
     if rule is None:
         raise AppError(404, "zone_rule_not_found", "Esa regla no existe.")
     rule.ensure_unchanged(changes.pop("expected_updated_at", None))
-    clean_reason = _reason(changes.pop("reason", None), required=False)
+    clean_reason = _reason(changes.pop("reason", None), required=True)
     before = _rule_state(rule)
     zone_type = changes.get("zone_type", rule.zone_type)
     requires_visit = changes.get("requires_visit", rule.requires_visit)
@@ -455,7 +455,7 @@ def update_price_list(db: Session, actor: User, list_id: int, changes: dict[str,
     if row is None:
         raise AppError(404, "price_list_not_found", "Esa lista no existe.")
     row.ensure_unchanged(changes.pop("expected_updated_at", None))
-    clean_reason = _reason(changes.pop("reason", None), required=False)
+    clean_reason = _reason(changes.pop("reason", None), required=True)
     before = _list_state(row)
     if changes.get("kind") is not None:
         row.kind = _choice(changes["kind"], PRICE_LIST_KINDS, "invalid_price_list_kind")
@@ -541,7 +541,7 @@ def update_category(db: Session, actor: User, category_id: int, changes: dict[st
     if row is None:
         raise AppError(404, "category_not_found", "Esa categoría no existe.")
     row.ensure_unchanged(changes.pop("expected_updated_at", None))
-    clean_reason = _reason(changes.pop("reason", None), required=False)
+    clean_reason = _reason(changes.pop("reason", None), required=True)
     before = _category_state(row)
     if changes.get("name") is not None:
         if not (clean_name := _clean(changes["name"])):
@@ -704,7 +704,7 @@ def update_reason_category(
     if row is None:
         raise AppError(404, "reason_category_not_found", "Esa categoría no existe.")
     row.ensure_unchanged(expected_updated_at)
-    clean_reason = _reason(reason, required=False)
+    clean_reason = _reason(reason, required=True)
     before = {"name": row.name, "active": row.active}
     if name is not None:
         if not (clean_name := _clean(name)):
@@ -756,6 +756,7 @@ def set_reason_category(
     if row is None:
         raise AppError(404, "reason_mapping_not_found", "Ese motivo no existe.")
     row.ensure_unchanged(expected_updated_at)
+    clean_reason = _reason(reason, required=True)
     if category_id is not None and db.get(NoPurchaseReasonCategory, category_id) is None:
         raise AppError(422, "invalid_reason_category", "La categoría no existe.")
     before = {"category_id": row.category_id}
@@ -769,7 +770,7 @@ def set_reason_category(
         "mapped",
         row.id,
         before,
-        {"category_id": category_id, "reason": _clean(reason)},
+        {"category_id": category_id, "reason": clean_reason},
     )
     if category_id is not None:  # F1.6: the reason has a category now, its issue's condition is gone
         resolve_open(

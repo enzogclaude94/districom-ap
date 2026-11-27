@@ -2,11 +2,10 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+# Every edit of an existing configuration or decision says why (F1.7 D1); a creation does not need one.
 Reason = Field(min_length=1, max_length=500)
 # The version the screen read (its `updated_at`): a save over a newer version is a 409 `changed_meanwhile` (F1.7).
 Expected = Field(default=None)
-# Optional on edits that never required one (kept compatible); Maestros always sends it and the audit records it.
-OptionalReason = Field(default=None, max_length=500)
 
 
 class ZoneOut(BaseModel):
@@ -82,7 +81,7 @@ class ZoneRulePatch(BaseModel):
     weekdays: list[int] | None = Field(default=None, max_length=7)
     active: bool | None = None
     description: str | None = Field(default=None, max_length=500)
-    reason: str | None = OptionalReason
+    reason: str = Reason
     expected_updated_at: datetime | None = Expected
 
 
@@ -114,7 +113,7 @@ class PriceListPatch(BaseModel):
     commercially_relevant: bool | None = None
     active: bool | None = None
     description: str | None = Field(default=None, max_length=500)
-    reason: str | None = OptionalReason
+    reason: str = Reason
     expected_updated_at: datetime | None = Expected
 
 
@@ -166,7 +165,7 @@ class CategoryPatch(BaseModel):
     sort_order: int | None = None
     active: bool | None = None
     parent_id: int | None = None
-    reason: str | None = OptionalReason
+    reason: str = Reason
     expected_updated_at: datetime | None = Expected
 
 
@@ -211,7 +210,7 @@ class ReasonCategoryIn(BaseModel):
 class ReasonCategoryPatch(BaseModel):
     name: str | None = Field(default=None, max_length=120)
     active: bool | None = None
-    reason: str | None = OptionalReason
+    reason: str = Reason
     expected_updated_at: datetime | None = Expected
 
 
@@ -229,5 +228,5 @@ class ReasonMappingOut(BaseModel):
 
 class ReasonMappingIn(BaseModel):
     category_id: int | None
-    reason: str | None = Field(default=None, max_length=500)
+    reason: str = Reason
     expected_updated_at: datetime | None = Expected

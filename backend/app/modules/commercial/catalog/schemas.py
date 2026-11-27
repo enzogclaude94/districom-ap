@@ -87,7 +87,7 @@ class FamilyPatch(BaseModel):
     name: str | None = Field(default=None, max_length=120)
     description: str | None = Field(default=None, max_length=500)
     active: bool | None = None
-    reason: str | None = Field(default=None, max_length=500)
+    reason: str = Field(min_length=1, max_length=500)  # an edit says why (F1.7 D1)
     expected_updated_at: datetime | None = None
 
 

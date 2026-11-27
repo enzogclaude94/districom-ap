@@ -383,7 +383,10 @@ def update_family(db: Session, actor: User, family_id: int, changes: dict[str, A
     if family is None:
         raise AppError(404, "family_not_found", "Esa familia no existe.")
     family.ensure_unchanged(changes.pop("expected_updated_at", None))
-    clean_reason = " ".join((changes.pop("reason", None) or "").split())[:500] or None
+    clean_reason = " ".join((changes.pop("reason", None) or "").split())
+    if not clean_reason:
+        raise AppError(422, "reason_required", "Indicá el motivo del cambio.")
+    clean_reason = clean_reason[:500]
     before = {"name": family.name, "description": family.description, "active": family.active}
     if changes.get("name") is not None:
         if not (clean := " ".join(changes["name"].split())):
@@ -403,7 +406,7 @@ def update_family(db: Session, actor: User, family_id: int, changes: dict[str, A
             entity_type="commercial.product_family",
             entity_id=family.id,
             before=before,
-            after=after if clean_reason is None else {**after, "reason": clean_reason},
+            after={**after, "reason": clean_reason},
         )
     db.commit()
     db.refresh(family)
