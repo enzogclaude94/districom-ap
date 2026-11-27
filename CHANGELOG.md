@@ -24,7 +24,7 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 ### Changed — F1.6 cerrada
 - F1.6 (calidad de datos y pantalla Calidad) aprobada y mergeada (PR #91, 2026-11-26).
 
-### Added — Servidor: W2‑C6, integración de los backups (en revisión, sin merge)
+### Added — Servidor: W2‑C6, integración de los backups (PR #94, merge `7632a2c`, 2026-11-26; DONE a nivel de implementación y CI, validación física PENDIENTE)
 - **Archivado de WAL** del servicio de PostgreSQL 17 a `repo1`, con los `archive_command` y `restore_command` de W2‑A (`districom-archive.conf`, que escribe `tasks install`; `archive_timeout = 300`). Un clúster sin las tareas instaladas no archiva.
 - **Rol `districom_backup`** en `database init`: `REPLICATION` y `pg_read_all_data`, sin superusuario ni propiedad. Su contraseña queda en `config\backup-db.secret`.
 - **Cinco tareas del Programador de tareas**, cada una como `LocalService` con su propio SID de tarea y sin contraseña: backup base verificado (15:00, dentro de la ventana de 15 a 17), dump cifrado con `rclone crypt` y restaurado en una instancia descartable (13:00), copia externa asíncrona con el atraso registrado (cada hora), retención (03:00) y revisión de huecos (cada hora). Su registro es idempotente (`tasks install`).
