@@ -16,6 +16,7 @@ Python con solo la biblioteca estándar (decisión D1). Reutiliza `districom_bac
 | `safety` | `writes_resume_check`: verificación conjunta y de solo lectura. Dice que sería seguro reactivar escrituras **solo si** la ventana está cerrada, el registro se lee y no tiene líneas inválidas, y no hay operaciones incompletas ni inciertas. Que falte `maintenance.json` no alcanza. C1 no desbloquea nada: **C9 debe consultar esta verificación antes de reactivar la aplicación** |
 | `oplock` | (C9‑A) Bloqueo exclusivo entre operaciones, `state\operations.lock`. Es el bloqueo de archivos del sistema operativo: si el proceso muere, Windows lo libera, y nunca vence. Quien no lo consigue falla enseguida o tras una espera acotada, y nombra al dueño. `operations.lock.json` dice quién lo tiene (operación, proceso, hora), solo para los mensajes. Soltarlo nunca cambia la ventana, el registro ni el resto del estado persistente |
 | `cli` | `districom-ops init`, `check-config`, `maintenance open\|close\|status`, `operations` y `resume-check` |
+| `wal_shutdown` | (C10) Verificación del WAL al apagar y comando de prueba `wal verify-shutdown` |
 
 ## C2: servicios nativos de Windows
 
@@ -209,6 +210,59 @@ Pruebas:
 - los tiempos en el i3‑9100;
 - el resguardo de las claves fuera del servidor;
 - la recuperabilidad completa (C7 y C13).
+
+## C10: verificación del WAL al apagar
+
+`wal_shutdown` es un **verificador** (decisiones D1 a D4 de Enzo, 2026-11-27). Corre solo dentro de la ventana de mantenimiento y del bloqueo de C9‑B **de su propia operación**: diario `blocked`, mismo dueño, mismo `operations.lock` y la base cerrada a conexiones. Se niega si existe un pedido de cancelación vivo de otra operación o una tarea pesada, y mientras trabaja retiene `backup.lock`.
+
+1. **Corte.** En una sola sesión del superusuario sobre `postgres`: `CHECKPOINT`, el punto de restauración `districom-c10-<fecha>-<operación>` y `pg_switch_wal()`. Después del corte **no corre ningún SQL**, porque una sesión nueva lee el catálogo y, con sumas de control, puede escribir WAL.
+2. **Conjunto fijo**, antes del apagado. Va desde el backup base más nuevo de `repo1` hasta el segmento del corte, por la timeline que lee la recuperación, más cada `.history`. Desde el backup base más antiguo se controla la continuidad, por presencia y tamaño.
+3. **repo1.**
+   - Se espera el archivo del segmento del corte.
+   - Cada archivo del conjunto debe estar entero y coincidir por SHA‑256 con el del servidor mientras el servidor lo tenga.
+   - El segmento archivado del corte debe terminar con este punto de restauración y este switch.
+4. **Apagado limpio** (fast, por el servicio).
+5. **`pg_waldump`** lee todo lo posterior al corte, del servidor o de `repo1` si el apagado ya lo archivó y lo borró. Solo se permite una **lista cerrada**:
+   - `XLOG/SWITCH`, que el apagado mismo escribe cuando hubo WAL después del corte;
+   - `XLOG/CHECKPOINT_SHUTDOWN`;
+   - `Standby/RUNNING_XACTS`.
+
+   Cualquier otro registro, `XLOG/FPI_FOR_HINT` incluido, da **FAIL**, con su tipo, LSN y transacción (nunca datos). El último registro debe ser el checkpoint del apagado. Ampliar la lista requiere evidencia y aprobación de Enzo.
+6. **`pg_controldata`:** el estado debe ser «shut down»; el último checkpoint y su redo, ese registro; la timeline, la del corte.
+7. **repo2.**
+   - El push sincrónico corre solo si `repo1` verificó: nunca se envía una copia que no verifica.
+   - Después **se descarga** cada archivo del conjunto del remoto cifrado y se compara por SHA‑256, en tandas.
+   - Ni el éxito de la subida ni los metadatos cuentan como evidencia.
+   - Si el remoto es inalcanzable o no verifica, da FAIL con su motivo. C10 no inventa un modo degradado ni decide el apagado (C11).
+
+Resultados **separados** por chequeo (`cut`, `repo1`, `shutdown`, `wal_after_cut`, `controldata` y `repo2`). Quedan en `state\wal-shutdown\<operación>-<hora>\`, que solo leen los administradores (regla de C3), con este contenido:
+- `result.json`;
+- el conjunto fijo;
+- las salidas de `pg_waldump` y `pg_controldata`;
+- ante un FAIL, el WAL posterior al corte;
+- las copias bajadas de `repo2` que lista la evidencia (el segmento del corte y los `.history`) o que no coincidieron.
+
+**PASS** solo si pasan los seis chequeos. Entonces `evidence` es la evidencia del cierre que verifica C9‑B. PostgreSQL queda **detenido**.
+
+`districom-ops wal verify-shutdown --reason …` es el comando de prueba y lo corre solo un administrador:
+- abre su ventana y su bloqueo;
+- corre C10;
+- vuelve a arrancar PostgreSQL, revierte el bloqueo y cierra la ventana como revertida.
+
+Devuelve 0 con PASS, 1 con FAIL y 2 si no empezó. **Nunca apaga Windows** y no repara un FAIL: el diagnóstico queda.
+
+Pruebas:
+- `tests/test_c10_units.py` (C10‑U), sin PostgreSQL;
+- `backups_tests/test_wal_shutdown_c10.py` (C10‑1 a C10‑10), con el servicio real de PostgreSQL 17.6, `repo1` y un `repo2` cifrado, en el job «Windows backups (W2-C6)». Tiene su propio informe, `w2c10-results`.
+
+**PENDIENTE, nunca PASS:**
+- Windows 11 Pro;
+- discos reales;
+- el bucket real y la duración de la subida y la verificación;
+- un día real de WAL en el i3‑9100;
+- autovacuum real entre el corte y el apagado, que daría FAIL;
+- la recuperabilidad (C7);
+- el cierre de jornada (C11).
 
 ## Regla de logs para C2 a C13
 

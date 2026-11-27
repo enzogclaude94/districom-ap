@@ -539,6 +539,8 @@ jobs:
     # restore test, the off-site copy to a local folder and to an address that refuses connections, and the AB
     # coordination with maintenance and services stop. Same disposable setup as W2-C2 (its first three tests), on a
     # larger virtual backup disk. Real schedule over days, reboots, the real bucket and hardware stay PENDIENTE.
+    # W2-C10 (decision D4, Enzo 2026-11-27) runs here too, after C6 and on the same installation: the WAL at shutdown
+    # verified with the real PostgreSQL 17.6 service, repo1 and the encrypted repo2, with its own report.
     name: Windows backups (W2-C6)
     runs-on: windows-latest
     timeout-minutes: 120
@@ -555,6 +557,7 @@ jobs:
       DISTRICOM_C2_RESULTS: ${{ github.workspace }}/deploy/windows/ops/test-results/setup
       DISTRICOM_C6_OFFSITE: C:\c6-offsite
       DISTRICOM_C6_RESULTS: ${{ github.workspace }}/deploy/windows/ops/test-results
+      DISTRICOM_C10_LAB: C:\c10-lab
     steps:
       - run: git config --global core.autocrlf false
       - uses: actions/checkout@v4
@@ -592,7 +595,7 @@ jobs:
       - name: Stage the release under C:\DistriCom
         working-directory: deploy/windows/ops
         run: uv run python services_tests/stage_release.py "${{ github.workspace }}" "$env:DISTRICOM_C2_ROOT" "$env:DISTRICOM_C2_RELEASE" "${{ env.PYTHON_VERSION }}"
-      - name: Setup (C2 install tests) and C6-1 to C6-7
+      - name: Setup (C2 install tests), C6-1 to C6-7 and C10-1 to C10-10
         working-directory: deploy/windows/ops
         run: >-
           uv run pytest -v -p no:cacheprovider
@@ -600,13 +603,15 @@ jobs:
           services_tests/test_c2_services.py::test_disk_database_and_services_install_idempotently
           services_tests/test_c2_services.py::test_migrations_with_postgresql_alone
           backups_tests
-      - name: W2-C6 results
+      - name: W2-C6 and W2-C10 results
         if: always()
         working-directory: deploy/windows/ops
         run: |
-          if (Test-Path test-results\w2c6-results.md) {
-            Get-Content test-results\w2c6-results.md >> $env:GITHUB_STEP_SUMMARY
-            Get-Content test-results\w2c6-results.md
+          foreach ($report in @("w2c6-results.md", "w2c10-results.md")) {
+            if (Test-Path "test-results\$report") {
+              Get-Content "test-results\$report" >> $env:GITHUB_STEP_SUMMARY
+              Get-Content "test-results\$report"
+            }
           }
       - name: Diagnostics (logs and task records without secrets)
         if: failure()
@@ -619,7 +624,8 @@ jobs:
                             @(Get-ChildItem "$root\state\tasks" -Filter *.json -ErrorAction SilentlyContinue) +
                             @(Get-Item "$root\state\tasks\history.jsonl" -ErrorAction SilentlyContinue) +
                             @(Get-ChildItem "$root\logs\services" -Recurse -Filter *.log -ErrorAction SilentlyContinue) +
-                            @(Get-ChildItem "$root\logs\postgresql" -Filter *.log -ErrorAction SilentlyContinue)) {
+                            @(Get-ChildItem "$root\logs\postgresql" -Filter *.log -ErrorAction SilentlyContinue) +
+                            @(Get-ChildItem "$root\state\wal-shutdown" -Recurse -Include result.json,*.txt -ErrorAction SilentlyContinue)) {
             "===== $($file.FullName)"
             Get-Content $file.FullName -Tail 60
           }
