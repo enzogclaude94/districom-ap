@@ -75,6 +75,10 @@ def incompatible(result: ws.Result) -> set[tuple[str, str]]:
     return {(r["rmgr"], r["type"]) for r in seen}
 
 
+def heap_inserts(found: set[tuple[str, str]]) -> set[str]:
+    return {kind for rmgr, kind in found if rmgr == "Heap" and kind.startswith("INSERT")}
+
+
 def allows_connections() -> bool:
     name = install().database[2]
     return superuser_sql(f"SELECT datallowconn FROM pg_database WHERE datname = '{name}';") == "t"
@@ -133,14 +137,15 @@ def prepared() -> Iterator[None]:
     outcome = wait_result("base_backup", start("base_backup"))
     assert outcome["status"] == "succeeded", outcome
     superuser_sql("CREATE TABLE IF NOT EXISTS c10_late (n int)")
-    # C10-9's table: written now and never read until its test, so its hint bits are still unset then.
+    # The C6 tests created and dropped large tables: vacuum now, so autovacuum has less pending that could write
+    # WAL between a cut and its shutdown (that is a FAIL, rightly: C10-8 isolates itself from it).
+    superuser_sql("VACUUM (ANALYZE)")
+    app_sql("VACUUM (ANALYZE)")
+    # C10-9's table, after the VACUUM (a manual VACUUM ignores autovacuum_enabled and sets the hint bits): written
+    # now and never read until its test, so its hint bits are still unset then.
     superuser_sql("DROP TABLE IF EXISTS c10_fresh")
     superuser_sql("CREATE TABLE c10_fresh (n int, filler text) WITH (autovacuum_enabled = false)")
     superuser_sql("INSERT INTO c10_fresh SELECT g, repeat('x', 100) FROM generate_series(1, 20000) g")
-    # The C6 tests created and dropped large tables: vacuum now, so autovacuum has nothing pending that could
-    # write WAL between a cut and its shutdown (that would be a FAIL, rightly; here it would only be noise).
-    superuser_sql("VACUUM (ANALYZE)")
-    app_sql("VACUUM (ANALYZE)")
     yield
     if not database.ready(install()):
         cli("services", "start", check=False)
@@ -188,12 +193,35 @@ def test_the_evidence_of_a_pass_is_the_one_c9b_verifies_against_the_stopped_clus
     metrics["C10-1 evidencia verificada por C9-B"] = {k: v for k, v in (result.evidence or {}).items() if k != "copies"}
 
 
+@contextmanager
+def autovacuum_off() -> Iterator[None]:
+    """``autovacuum = off`` (``postgresql.auto.conf``: no WAL) with no worker left, and back to the default after
+    the shutdown and restart of the test."""
+    superuser_sql("ALTER SYSTEM SET autovacuum = off")
+    superuser_sql("SELECT pg_reload_conf()")
+    try:
+        wait_until(lambda: superuser_sql("SHOW autovacuum") == "off", 30, "autovacuum is still on")
+        workers = "SELECT count(*) FROM pg_stat_activity WHERE backend_type = 'autovacuum worker'"
+        wait_until(lambda: superuser_sql(workers) == "0", 300, "an autovacuum worker is still running")
+        yield
+    finally:
+        if not database.ready(install()):
+            cli("services", "start", check=False)
+        superuser_sql("ALTER SYSTEM RESET autovacuum")
+        superuser_sql("SELECT pg_reload_conf()")
+        wait_until(lambda: superuser_sql("SHOW autovacuum") == "on", 30, "autovacuum is still off")
+
+
 @pytest.mark.criterion("C10-8")
 def test_the_allowed_list_is_exactly_what_postgresql_17_6_writes_after_the_cut_and_at_shutdown() -> None:
     assert superuser_sql("SHOW server_version").startswith("17.6"), superuser_sql("SHOW server_version")
     # 25 s after the cut: the background writer logs its snapshot (every 15 s after WAL activity), and then the
     # shutdown switches segment (archiving on, WAL since the cut) before its checkpoint.
-    result = run("prueba C10-8", ws.Hooks(after_cut=lambda: time.sleep(25)))
+    # Autovacuum is off for this test only: in the first CI run of C10 a worker vacuumed between the cut and the
+    # shutdown (Heap2/PRUNE_VACUUM_*, Btree/VACUUM, XLOG/FPI_FOR_HINT...) and C10 failed, as it must (D3). That is
+    # a finding for C7, not a reason to widen the list; here the test needs the baseline of PostgreSQL itself.
+    with autovacuum_off():
+        result = run("prueba C10-8", ws.Hooks(after_cut=lambda: time.sleep(25)))
     assert result.passed, summary(result)
     seen = {(r["rmgr"], r["type"]) for r in result.checks["wal_after_cut"]["records"]}
     assert seen == ws.ALLOWED, seen
@@ -212,7 +240,8 @@ def test_the_allowed_list_is_exactly_what_postgresql_17_6_writes_after_the_cut_a
 def test_a_superuser_write_after_the_cut_fails_and_is_named() -> None:
     result = run("prueba C10-2", ws.Hooks(after_cut=lambda: superuser_sql("INSERT INTO c10_late VALUES (2)")))
     assert result.verdict == "FAIL"
-    assert ("Heap", "INSERT") in incompatible(result), summary(result)
+    # The first insert into an empty page is INSERT+INIT in PostgreSQL 17.
+    assert heap_inserts(incompatible(result)), summary(result)
     assert ("Transaction", "COMMIT") in incompatible(result)
     assert any("Heap/INSERT" in p for p in result.checks["wal_after_cut"]["problems"])
     assert result.evidence is None
@@ -253,7 +282,7 @@ def test_a_transaction_opened_before_the_cut_and_committed_after_it_fails() -> N
     assert result.verdict == "FAIL"
     found = incompatible(result)
     assert ("Transaction", "COMMIT") in found, summary(result)
-    assert ("Heap", "INSERT") not in found, "the insert was before the cut"
+    assert not heap_inserts(found), "the insert was before the cut"
     commits = [r for r in result.checks["wal_after_cut"]["by_category"]["incompatible"] if r["type"] == "COMMIT"]
     assert commits[0]["tx"] == xid
     assert superuser_sql("SELECT count(*) FROM c10_late WHERE n = 3") == "1"
@@ -267,7 +296,8 @@ def test_a_read_after_the_cut_writes_fpi_for_hint_and_fails() -> None:
     assert result.verdict == "FAIL", summary(result)
     found = incompatible(result)
     assert ("XLOG", "FPI_FOR_HINT") in found, summary(result)  # a read: hint bits, with data checksums
-    assert not {("Heap", "INSERT"), ("Transaction", "COMMIT")} & found, "a read changed no data"
+    assert not heap_inserts(found), "a read changed no data"
+    assert ("Transaction", "COMMIT") not in found, "a read changed no data"
     back_to_normal()
     metrics["C10-9 lectura después del corte"] = summary(result)
 
@@ -439,7 +469,14 @@ def free_port() -> int:
 class Lab:
     def __init__(self, root: Path) -> None:
         self.root = root
-        self.bin = install().pg_bin("pg_ctl").parent
+        # initdb and pg_ctl, run by an administrator, drop to a restricted token (Administrators deny-only); the
+        # installed runtime is readable only by its services (C3), so they could not load their DLLs from it. The
+        # lab uses its own copy of the same PostgreSQL 17.6.
+        home = install().artifact("postgresql").home(install().runtime)
+        pg = LAB / "pg"
+        if not pg.is_dir():
+            shutil.copytree(home, pg)
+        self.bin = pg / install().pg_bin("pg_ctl").parent.relative_to(home)
         self.repo = init_repo(root / "repo1")
         (root / "remote").mkdir()
         rclone = settings().rclone
