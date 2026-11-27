@@ -12,8 +12,14 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
   - Vendedores: empleados con la función Preventista o con un código vinculado, sus códigos y sus clientes vigentes, y los códigos sin vincular con enlace a Mapeos. Las personas se editan en Empleados.
 - **Calidad enlaza al registro exacto en Maestros** (`fix=masters`, `fix_href`) para producto sin categoría, zona sin configurar, tipo de comprobante sin clasificar, motivo sin categoría y precios sin lista. Al corregir, el issue se cierra por su ciclo de vida existente (`docs/IMPORTS.md §7.2`).
 - **API aditiva:** `GET /commercial/customers` con filtros y código, zona y vendedor vigentes; `GET /commercial/customers/{id}/history`; `GET /commercial/salespeople`; `GET /commercial/products` con `has_category`, `active` y `master_price`; `parent_id` en `PATCH /commercial/product-categories/{id}`.
-- **Control de versión en las ediciones de admin:** aceptan `expected_updated_at`; si otro guardó en el medio, 409 `changed_meanwhile` en vez de pisar. Las ediciones que no pedían motivo aceptan uno opcional y lo auditan.
+- **Control de versión en las ediciones de admin:** aceptan `expected_updated_at`; si otro guardó en el medio, 409 `changed_meanwhile` en vez de pisar.
 - Sin migración. Medido con 20.820 clientes sintéticos: todas las lecturas por debajo de 20 ms, sin índices nuevos.
+- **Motivo obligatorio también en la API al modificar algo existente** (D1, Enzo 2026-11-27). Aplica a regla de zona, lista de precios, categoría de producto, familia, categoría de motivo y la categoría de un motivo.
+  - Sin motivo, vacío o solo con espacios: 422, sin cambios.
+  - El motivo queda en la auditoría del evento existente.
+  - Crear sigue sin pedir motivo (D3).
+  - Cambio de contrato: un consumidor de la API que editaba sin `reason` ahora recibe 422. La pantalla ya lo enviaba siempre.
+- **Datos reales:** el maestro de clientes tiene 820 (los ~408 son los clientes con ventas en octubre). Los 281 productos están sin categoría porque el export no trae rubro; se clasifican en Maestros.
 
 ### Changed — F1.6 cerrada
 - F1.6 (calidad de datos y pantalla Calidad) aprobada y mergeada (PR #91, 2026-11-26).
