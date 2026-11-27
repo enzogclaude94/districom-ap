@@ -169,6 +169,8 @@ def policy(
         Rule(root / "state", ((sid["stack"], MODIFY),)),
         Rule(root / "state" / "caddy", ((sid["caddy"], MODIFY),), protected=True),
         Rule(root / "state" / "frontend-cache", ((sid["frontend"], MODIFY),), protected=True),
+        # W2-C10: the diagnostics of the WAL at shutdown hold WAL (data): administrators only, nobody inherits it.
+        Rule(root / "state" / "wal-shutdown", protected=True, required=False),
     ]
     if backup_marker is not None:
         rules.append(Rule(backup_marker, ((sid["stack"], READ),), protected=True))

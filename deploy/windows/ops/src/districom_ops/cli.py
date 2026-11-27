@@ -26,6 +26,7 @@ from districom_ops import (
     schedule,
     services,
     tasklock,
+    wal_shutdown,
     write_block,
 )
 from districom_ops.config import ConfigError, OpsConfig, parse_env, read_config, read_services_config
@@ -119,6 +120,13 @@ def _parser() -> argparse.ArgumentParser:
     i.add_parser("verify", help="compare them with the record (read only)")
 
     # W2-C6: backup tasks
+    w = sub.add_parser("wal", help="WAL at shutdown (C10)").add_subparsers(dest="action", required=True)
+    p = w.add_parser(
+        "verify-shutdown",
+        help="administrator: a trial of C10 in its own maintenance window and write block; PostgreSQL is stopped "
+        "and started again, Windows never",
+    )
+    p.add_argument("--reason", required=True)
     t = sub.add_parser("tasks", help="scheduled backup tasks (C6)").add_subparsers(dest="action", required=True)
     t.add_parser("install", help="repo1, archiving, task settings, permissions and the scheduled tasks (idempotent)")
     t.add_parser("uninstall", help="remove the scheduled tasks; repositories, dumps and records stay")
@@ -180,7 +188,8 @@ def _run(args: argparse.Namespace) -> int:
         return 0
 
     if args.command in (
-        "runtime", "backup-disk", "database", "services", "permissions", "integrity", "firewall", "resume", "tasks"
+        "runtime", "backup-disk", "database", "services", "permissions", "integrity", "firewall", "resume", "tasks",
+        "wal",
     ):  # fmt: skip
         return _services(args, config)
 
@@ -248,6 +257,23 @@ def _resume(args: argparse.Namespace, install: Install) -> int:
     return 0
 
 
+def _wal(args: argparse.Namespace, install: Install, config: OpsConfig) -> int:
+    """C10 trial: 0 PASS, 1 FAIL, 2 not started. The result names every check; the details stay in the
+    diagnostics folder (administrators only)."""
+    if not _is_admin():
+        log.error("refused", extra={"reason": "wal verify-shutdown needs an administrator (Remote Desktop, elevated)"})
+        return 2
+    try:
+        result = wal_shutdown.trial(install, args.reason, config.backup_cancel_wait_seconds)
+    except (wal_shutdown.WalShutdownError, write_block.WriteBlockError, MaintenanceError) as exc:
+        log.error("wal_shutdown_not_started", extra={"reason": str(exc)})
+        return 2
+    checks = {name: check.get("ok") is True for name, check in result.checks.items()}
+    _print({"verdict": result.verdict, "checks": checks, "cut": result.cut.get("cut_lsn"),
+            "diagnostics": result.diagnostics})  # fmt: skip
+    return 0 if result.passed else 1
+
+
 def _print(data: object) -> None:
     sys.stdout.write(json.dumps(data, ensure_ascii=False, default=str) + "\n")
 
@@ -285,6 +311,8 @@ def _services(args: argparse.Namespace, config: OpsConfig) -> int:
         return _resume(args, install)
     if args.command == "tasks":
         return _tasks(args, install)
+    if args.command == "wal":
+        return _wal(args, install, config)
     if args.command == "database":
         changed = database.init(install)
         log.info("database_init", extra={"changed": changed})
