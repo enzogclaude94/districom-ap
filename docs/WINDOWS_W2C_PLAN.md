@@ -761,6 +761,28 @@ Lo que estaba en `main` (`274ad4d`) antes de la revisión:
    - **En CI:** todo.
    - **PENDIENTE:** el mismo procedimiento con PostgreSQL como servicio en Windows 11 Pro y discos reales.
 
+   **Decisiones de Enzo del 2026-11-27** (autorización de C10):
+   - **D1, con condiciones.** `offsite push` sincrónico, y luego descarga real desde `repo2` cifrado con comparación de contenido. El conjunto exacto de segmentos y `.history` se fija antes. Ni el éxito de la subida ni los metadatos son evidencia. `repo1` también se comprueba, con resultados separados por repositorio.
+   - **D2.** Si `repo2` no está o no verifica, da FAIL con la evidencia incompleta y el motivo. C10 no decide el apagado de Windows ni inventa un modo degradado: eso es de C11.
+   - **D3.** `FPI_FOR_HINT` después del corte da FAIL. La lista es cerrada y se valida contra PostgreSQL 17.6. Ampliarla requiere evidencia y aprobación, nunca solo un CI en verde.
+   - **D4.** C10 corre en el job «Windows backups (W2-C6)», con sus criterios en un informe propio. Siguen siendo 13 jobs.
+
+   **Precisiones de la implementación (PR #98, `districom_ops/wal_shutdown.py`):**
+   - **No corre SQL después del corte.** El `CHECKPOINT`, el punto de restauración y `pg_switch_wal()` van en una sola sesión, y la espera del archivado mira el archivo en `repo1`. Motivo: con sumas de control, la primera lectura de una página después de un checkpoint escribe `FPI_FOR_HINT`, y una sesión nueva lee el catálogo; se observó en PostgreSQL 16 y 17 mientras se desarrollaba. El `CHECKPOINT` previo evita, además, que un checkpoint por tiempo caiga entre el corte y el apagado.
+   - **El apagado escribe WAL propio.** Con el archivado activo y WAL desde el corte (por ejemplo, el `RUNNING_XACTS` del background writer), el apagado hace un `XLOG/SWITCH` antes de su `CHECKPOINT_SHUTDOWN`. Ese segmento queda archivado y puede desaparecer de `pg_wal`, así que el WAL posterior al corte se lee del servidor o de su copia en `repo1` (si están las dos, deben ser iguales). El informe separa los registros del apagado (`shutdown`), los de control permitidos (`control`) y los incompatibles.
+   - **Orden: `repo2` después del apagado.** Cambia el paso 2 del diseño original, y es una decisión a revisar. El conjunto que se verifica en `repo2` se fija antes del apagado y no cambia por apagar. Así PostgreSQL corre lo mínimo después del corte (sin checkpoints por tiempo, sin `archive_timeout`, sin autovacuum mientras dura la subida) y la lista cerrada no necesita ampliarse.
+   - **Conjunto fijo.** Va desde el backup base más nuevo hasta el segmento del corte, más los `.history` de la historia; se verifica por contenido en los dos repositorios. Lo que va desde el backup base más antiguo hasta el más nuevo se controla por continuidad (presencia y tamaño): su contenido lo verificó el cierre de su día, y la descarga completa queda para C7.
+   - **Referencia de cada archivo.** Es el archivo del servidor mientras el servidor lo tiene; si ya no lo tiene, la copia de `repo1`. Si `repo1` no verifica, no se hace el push a `repo2`, y `repo2` se comprueba igual, por separado.
+   - **El punto de restauración del día es `districom-c10-<fecha>-<operación>`.** Se verifica que el segmento archivado del corte termine con él y con el switch.
+   - **Diagnóstico** en `state\wal-shutdown\` (solo administradores, regla nueva de C3). La evidencia de un PASS lista el segmento del corte y los `.history` en `repo1` y, para `repo2`, las copias descargadas en el diagnóstico. Re-hashearlas después prueba que no cambiaron, no que el remoto siga igual.
+   - **`wal verify-shutdown`** es solo una prueba de administrador: vuelve a arrancar PostgreSQL, revierte el bloqueo y cierra la ventana. «Si algo no cierra… se arranca la base sin la app, se repite y se avisa» es de C11.
+   - **Riesgos que quedan para C11 y C7:**
+     - autovacuum, o cualquier actividad interna entre el corte y el apagado, da FAIL (el lado seguro); hay que observarlo en el equipo;
+     - la duración del push y de la descarga en el enlace real es desconocida;
+     - la carpeta de diagnóstico crece unos 16 MB por cierre: limpiarla es de C8 o C11;
+     - para re-verificar la evidencia al arrancar, el supervisor necesita leer las copias que lista (en `repo1` y en `state\wal-shutdown\`), y hoy no tiene ese permiso: la recuperación automática quedaría bloqueada, que es el lado seguro. Lo resuelve C11;
+     - C10 no prueba que las copias restauren: eso es C7.
+
 ### C11. Cierre seguro de jornada
 
 1. **Objetivo:** el comando `cierre-jornada`, que se usa por Escritorio remoto y es el único modo de apagado. Ejecuta los pasos 1 a 8 de §6 usando C9 y C10:

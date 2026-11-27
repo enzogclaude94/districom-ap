@@ -4,6 +4,28 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 
 ## [Unreleased]
 
+### Added — Servidor: W2‑C10, verificación del WAL al apagar (PR #98, en revisión; sin merge sin la revisión de Enzo)
+- **`districom_ops/wal_shutdown.py`**: un verificador que corre en la ventana y el bloqueo de C9‑B de su propia operación, sin pedidos de cancelación vivos ni tareas pesadas, y retiene `backup.lock` (decisiones D1 a D4, 2026-11-27).
+  - **Corte** en una sola sesión: `CHECKPOINT`, el punto de restauración del día y `pg_switch_wal()`. Después del corte no corre ningún SQL.
+  - **Conjunto fijo** de WAL desde el backup base más nuevo hasta el corte, con los `.history`, y la continuidad desde el más antiguo.
+  - **repo1** contra los archivos del servidor.
+  - **Apagado limpio.**
+  - **`pg_waldump`** con la lista cerrada `XLOG/SWITCH`, `XLOG/CHECKPOINT_SHUTDOWN` y `Standby/RUNNING_XACTS`. `FPI_FOR_HINT` da FAIL.
+  - **`pg_controldata`.**
+  - **repo2:** push sincrónico, solo si `repo1` verificó, y después descarga del remoto cifrado y comparación por SHA‑256.
+  - **Resultados** separados por chequeo, en `state\wal-shutdown\`, que solo leen los administradores (regla nueva de C3). La evidencia de un PASS es la que verifica C9‑B. PostgreSQL queda detenido.
+- **`districom-ops wal verify-shutdown --reason …`**: comando de prueba de administrador. Corre en su propia ventana y su propio bloqueo y después deja todo como estaba. Nunca apaga Windows.
+- **Pruebas:**
+  - C10‑U (unitarias) y 13 mutaciones detectadas;
+  - C10‑1 a C10‑10 con el servicio real de PostgreSQL 17.6 en el job «Windows backups (W2-C6)», con un informe propio (`w2c10-results`).
+- **PENDIENTE:**
+  - Windows 11 Pro y discos reales;
+  - el bucket real;
+  - los tiempos reales;
+  - autovacuum real entre el corte y el apagado;
+  - la recuperabilidad (C7);
+  - el cierre de jornada (C11).
+
 ### Added — Servidor: W2‑C6, integración de los backups (PR #94, merge `7632a2c`, 2026-11-26; DONE a nivel de implementación y CI, validación física PENDIENTE)
 - **Archivado de WAL** del servicio de PostgreSQL 17 a `repo1`, con los `archive_command` y `restore_command` de W2‑A (`districom-archive.conf`, que escribe `tasks install`; `archive_timeout = 300`). Un clúster sin las tareas instaladas no archiva.
 - **Rol `districom_backup`** en `database init`: `REPLICATION` y `pg_read_all_data`, sin superusuario ni propiedad. Su contraseña queda en `config\backup-db.secret`.
