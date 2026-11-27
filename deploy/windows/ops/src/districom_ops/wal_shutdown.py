@@ -344,10 +344,10 @@ class Target:
 class Hooks:
     """Points where the tests inject a fault (C10-2 to C10-9). Production passes none."""
 
-    after_cut: Callable[[], None] | None = None
-    after_archive: Callable[[], None] | None = None
-    after_push: Callable[[], None] | None = None
-    stop: Callable[[], None] | None = None
+    after_cut: Callable[[], object] | None = None
+    after_archive: Callable[[], object] | None = None
+    after_push: Callable[[], object] | None = None
+    stop: Callable[[], object] | None = None
 
 
 @dataclass
@@ -602,17 +602,15 @@ def read_after_cut(target: Target, cut: Cut, staging: Path) -> tuple[Dump, list[
 def _download(remote: CryptRemote, names: list[str], folder: Path) -> str | None:
     """Download ``wal/<name>`` for every name into ``folder`` (rclone decrypts). Returns an error, or None."""
     folder.mkdir(parents=True, exist_ok=True)
-    for index in range(0, len(names), DOWNLOAD_BATCH):
-        batch = names[index : index + DOWNLOAD_BATCH]
-        listing = folder.parent / "repo2-files.txt"
-        listing.write_text("\n".join(batch) + "\n", encoding="utf-8")
-        try:
-            result = remote.run("copy", "--files-from-raw", str(listing), "--no-traverse", f"{REMOTE_NAME}:wal",
-                                str(folder))  # fmt: skip
-        finally:
-            listing.unlink(missing_ok=True)
-        if result.returncode != 0:
-            return REDACTOR.text(result.stderr.strip().splitlines()[-1] if result.stderr.strip() else "rclone failed")
+    listing = folder.parent / "repo2-files.txt"
+    listing.write_text("\n".join(names) + "\n", encoding="utf-8")
+    try:
+        result = remote.run("copy", "--files-from-raw", str(listing), "--no-traverse", f"{REMOTE_NAME}:wal",
+                            str(folder))  # fmt: skip
+    finally:
+        listing.unlink(missing_ok=True)
+    if result.returncode != 0:
+        return REDACTOR.text(result.stderr.strip().splitlines()[-1] if result.stderr.strip() else "rclone failed")
     return None
 
 
@@ -635,24 +633,28 @@ def check_repo2(
     assert remote is not None
     problems: list[str] = []
     folder = target.diagnostics / "repo2"
-    error = _download(remote, walset.content, folder)
-    if error:
-        problems.append(f"the download from repo2 failed: {error}")
-    copies, compared = [], 0
-    for name in walset.content:
-        path = folder / name
-        digest = _sha(path) if path.is_file() else None
-        if digest is None:
-            problems.append(f"{name} missing from repo2")
-            continue
-        compared += 1
-        if digest != reference.get(name):
-            problems.append(f"{name} in repo2 differs from the reference")
-            continue  # kept for the diagnosis
-        if name in keep:
-            copies.append({"repo": "repo2", "path": str(path), "sha256": digest})
-        else:
-            path.unlink(missing_ok=True)
+    copies, compared, errors = [], 0, []
+    # In batches, each one compared and removed before the next: the day's WAL never sits whole on the disk twice.
+    for index in range(0, len(walset.content), DOWNLOAD_BATCH):
+        batch = walset.content[index : index + DOWNLOAD_BATCH]
+        error = _download(remote, batch, folder)
+        if error and error not in errors:
+            errors.append(error)
+        for name in batch:
+            path = folder / name
+            digest = _sha(path) if path.is_file() else None
+            if digest is None:
+                problems.append(f"{name} missing from repo2")
+                continue
+            compared += 1
+            if digest != reference.get(name):
+                problems.append(f"{name} in repo2 differs from the reference")
+                continue  # kept for the diagnosis
+            if name in keep:
+                copies.append({"repo": "repo2", "path": str(path), "sha256": digest})
+            else:
+                path.unlink(missing_ok=True)
+    problems[:0] = [f"the download from repo2 failed: {e}" for e in errors]
     sizes = _remote_sizes(remote) if walset.older else {}
     if sizes is None:
         problems.append("repo2's WAL listing could not be read (continuity)")

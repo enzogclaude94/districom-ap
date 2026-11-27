@@ -246,7 +246,7 @@ def test_repo1_names_a_missing_truncated_or_different_file_and_a_gap(tmp_path: P
     ]
     assert hashes == {"000000010000000000000006": sha(good), "000000010000000000000007": sha(other)}
     # No longer on the server: only its size tells that the copy is not whole.
-    (tmp_path / "repo1" / "wal" / "000000010000000000000006").write_bytes(good[:SIZE - 1])
+    (tmp_path / "repo1" / "wal" / "000000010000000000000006").write_bytes(good[: SIZE - 1])
     problems, _ = ws.check_repo1(target(tmp_path), cut(), walset, {})
     assert f"000000010000000000000006 truncated in repo1 ({SIZE - 1} bytes)" in problems
 
